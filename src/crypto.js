@@ -117,3 +117,35 @@ export const decryptData = async (encryptedObj, key) => {
     return null;
   }
 };
+
+export const keyToUrlString = async (key) => {
+  const exported = await window.crypto.subtle.exportKey("raw", key);
+  const bytes = new Uint8Array(exported);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); // URL-safe Base64
+};
+
+// Import a Base64 String back to a Key object
+export const keyFromUrlString = async (base64) => {
+  // Add padding back if needed
+  let str = base64.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  
+  const binary_string = window.atob(str);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  
+  return window.crypto.subtle.importKey(
+    "raw",
+    bytes.buffer,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+};
