@@ -5,8 +5,9 @@ import {
 } from 'firebase/firestore';
 import { 
   ChevronLeft, Plus, Search, Folder, FileText, X, 
-  MoreVertical, Star, Tag, Paperclip, Share2, FolderPlus, 
-  ArrowRightLeft, Trash2, Home, ChevronRight, Save, LayoutGrid, List
+  Star, Tag, Paperclip, Share2, FolderPlus, 
+  ArrowRightLeft, Trash2, Home, ChevronRight, Save, LayoutGrid, List,
+  Image as ImageIcon
 } from 'lucide-react';
 
 import { db, appId } from './firebase'; 
@@ -21,17 +22,7 @@ const toBase64 = (file) => new Promise((resolve, reject) => {
   reader.onerror = error => reject(error);
 });
 
-const formatBytes = (bytes, decimals = 0) => {
-  if (!+bytes) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B', 'KB', 'MB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-};
-
 const NotesApp = ({ user, cryptoKey, onExit }) => {
-  // --- State ---
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -39,25 +30,24 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [folderPath, setFolderPath] = useState([{ id: null, title: 'Notes' }]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
+  const [viewMode, setViewMode] = useState('grid'); 
 
   // Editor / Modals
-  const [editorState, setEditorState] = useState(null); // { id, title, content, tags, attachments, isPinned }
+  const [editorState, setEditorState] = useState(null); 
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  
+  // UI State for Tags
+  const [isTagInputVisible, setIsTagInputVisible] = useState(false);
 
   // --- History API Integration ---
   useEffect(() => {
     const handlePopState = (event) => {
       if (event.state?.appId === 'notes') {
-        if (event.state.mode === 'editor') {
-           // We technically don't support deep linking to editor yet, 
-           // but if we did, we'd load the note here.
-           // For now, if we pop to editor state, we just close it
-           setEditorState(null);
-        } else {
+        // If popping back from editor, close it
+        if (event.state.mode !== 'editor') {
            setEditorState(null);
            setCurrentFolderId(event.state.folderId || null);
            setFolderPath(event.state.path || [{ id: null, title: 'Notes' }]);
@@ -66,7 +56,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
     };
     window.addEventListener('popstate', handlePopState);
     
-    // Initial Load Restore
     if (window.history.state?.appId === 'notes' && window.history.state.folderId) {
        setCurrentFolderId(window.history.state.folderId);
        setFolderPath(window.history.state.path || [{ id: null, title: 'Notes' }]);
@@ -93,12 +82,10 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
 
   const handleBack = () => {
     if (editorState) {
-        // Close editor
-        window.history.back();
+        window.history.back(); // Close editor
     } else if (searchQuery) {
         setSearchQuery("");
     } else {
-        // Standard back (Folder up or Exit)
         if (folderPath.length > 1) window.history.back();
         else onExit();
     }
@@ -118,9 +105,8 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
           id: doc.id, 
           ...raw, 
           ...decrypted, 
-          // Defaults
-          tags: decrypted.tags || [],
-          attachments: decrypted.attachments || [],
+          tags: decrypted?.tags || [],
+          attachments: decrypted?.attachments || [],
           isPinned: raw.isPinned || false,
           type: raw.type || 'note',
           updatedAt: raw.updatedAt?.toDate() || new Date()
@@ -134,19 +120,16 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   // --- Filtering & Sorting ---
   const displayedItems = useMemo(() => {
     let filtered = items;
-
     if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         filtered = items.filter(i => 
             i.title?.toLowerCase().includes(q) || 
             i.content?.toLowerCase().includes(q) ||
-            i.tags.some(t => t.toLowerCase().includes(q))
+            i.tags?.some(t => t.toLowerCase().includes(q))
         );
     } else {
         filtered = items.filter(i => i.parentId === currentFolderId);
     }
-
-    // Sort: Folders first, then Pinned Notes, then Regular Notes
     return filtered.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
         if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
@@ -159,30 +142,36 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   const handleSaveNote = async () => {
     if (!editorState.title.trim() && !editorState.content.trim()) return;
 
-    const payload = {
-        title: editorState.title || "Untitled Note",
-        content: editorState.content || "",
-        tags: editorState.tags || [],
-        attachments: editorState.attachments || []
-    };
+    try {
+        const payload = {
+            title: editorState.title || "Untitled Note",
+            content: editorState.content || "",
+            tags: editorState.tags || [],
+            attachments: editorState.attachments || []
+        };
 
-    const encrypted = await encryptData(payload, cryptoKey);
-    const meta = {
-        updatedAt: serverTimestamp(),
-        isPinned: editorState.isPinned || false,
-        type: 'note',
-        parentId: editorState.parentId || currentFolderId // Preserve parent if moving
-    };
+        const encrypted = await encryptData(payload, cryptoKey);
+        const meta = {
+            updatedAt: serverTimestamp(),
+            isPinned: editorState.isPinned || false,
+            type: 'note',
+            parentId: editorState.parentId || currentFolderId
+        };
 
-    if (editorState.id) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', editorState.id), { ...encrypted, ...meta });
-    } else {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'notes'), { ...encrypted, ...meta, createdAt: serverTimestamp() });
+        if (editorState.id) {
+            await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', editorState.id), { ...encrypted, ...meta });
+        } else {
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'notes'), { ...encrypted, ...meta, createdAt: serverTimestamp() });
+        }
+        
+        // Success - Go back
+        if(window.history.state?.mode === 'editor') window.history.back();
+        else setEditorState(null);
+
+    } catch (error) {
+        console.error("Save Error:", error);
+        alert("Failed to save. If you have large attachments, they might exceed the limit.");
     }
-    
-    // Close editor by going back
-    if(window.history.state?.mode === 'editor') window.history.back();
-    else setEditorState(null);
   };
 
   const handleCreateFolder = async (e) => {
@@ -204,8 +193,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
     const { id, type } = deleteConfirmation;
-    
-    // If folder, delete contents recursively (simple batch)
     if (type === 'folder') {
         const batch = writeBatch(db);
         const children = items.filter(i => i.parentId === id);
@@ -215,8 +202,7 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
     } else {
         await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', id));
     }
-    
-    if (editorState?.id === id) setEditorState(null); // Close if open
+    if (editorState?.id === id) setEditorState(null);
     setDeleteConfirmation(null);
   };
 
@@ -232,54 +218,49 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
 
   const togglePin = async (e, item) => {
     e.stopPropagation();
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', item.id), {
-        isPinned: !item.isPinned
-    });
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', item.id), { isPinned: !item.isPinned });
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 500000) { alert("File too large. Max 500KB."); return; } // Limit for Firestore
+    // Limit file size to 300KB to prevent Firestore document limit issues
+    if (file.size > 300000) { alert("File too large. Max 300KB allowed."); return; }
 
     try {
         const base64 = await toBase64(file);
         setEditorState(prev => ({
             ...prev,
-            attachments: [...prev.attachments, { name: file.name, type: file.type, data: base64, size: file.size }]
+            attachments: [...prev.attachments, { name: file.name, type: file.type, data: base64 }]
         }));
     } catch (err) {
-        console.error("Upload failed", err);
-        alert("Failed to attach file.");
+        alert("Upload failed.");
     }
   };
 
-  const shareNote = (note) => {
-    const text = `${note.title}\n\n${note.content}`;
-    if (navigator.share) {
-        navigator.share({ title: note.title, text: text }).catch(() => {});
-    } else {
-        navigator.clipboard.writeText(text);
-        alert("Note content copied to clipboard.");
+  const handleAddTag = (e) => {
+    if (e.key === 'Enter') {
+        const val = e.target.value.trim();
+        if (val) {
+            setEditorState(s => ({...s, tags: [...s.tags, val]}));
+            setIsTagInputVisible(false);
+        }
     }
   };
-
-  // --- Views ---
 
   const openEditor = (note = null) => {
     const newState = note 
-        ? { ...note } // Edit existing
-        : { title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId }; // New
+        ? { ...note }
+        : { title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId };
     
     setEditorState(newState);
-    // Push editor state to history so back button closes it
     pushState(currentFolderId, folderPath, true);
   };
 
+  // --- Editor View ---
   if (editorState) {
     return (
         <div className="flex flex-col h-[100dvh] bg-white">
-            {/* Editor Toolbar */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
                 <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft className="text-gray-600" /></button>
                 <div className="flex gap-2">
@@ -290,7 +271,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
                 </div>
             </div>
 
-            {/* Editor Body */}
             <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
                 <input 
                     value={editorState.title} 
@@ -299,55 +279,51 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
                     className="text-2xl font-bold outline-none placeholder-gray-300"
                 />
                 
-                {/* Meta Inputs */}
                 <div className="flex flex-wrap gap-2 items-center">
-                    {/* Tags */}
                     {editorState.tags.map((tag, i) => (
                         <span key={i} className="bg-blue-50 text-[#4285f4] text-xs px-2 py-1 rounded-full flex items-center gap-1">
                             #{tag} <button onClick={() => setEditorState(s => ({...s, tags: s.tags.filter((_, idx) => idx !== i)}))}><X size={10} /></button>
                         </span>
                     ))}
-                    <div className="relative group">
-                        <button className="flex items-center gap-1 text-gray-400 text-xs px-2 py-1 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4]">
+                    
+                    {/* Fixed Tag Input UI */}
+                    {isTagInputVisible ? (
+                        <input 
+                            autoFocus
+                            placeholder="Type tag & Enter"
+                            className="text-xs px-2 py-1 rounded-full border border-[#4285f4] outline-none min-w-[80px]"
+                            onKeyDown={handleAddTag}
+                            onBlur={() => setIsTagInputVisible(false)}
+                        />
+                    ) : (
+                        <button onClick={() => setIsTagInputVisible(true)} className="flex items-center gap-1 text-gray-400 text-xs px-2 py-1 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4]">
                             <Tag size={10} /> Add Tag
                         </button>
-                        <input 
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const val = e.target.value.trim();
-                                    if (val) setEditorState(s => ({...s, tags: [...s.tags, val]}));
-                                    e.target.value = '';
-                                }
-                            }}
-                        />
-                    </div>
+                    )}
 
-                    {/* Attachment Button */}
                     <label className="flex items-center gap-1 text-gray-400 text-xs px-2 py-1 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] cursor-pointer">
                         <Paperclip size={10} /> Attach
                         <input type="file" className="hidden" onChange={handleFileUpload} />
                     </label>
                 </div>
 
-                {/* Attachments List */}
                 {editorState.attachments.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto py-2">
                         {editorState.attachments.map((att, i) => (
-                            <div key={i} className="flex-shrink-0 w-24 h-24 bg-gray-50 rounded-lg border relative flex flex-col items-center justify-center p-2 group">
+                            <div key={i} className="flex-shrink-0 w-24 h-24 bg-gray-50 rounded-lg border relative flex flex-col items-center justify-center p-2 group overflow-hidden">
                                 {att.type.startsWith('image/') ? (
                                     <img src={att.data} className="w-full h-full object-cover rounded" alt="" />
                                 ) : (
-                                    <div className="text-center">
+                                    <div className="text-center p-1">
                                         <FileText size={24} className="mx-auto text-gray-400" />
-                                        <p className="text-[9px] text-gray-500 mt-1 truncate w-20">{att.name}</p>
+                                        <p className="text-[9px] text-gray-500 mt-1 w-full truncate">{att.name}</p>
                                     </div>
                                 )}
                                 <button 
                                     onClick={() => setEditorState(s => ({...s, attachments: s.attachments.filter((_, idx) => idx !== i)}))}
-                                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="absolute top-1 right-1 bg-white/90 text-red-500 rounded-full p-1 shadow hover:bg-white"
                                 >
-                                    <X size={10} />
+                                    <X size={12} />
                                 </button>
                             </div>
                         ))}
@@ -365,11 +341,9 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
     );
   }
 
-  // --- Main View ---
+  // --- List View ---
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 overflow-hidden relative">
-      
-      {/* Header */}
       <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 p-4">
         <div className="max-w-4xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between">
@@ -386,7 +360,7 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search notes, tags, content..." className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm" />
+            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm" />
             {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
           </div>
 
@@ -410,7 +384,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
         </div>
       </header>
 
-      {/* Main List */}
       <main className="flex-1 overflow-y-auto scroll-smooth p-4">
         <div className="max-w-4xl mx-auto pb-32">
           {loading ? (
@@ -421,7 +394,7 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
           ) : displayedItems.length === 0 ? (
             <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
               <div className="bg-gray-100 p-4 rounded-full"><FileText size={32} className="opacity-50" /></div>
-              <p>{searchQuery ? "No notes found." : "Folder is empty."}</p>
+              <p>Empty folder.</p>
             </div>
           ) : (
             <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
@@ -431,12 +404,10 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
                     onClick={() => item.type === 'folder' ? handleEnterFolder(item) : openEditor(item)}
                     className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative group cursor-pointer active:scale-[0.98] transition-all flex ${viewMode === 'list' ? 'flex-row items-center p-3 gap-3' : 'flex-col p-4 h-40'}`}
                 >
-                    {/* Icon */}
                     <div className={`flex-shrink-0 flex items-center justify-center rounded-lg ${viewMode === 'list' ? 'w-10 h-10' : 'w-8 h-8 mb-2'} ${item.type === 'folder' ? 'bg-blue-50 text-[#4285f4]' : 'bg-yellow-50 text-yellow-600'}`}>
                         {item.type === 'folder' ? <Folder size={20} fill="currentColor" className="opacity-80" /> : <FileText size={20} />}
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             <h3 className={`font-bold text-gray-800 truncate ${item.isPinned && item.type !== 'folder' ? 'text-blue-600' : ''}`}>{item.title}</h3>
@@ -454,12 +425,10 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
                         {item.type === 'folder' && <p className="text-xs text-blue-400 font-medium">Folder</p>}
                     </div>
 
-                    {/* Actions Overlay (Desktop hover / Mobile swipe-ish) */}
                     <div className={`absolute top-2 right-2 flex flex-col gap-1 transition-opacity ${viewMode === 'list' ? 'opacity-0 group-hover:opacity-100 relative top-auto right-auto flex-row' : 'opacity-0 group-hover:opacity-100'}`}>
                         {item.type === 'note' && (
                             <>
                                 <button onClick={(e) => togglePin(e, item)} className="p-1.5 bg-white shadow rounded-full text-gray-400 hover:text-yellow-500"><Star size={14} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); shareNote(item); }} className="p-1.5 bg-white shadow rounded-full text-gray-400 hover:text-blue-500"><Share2 size={14} /></button>
                                 <button onClick={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }} className="p-1.5 bg-white shadow rounded-full text-gray-400 hover:text-green-500"><ArrowRightLeft size={14} /></button>
                             </>
                         )}
@@ -472,25 +441,11 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
         </div>
       </main>
 
-      {/* FABs */}
       <div className="fixed bottom-6 right-6 z-20 flex flex-col gap-3 items-end">
-         <button 
-            onClick={() => setIsFolderModalOpen(true)}
-            className="h-12 w-12 rounded-full bg-white text-gray-600 shadow-lg flex items-center justify-center hover:bg-gray-50 active:scale-95 transition-transform"
-            title="New Folder"
-         >
-           <FolderPlus size={20} />
-         </button>
-         <button 
-            onClick={() => openEditor()}
-            className="h-14 w-14 rounded-full bg-[#4285f4] text-white shadow-lg flex items-center justify-center active:scale-90 transition-transform"
-            title="New Note"
-         >
-           <Plus size={28} />
-         </button>
+         <button onClick={() => setIsFolderModalOpen(true)} className="h-12 w-12 rounded-full bg-white text-gray-600 shadow-lg flex items-center justify-center hover:bg-gray-50 active:scale-95 transition-transform"><FolderPlus size={20} /></button>
+         <button onClick={() => openEditor()} className="h-14 w-14 rounded-full bg-[#4285f4] text-white shadow-lg flex items-center justify-center active:scale-90 transition-transform"><Plus size={28} /></button>
       </div>
 
-      {/* New Folder Modal */}
       <Modal isOpen={isFolderModalOpen} onClose={() => setIsFolderModalOpen(false)} title="New Folder">
         <form onSubmit={handleCreateFolder} className="flex flex-col gap-4">
           <Input name="title" label="Folder Name" placeholder="e.g. Work, Ideas" autoFocus required />
@@ -498,22 +453,17 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
         </form>
       </Modal>
 
-      {/* Move Modal */}
       <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
         <div className="flex flex-col gap-2">
-            <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2">
-                <Home size={16} /> Home (Root)
-            </button>
+            <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home (Root)</button>
             {items.filter(i => i.type === 'folder' && i.id !== itemToMove?.id).map(folder => (
                 <button key={folder.id} onClick={() => handleMove(folder.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2">
                     <Folder size={16} className="text-[#4285f4]" /> {folder.title}
                 </button>
             ))}
-            {items.filter(i => i.type === 'folder').length === 0 && <p className="text-sm text-gray-400 italic p-2">No other folders available.</p>}
         </div>
       </Modal>
 
-      {/* Delete Confirmation */}
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Delete Item">
         <div className="flex flex-col gap-4">
           <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">

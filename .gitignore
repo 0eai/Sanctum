@@ -88,5 +88,4 @@ sample_data/
 
 package-lock.json
 
-src/Counter copy.jsx
-src/Counter copy 2.jsx
+src/*copy*

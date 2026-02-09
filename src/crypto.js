@@ -1,23 +1,63 @@
 // crypto.js
 
 // Configuration
-const ITERATIONS = 100000; // High iterations for security
+const ITERATIONS = 100000; 
 const ALGO_NAME = "AES-GCM";
 const HASH_NAME = "SHA-256";
 
-// Helpers for ArrayBuffer <-> Base64 conversion
-const buffToBase64 = (buff) => btoa(String.fromCharCode(...new Uint8Array(buff)));
-const base64ToBuff = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+// --- Helpers for Large Buffer Handling ---
+const bufferToBase64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 32768; 
+  for (let i = 0; i < len; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return window.btoa(binary);
+};
+
+const base64ToBuffer = (base64) => {
+  const binary_string = window.atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+// --- Key Management ---
 
 export const generateSalt = () => {
   const randomValues = new Uint8Array(16);
   window.crypto.getRandomValues(randomValues);
-  // Return as hex string for storage
   return Array.from(randomValues).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// 1. Derive a Cryptographic Key from the User's Passkey
-// We do this ONCE when the user "Unlocks" the app
+export const generateMasterKey = async () => {
+  return window.crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true, 
+    ["encrypt", "decrypt"]
+  );
+};
+
+// *** THIS WAS MISSING ***
+export const exportKey = async (key) => {
+  return window.crypto.subtle.exportKey("jwk", key);
+};
+
+export const importMasterKey = async (jwkData) => {
+  return window.crypto.subtle.importKey(
+    "jwk",
+    jwkData,
+    { name: "AES-GCM" },
+    true,
+    ["encrypt", "decrypt"]
+  );
+};
+
 export const deriveKeyFromPasskey = async (passkey, saltString) => {
   const textEncoder = new TextEncoder();
   const keyMaterial = await window.crypto.subtle.importKey(
@@ -31,73 +71,49 @@ export const deriveKeyFromPasskey = async (passkey, saltString) => {
   return window.crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: textEncoder.encode(saltString), // <--- Use specific salt here
-      iterations: 100000,
-      hash: "SHA-256"
+      salt: textEncoder.encode(saltString),
+      iterations: ITERATIONS,
+      hash: HASH_NAME
     },
     keyMaterial,
-    { name: "AES-GCM", length: 256 },
+    { name: ALGO_NAME, length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
 };
 
-// 2. Encrypt Data
-// Returns: Base64 String containing [IV + Ciphertext]
-export const encryptData = async (dataObj, cryptoKey) => {
-  try {
-    const textEncoder = new TextEncoder();
-    const encodedData = textEncoder.encode(JSON.stringify(dataObj));
+// --- Encryption / Decryption ---
 
-    // Generate a random initialization vector (IV) for every encryption
-    // This ensures that encrypting the same data twice yields different results
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+export const encryptData = async (data, key) => {
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: ALGO_NAME, iv: iv },
+    key,
+    encoded
+  );
 
-    const encryptedContent = await window.crypto.subtle.encrypt(
-      { name: ALGO_NAME, iv: iv },
-      cryptoKey,
-      encodedData
-    );
-
-    // Combine IV and Ciphertext
-    const combined = new Uint8Array(iv.length + new Uint8Array(encryptedContent).length);
-    combined.set(iv);
-    combined.set(new Uint8Array(encryptedContent), iv.length);
-
-    return {
-      encryptedData: buffToBase64(combined.buffer),
-      isEncrypted: true,
-      updatedAt: new Date() // Metadata kept clear for sorting
-    };
-  } catch (e) {
-    console.error("Encryption Failed:", e);
-    throw e;
-  }
+  return {
+    iv: bufferToBase64(iv),
+    data: bufferToBase64(encrypted)
+  };
 };
 
-// 3. Decrypt Data
-export const decryptData = async (docData, cryptoKey) => {
-  if (!docData || !docData.isEncrypted || !docData.encryptedData) return docData;
-
+export const decryptData = async (encryptedObj, key) => {
   try {
-    const combined = base64ToBuff(docData.encryptedData);
-
-    // Extract IV (first 12 bytes)
-    const iv = combined.slice(0, 12);
-    // Extract Ciphertext (remaining bytes)
-    const data = combined.slice(12);
-
-    const decryptedContent = await window.crypto.subtle.decrypt(
+    if (!encryptedObj || !encryptedObj.iv || !encryptedObj.data) return null;
+    
+    const iv = base64ToBuffer(encryptedObj.iv);
+    const data = base64ToBuffer(encryptedObj.data);
+    
+    const decrypted = await window.crypto.subtle.decrypt(
       { name: ALGO_NAME, iv: iv },
-      cryptoKey,
+      key,
       data
     );
-
-    const textDecoder = new TextDecoder();
-    const jsonString = textDecoder.decode(decryptedContent);
-    return { ...docData, ...JSON.parse(jsonString) };
+    return JSON.parse(new TextDecoder().decode(decrypted));
   } catch (e) {
-    console.error("Decryption Failed (Wrong Key?):", e);
-    return { ...docData, error: "Decryption Failed" };
+    console.error("Decryption failed", e);
+    return null;
   }
 };
