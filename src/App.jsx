@@ -184,7 +184,7 @@ const Launcher = ({ user, onLaunch }) => {
     { id: 'drive', icon: <Cloud size={32} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
     { id: 'passwords', icon: <Key size={32} className="text-yellow-400" />, label: 'Passwords', locked: true },
     { id: 'notifications', icon: <Bell size={32} className="text-yellow-400" />, label: 'Alerts', locked: true },
-    { id: 'settings', icon: <Sliders size={32} />, label: 'Settings', locked: true },
+    { id: 'settings', icon: <Sliders size={32} />, label: 'Settings' },
     { id: 'vault', icon: <Lock size={32} className="text-yellow-400" />, label: 'Vault', locked: true },
   ];
 
@@ -260,7 +260,7 @@ export default function App() {
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '');
-    if (hash && ['checklist', 'counter', 'bookmarks', 'notes'].includes(hash)) {
+    if (hash && ['checklist', 'counter', 'bookmarks', 'notes', 'settings'].includes(hash)) {
       setCurrentApp(hash);
     }
 
