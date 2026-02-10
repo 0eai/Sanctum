@@ -6,18 +6,18 @@ import {
 } from 'lucide-react';
 
 import { db, auth } from './firebase';
-import { Button, Input } from './components'; // Assuming you have these from previous files
+import { Button, Input } from './components'; 
 import { deriveKeyFromPasskey, generateSalt, encryptData, decryptData } from './crypto';
 
 const SettingsApp = ({ user, onExit }) => {
-  // State for Password Change
+  // --- Password Change State ---
   const [oldPass, setOldPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   
-  // UI States
+  // --- UI States ---
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState(null); // { type: 'success' | 'error', text: string }
+  const [message, setMessage] = useState(null); 
 
   // --- Handlers ---
 
@@ -25,7 +25,6 @@ const SettingsApp = ({ user, onExit }) => {
     e.preventDefault();
     setMessage(null);
 
-    // 1. Basic Validation
     if (!oldPass || !newPass || !confirmPass) {
         setMessage({ type: 'error', text: "All fields are required." });
         return;
@@ -49,30 +48,21 @@ const SettingsApp = ({ user, onExit }) => {
       
       const { encryptionSalt, encryptedMasterKey } = userDoc.data();
 
-      // 2. Verify Old Password (by trying to unlock the Master Key)
-      // Derive the wrapper key using the OLD password and EXISTING salt
+      // Verify Old Password
       const oldWrapperKey = await deriveKeyFromPasskey(oldPass, encryptionSalt);
-      
-      // Attempt to decrypt the Master Key
       const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, oldWrapperKey);
       
-      // If decryption returns null, the password was wrong
       if (!unlockedMasterKeyJWK) {
         setMessage({ type: 'error', text: "Current passkey is incorrect." });
         setLoading(false);
         return;
       }
 
-      // 3. Generate NEW Security Params
+      // Re-Encrypt with New Password
       const newSalt = generateSalt();
       const newWrapperKey = await deriveKeyFromPasskey(newPass, newSalt);
-
-      // 4. Re-Encrypt the Master Key
-      // We take the JWK we just successfully decrypted and wrap it with the NEW key
       const newEncryptedMasterKey = await encryptData(unlockedMasterKeyJWK, newWrapperKey);
 
-      // 5. Save to Firestore
-      // We only update the salt and the wrapped key. The actual data in other apps remains untouched.
       await setDoc(userDocRef, {
         encryptionSalt: newSalt,
         encryptedMasterKey: newEncryptedMasterKey
@@ -100,7 +90,6 @@ const SettingsApp = ({ user, onExit }) => {
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 overflow-hidden relative">
       
-      {/* Header */}
       <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 p-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -112,10 +101,17 @@ const SettingsApp = ({ user, onExit }) => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto scroll-smooth p-4">
-        <div className="max-w-xl mx-auto space-y-6">
+        <div className="max-w-xl mx-auto space-y-6 pb-20">
           
+          {/* Notification Area */}
+          {message && (
+            <div className={`p-4 rounded-xl text-sm flex items-center gap-3 shadow-sm animate-in slide-in-from-top-2 ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                {message.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
+                {message.text}
+            </div>
+          )}
+
           {/* Section: Security */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex items-center gap-2">
@@ -127,15 +123,6 @@ const SettingsApp = ({ user, onExit }) => {
             
             <div className="p-6">
                 <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Change Passkey</h3>
-                    
-                    {message && (
-                        <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                            {message.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                            {message.text}
-                        </div>
-                    )}
-
                     <div className="space-y-3">
                         <Input 
                             type="password" 
@@ -192,7 +179,7 @@ const SettingsApp = ({ user, onExit }) => {
 
           {/* Info Footer */}
           <div className="text-center text-xs text-gray-400 py-4">
-            <p>App Suite v2.0 • Secure Client-Side Encryption</p>
+            <p>App Suite v2.1</p>
           </div>
 
         </div>

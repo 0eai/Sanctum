@@ -19,7 +19,7 @@ import BookmarksApp from './Bookmarks';
 import NotesApp from './Notes';
 import TasksApp from './Tasks'; 
 import PasswordsApp from './Passwords'; 
-import AlertsApp from './Alerts'; // <--- 1. Import Alerts App
+import AlertsApp from './Alerts'; 
 import SharedNote from './SharedNote';
 import SettingsApp from './Settings';
 import { 
@@ -59,7 +59,6 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
     setIsDeriving(true); 
 
     try {
-        // Note: AlertsApp uses 'tasks' collection, so no specific 'alerts' collection to wipe here.
         const appCollections = ['notes', 'bookmarks', 'checklists', 'counters', 'tasks', 'passwords'];
         
         for (const colName of appCollections) {
@@ -211,7 +210,6 @@ const Launcher = ({ user, onLaunch }) => {
   }, [user]);
 
   const apps = [
-    // 2. Added Alerts (DayPulse) to the grid
     { id: 'alerts', icon: <Bell size={32} />, label: 'DayPulse' }, 
     { id: 'tasks', icon: <ClipboardList size={32} />, label: 'Tasks', count: stats.tasks },
     { id: 'checklist', icon: <CheckSquare size={32} />, label: 'Checklists', count: stats.checklists },
@@ -245,7 +243,6 @@ const Launcher = ({ user, onLaunch }) => {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto p-6 grid grid-cols-2 md:grid-cols-3 gap-8">
           {apps.map(app => {
-            // 3. Added 'alerts' to primary apps list for blue styling
             const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'settings'].includes(app.id);
             return (
               <button key={app.id} onClick={() => handleAppClick(app)} className={`aspect-square rounded-3xl flex flex-col items-center justify-center gap-3 shadow-lg transition-transform active:scale-95 relative bg-[#4285f4] ${app.locked ? 'opacity-90' : 'hover:brightness-110'}`}>
@@ -304,7 +301,6 @@ export default function App() {
       setIsSharedView(true);
     }
     const hash = window.location.hash.replace('#', '');
-    // 4. Added 'alerts' to deep linking
     if (hash && ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'bookmarks', 'notes', 'settings'].includes(hash)) {
       setCurrentApp(hash);
     }
@@ -321,8 +317,9 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const launchApp = (appId) => {
-    window.history.pushState({ appId }, '', `#${appId}`);
+  // UPDATED: launchApp now accepts extraState for deep linking
+  const launchApp = (appId, extraState = {}) => {
+    window.history.pushState({ appId, ...extraState }, '', `#${appId}`);
     setCurrentApp(appId);
   };
 
@@ -367,8 +364,8 @@ export default function App() {
     return <LockScreen user={user} onUnlock={handleUnlock} initialMessage={lockMessage} />;
   }
 
-  // 5. Render Alerts App
-  if (currentApp === 'alerts') return <AlertsApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
+  // UPDATED: Passing onLaunch to AlertsApp
+  if (currentApp === 'alerts') return <AlertsApp user={user} cryptoKey={cryptoKey} onExit={exitApp} onLaunch={launchApp} />;
   
   if (currentApp === 'checklist') return <ChecklistApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
   if (currentApp === 'tasks') return <TasksApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;

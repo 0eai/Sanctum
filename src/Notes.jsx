@@ -7,7 +7,8 @@ import {
   ChevronLeft, Plus, Search, Folder, FileText, X, 
   Star, Tag, Paperclip, Share2, FolderPlus, 
   ArrowRightLeft, Trash2, Home, ChevronRight, LayoutGrid, List,
-  Edit2, Link, CloudOff, Check, Loader, Globe
+  Edit2, Link, CloudOff, Check, Loader, Globe,
+  Bell, Clock, RotateCcw, RefreshCw // Added Icons
 } from 'lucide-react';
 
 import { db, appId } from './firebase'; 
@@ -32,6 +33,26 @@ const toBase64 = (file) => new Promise((resolve, reject) => {
   reader.onerror = error => reject(error);
 });
 
+// Calculate next date based on frequency
+const getNextDate = (currentDateStr, frequency) => {
+  if (!currentDateStr) return null;
+  const date = new Date(currentDateStr);
+  switch(frequency) {
+    case 'daily': date.setDate(date.getDate() + 1); break;
+    case 'weekly': date.setDate(date.getDate() + 7); break;
+    case 'monthly': date.setMonth(date.getMonth() + 1); break;
+    case 'yearly': date.setFullYear(date.getFullYear() + 1); break;
+    default: return null;
+  }
+  return date.toISOString();
+};
+
+// Format Date for Badge
+const formatBadgeDate = (isoString) => {
+  if (!isoString) return "";
+  return new Date(isoString).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
 const NotesApp = ({ user, cryptoKey, onExit }) => {
   // --- State ---
   const [items, setItems] = useState([]);
@@ -46,6 +67,8 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
 
   // Editor / Modals
   const [editorState, setEditorState] = useState(null); 
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false); // New: Toggle for Alert Inputs
+
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   
@@ -68,7 +91,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   // --- Auto-Resize Logic for Text Area ---
   useEffect(() => {
     if (textAreaRef.current) {
-      // Reset height to auto to shrink if text was deleted, then set to scrollHeight
       textAreaRef.current.style.height = "auto";
       textAreaRef.current.style.height = textAreaRef.current.scrollHeight + "px";
     }
@@ -122,7 +144,10 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
             tags: debouncedEditorData.tags || [],
             attachments: debouncedEditorData.attachments || [],
             sharedId: debouncedEditorData.sharedId || null,
-            shareUrlKey: debouncedEditorData.shareUrlKey || null 
+            shareUrlKey: debouncedEditorData.shareUrlKey || null,
+            // New Alert Fields
+            dueDate: debouncedEditorData.dueDate || null,
+            repeat: debouncedEditorData.repeat || 'none'
         };
 
         const encrypted = await encryptData(payload, cryptoKey);
@@ -166,8 +191,8 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
           ...decrypted, 
           tags: decrypted?.tags || [],
           attachments: decrypted?.attachments || [],
-          sharedId: decrypted?.sharedId || null,
-          shareUrlKey: decrypted?.shareUrlKey || null,
+          dueDate: decrypted?.dueDate || null, // Ensure field exists
+          repeat: decrypted?.repeat || 'none', // Ensure field exists
           isPinned: raw.isPinned || false,
           type: raw.type || 'note',
           updatedAt: raw.updatedAt?.toDate() || new Date()
@@ -228,6 +253,20 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
     }
     setIsFolderModalOpen(false);
     setFolderToEdit(null);
+  };
+
+  const handleRescheduleNote = async (e, note) => {
+      e.stopPropagation();
+      const nextDate = getNextDate(note.dueDate, note.repeat);
+      
+      const payload = { ...note, dueDate: nextDate };
+      // cleanup metadata before re-encrypting payload
+      delete payload.id; delete payload.updatedAt; delete payload.createdAt; delete payload.type; delete payload.isPinned;
+      
+      const encrypted = await encryptData(payload, cryptoKey);
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', note.id), {
+          ...encrypted, updatedAt: serverTimestamp()
+      });
   };
 
   const handleCreateNewShare = async (note) => {
@@ -294,7 +333,6 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
     setShareModal({ isOpen: true, note: note, link: url }); 
   };
 
-  // --- Fixed: TogglePin Definition ---
   const togglePin = async (e, item) => {
     e.stopPropagation();
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', item.id), {
@@ -306,8 +344,12 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
   const openEditor = (note = null) => {
     const newState = note 
         ? { ...note }
-        : { title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId, sharedId: null, shareUrlKey: null };
+        : { 
+            title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId, 
+            sharedId: null, shareUrlKey: null, dueDate: null, repeat: 'none' 
+          };
     setEditorState(newState);
+    setIsAlertsOpen(!!(newState.dueDate || newState.repeat !== 'none')); // Open drawer if alert exists
     pushState(currentFolderId, folderPath, true);
   };
 
@@ -341,6 +383,13 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
                 <span className="text-xs text-gray-400 mr-2 uppercase tracking-wider font-medium">
                     {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'error' ? 'Error' : 'Saved'}
                 </span>
+                {/* Alert Toggle */}
+                <button 
+                    onClick={() => setIsAlertsOpen(!isAlertsOpen)} 
+                    className={`p-2 transition-colors rounded-full ${editorState.dueDate || editorState.repeat !== 'none' ? 'text-blue-500 bg-blue-50' : 'text-gray-400 hover:text-[#4285f4]'}`}
+                >
+                    <Bell size={20} />
+                </button>
                 <button onClick={(e) => openShareMenu(e, editorState)} className={`p-2 transition-colors rounded-full ${editorState.sharedId ? 'text-green-500 bg-green-50' : 'text-gray-400 hover:text-[#4285f4]'}`}>
                     <Share2 size={20} />
                 </button>
@@ -353,6 +402,44 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
         {/* UNIFIED SCROLL CONTAINER */}
         <div className="flex-1 overflow-y-auto">
             <div className="p-6 md:p-8 flex flex-col gap-6 min-h-full">
+                
+                {/* Alert Settings Drawer */}
+                {isAlertsOpen && (
+                    <div className="animate-in slide-in-from-top-2 fade-in bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col gap-3">
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <div className="flex-1">
+                                <label className="text-xs font-bold text-gray-500 mb-1 block uppercase tracking-wider">Due Date</label>
+                                <div className="relative">
+                                    <input 
+                                        type="datetime-local" 
+                                        value={editorState.dueDate || ''} 
+                                        onChange={(e) => setEditorState(s => ({...s, dueDate: e.target.value}))}
+                                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4]" 
+                                    />
+                                    {editorState.dueDate && <button onClick={() => setEditorState(s => ({...s, dueDate: ''}))} className="absolute right-2 top-2.5 text-gray-400 hover:text-red-500"><X size={14} /></button>}
+                                </div>
+                            </div>
+                            <div className="flex-1">
+                                <label className="text-xs font-bold text-gray-500 mb-1 block uppercase tracking-wider">Repeat</label>
+                                <div className="relative">
+                                    <select 
+                                        value={editorState.repeat || 'none'} 
+                                        onChange={(e) => setEditorState(s => ({...s, repeat: e.target.value}))}
+                                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4] appearance-none"
+                                    >
+                                        <option value="none">No Repeat</option>
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly">Weekly</option>
+                                        <option value="monthly">Monthly</option>
+                                        <option value="yearly">Yearly</option>
+                                    </select>
+                                    {editorState.repeat !== 'none' && <button onClick={() => setEditorState(s => ({...s, repeat: 'none'}))} className="absolute right-8 top-2.5 text-gray-400 hover:text-red-500"><X size={14} /></button>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Header Section (Inline) */}
                 <div className="flex flex-col gap-4">
                     <input 
@@ -466,52 +553,76 @@ const NotesApp = ({ user, cryptoKey, onExit }) => {
             <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4"><div className="bg-white p-4 rounded-full shadow-sm"><FileText size={32} className="opacity-50" /></div><p>Empty folder.</p></div>
           ) : (
             <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
-              {displayedItems.map(item => (
-                <div 
-                    key={item.id} 
-                    onClick={() => item.type === 'folder' ? handleEnterFolder(item) : openEditor(item)}
-                    className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative group cursor-pointer active:scale-[0.99] transition-all flex ${viewMode === 'list' ? 'flex-row items-center p-3 gap-3' : 'flex-col p-4 h-48'}`}
-                >
-                    <div className={`flex-shrink-0 flex items-center justify-center rounded-lg ${viewMode === 'list' ? 'w-10 h-10' : 'w-8 h-8 mb-2'} ${item.type === 'folder' ? 'bg-blue-50 text-[#4285f4]' : 'bg-yellow-50 text-yellow-600'}`}>
-                        {item.type === 'folder' ? <Folder size={20} /> : <FileText size={20} />}
-                    </div>
-
-                    <div className="flex-1 min-w-0 flex flex-col h-full">
-                        <div className="flex items-center justify-between gap-2">
-                            <h3 className={`font-bold text-gray-800 truncate ${item.isPinned && item.type !== 'folder' ? 'text-blue-600' : ''}`}>{item.title}</h3>
-                            <div className="flex items-center gap-1">
-                                {item.sharedId && <Globe size={12} className="text-green-500" />}
-                                {item.isPinned && <Star size={12} fill="currentColor" className="text-yellow-400 flex-shrink-0" />}
-                            </div>
+              {displayedItems.map(item => {
+                const isOverdue = item.dueDate && new Date(item.dueDate) < new Date();
+                return (
+                    <div 
+                        key={item.id} 
+                        onClick={() => item.type === 'folder' ? handleEnterFolder(item) : openEditor(item)}
+                        className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative group cursor-pointer active:scale-[0.99] transition-all flex ${viewMode === 'list' ? 'flex-row items-center p-3 gap-3' : 'flex-col p-4 h-48'}`}
+                    >
+                        <div className={`flex-shrink-0 flex items-center justify-center rounded-lg ${viewMode === 'list' ? 'w-10 h-10' : 'w-8 h-8 mb-2'} ${item.type === 'folder' ? 'bg-blue-50 text-[#4285f4]' : 'bg-yellow-50 text-yellow-600'}`}>
+                            {item.type === 'folder' ? <Folder size={20} /> : <FileText size={20} />}
                         </div>
-                        
-                        {item.type === 'folder' ? (
-                            <p className="text-xs text-blue-400 font-medium mt-1">{folderCounts[item.id] || 0} items</p>
-                        ) : (
-                            <>
-                                <p className="text-xs text-gray-400 mt-1 line-clamp-3">{item.content || "No content"}</p>
-                                <div className="mt-auto flex gap-1 pt-2 flex-wrap">
-                                    {item.tags.slice(0, 3).map((t, i) => <span key={i} className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{t}</span>)}
-                                    {item.attachments.length > 0 && <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex items-center gap-0.5"><Paperclip size={8} /> {item.attachments.length}</span>}
-                                </div>
-                            </>
-                        )}
-                    </div>
 
-                    <div className={`absolute top-2 right-2 flex flex-col gap-1 transition-opacity opacity-100 md:opacity-0 md:group-hover:opacity-100 ${viewMode === 'list' ? 'relative top-auto right-auto flex-row' : ''}`}>
-                        {item.type === 'note' ? (
-                            <>
-                                <button onClick={(e) => openShareMenu(e, item)} className={`p-1.5 bg-white shadow-sm border border-gray-100 rounded-full ${item.sharedId ? 'text-green-500' : 'text-gray-400'} hover:text-blue-500 active:scale-95`}><Share2 size={14} /></button>
-                                <button onClick={(e) => togglePin(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-yellow-500 active:scale-95"><Star size={14} fill={item.isPinned ? "currentColor" : "none"} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-green-500 active:scale-95"><ArrowRightLeft size={14} /></button>
-                            </>
-                        ) : (
-                            <button onClick={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-blue-500 active:scale-95"><Edit2 size={14} /></button>
+                        <div className="flex-1 min-w-0 flex flex-col h-full">
+                            <div className="flex items-center justify-between gap-2">
+                                <h3 className={`font-bold text-gray-800 truncate ${item.isPinned && item.type !== 'folder' ? 'text-blue-600' : ''}`}>{item.title}</h3>
+                                <div className="flex items-center gap-1">
+                                    {item.sharedId && <Globe size={12} className="text-green-500" />}
+                                    {item.isPinned && <Star size={12} fill="currentColor" className="text-yellow-400 flex-shrink-0" />}
+                                </div>
+                            </div>
+                            
+                            {item.type === 'folder' ? (
+                                <p className="text-xs text-blue-400 font-medium mt-1">{folderCounts[item.id] || 0} items</p>
+                            ) : (
+                                <>
+                                    {/* Alert Badge on Card */}
+                                    {item.dueDate && (
+                                        <div className={`flex items-center gap-1 mt-1 text-[10px] font-medium w-fit px-1.5 py-0.5 rounded ${isOverdue ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}>
+                                            <Clock size={10} />
+                                            {formatBadgeDate(item.dueDate)}
+                                            {item.repeat !== 'none' && <RotateCcw size={8} className="ml-0.5" />}
+                                        </div>
+                                    )}
+
+                                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">{item.content || "No content"}</p>
+                                    
+                                    <div className="mt-auto flex gap-1 pt-2 flex-wrap">
+                                        {item.tags.slice(0, 3).map((t, i) => <span key={i} className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{t}</span>)}
+                                        {item.attachments.length > 0 && <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex items-center gap-0.5"><Paperclip size={8} /> {item.attachments.length}</span>}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Reset Button for Overdue Repeating Notes */}
+                        {isOverdue && item.repeat && item.repeat !== 'none' && item.type !== 'folder' && (
+                            <button 
+                                onClick={(e) => handleRescheduleNote(e, item)}
+                                className="absolute bottom-2 right-2 bg-blue-500 text-white p-1.5 rounded-full shadow-lg hover:bg-blue-600 transition-colors z-10"
+                                title="Reschedule to next occurrence"
+                            >
+                                <RefreshCw size={14} />
+                            </button>
                         )}
-                        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-red-500 active:scale-95"><Trash2 size={14} /></button>
+
+                        <div className={`absolute top-2 right-2 flex flex-col gap-1 transition-opacity opacity-100 md:opacity-0 md:group-hover:opacity-100 ${viewMode === 'list' ? 'relative top-auto right-auto flex-row' : ''}`}>
+                            {item.type === 'note' ? (
+                                <>
+                                    <button onClick={(e) => openShareMenu(e, item)} className={`p-1.5 bg-white shadow-sm border border-gray-100 rounded-full ${item.sharedId ? 'text-green-500' : 'text-gray-400'} hover:text-blue-500 active:scale-95`}><Share2 size={14} /></button>
+                                    <button onClick={(e) => togglePin(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-yellow-500 active:scale-95"><Star size={14} fill={item.isPinned ? "currentColor" : "none"} /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-green-500 active:scale-95"><ArrowRightLeft size={14} /></button>
+                                </>
+                            ) : (
+                                <button onClick={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-blue-500 active:scale-95"><Edit2 size={14} /></button>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-red-500 active:scale-95"><Trash2 size={14} /></button>
+                        </div>
                     </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
