@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore';
 import { 
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, LogIn, Grid, Cloud, Cast, Bookmark,
-  FileText, RotateCcw, ClipboardList 
+  FileText, RotateCcw, ClipboardList, CreditCard, PieChart
 } from 'lucide-react';
 
 import { auth, db, appId } from './firebase';
@@ -20,6 +20,8 @@ import NotesApp from './Notes';
 import TasksApp from './Tasks'; 
 import PasswordsApp from './Passwords'; 
 import AlertsApp from './Alerts'; 
+import BankingApp from './Banking'; 
+import FinanceApp from './Finance';
 import SharedNote from './SharedNote';
 import SettingsApp from './Settings';
 import { 
@@ -59,7 +61,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
     setIsDeriving(true); 
 
     try {
-        const appCollections = ['notes', 'bookmarks', 'checklists', 'counters', 'tasks', 'passwords'];
+        const appCollections = ['notes', 'bookmarks', 'checklists', 'counters', 'tasks', 'passwords', 'banking', 'finance'];
         
         for (const colName of appCollections) {
             const q = query(collection(db, 'artifacts', appId, 'users', user.uid, colName));
@@ -192,7 +194,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
 
 // --- Launcher Component ---
 const Launcher = ({ user, onLaunch }) => {
-  const [stats, setStats] = useState({ counters: 0, checklists: 0, tasks: 0, passwords: 0 });
+  const [stats, setStats] = useState({ counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0 });
 
   useEffect(() => {
     if(!user) return;
@@ -200,13 +202,17 @@ const Launcher = ({ user, onLaunch }) => {
     const q2 = query(collection(db, 'artifacts', appId, 'users', user.uid, 'checklists'));
     const q3 = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
     const q4 = query(collection(db, 'artifacts', appId, 'users', user.uid, 'passwords'));
+    const q5 = query(collection(db, 'artifacts', appId, 'users', user.uid, 'banking')); 
+    const q6 = query(collection(db, 'artifacts', appId, 'users', user.uid, 'finance')); 
     
     const unsub1 = onSnapshot(q1, snap => setStats(s => ({ ...s, counters: snap.size })));
     const unsub2 = onSnapshot(q2, snap => setStats(s => ({ ...s, checklists: snap.size })));
     const unsub3 = onSnapshot(q3, snap => setStats(s => ({ ...s, tasks: snap.size })));
     const unsub4 = onSnapshot(q4, snap => setStats(s => ({ ...s, passwords: snap.size })));
+    const unsub5 = onSnapshot(q5, snap => setStats(s => ({ ...s, banking: snap.size })));
+    const unsub6 = onSnapshot(q6, snap => setStats(s => ({ ...s, finance: snap.size })));
     
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, [user]);
 
   const apps = [
@@ -216,6 +222,8 @@ const Launcher = ({ user, onLaunch }) => {
     { id: 'counter', icon: <TrendingUp size={32} />, label: 'Counters', count: stats.counters },
     { id: 'notes', icon: <FileText size={32} />, label: 'Notes' }, 
     { id: 'passwords', icon: <Key size={32} />, label: 'Passwords', count: stats.passwords },
+    { id: 'banking', icon: <CreditCard size={32} />, label: 'Wallet', count: stats.banking }, 
+    { id: 'finance', icon: <PieChart size={32} />, label: 'Finance', count: stats.finance }, 
     { id: 'bookmarks', icon: <Bookmark size={32} />, label: 'Bookmarks' },
     { id: 'streampi', icon: <Cast size={32} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
     { id: 'drive', icon: <Cloud size={32} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
@@ -243,7 +251,7 @@ const Launcher = ({ user, onLaunch }) => {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto p-6 grid grid-cols-2 md:grid-cols-3 gap-8">
           {apps.map(app => {
-            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'settings'].includes(app.id);
+            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'settings', 'banking', 'finance'].includes(app.id);
             return (
               <button key={app.id} onClick={() => handleAppClick(app)} className={`aspect-square rounded-3xl flex flex-col items-center justify-center gap-3 shadow-lg transition-transform active:scale-95 relative bg-[#4285f4] ${app.locked ? 'opacity-90' : 'hover:brightness-110'}`}>
                 <div className={`p-4 rounded-2xl ${isPrimary ? 'bg-white/20 text-white' : 'bg-white text-[#4285f4]'}`}>{app.icon}</div>
@@ -301,7 +309,8 @@ export default function App() {
       setIsSharedView(true);
     }
     const hash = window.location.hash.replace('#', '');
-    if (hash && ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'bookmarks', 'notes', 'settings'].includes(hash)) {
+    // 4. Update Deep Linking
+    if (hash && ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'bookmarks', 'notes', 'settings', 'banking', 'finance'].includes(hash)) {
       setCurrentApp(hash);
     }
 
@@ -317,7 +326,6 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // UPDATED: launchApp now accepts extraState for deep linking
   const launchApp = (appId, extraState = {}) => {
     window.history.pushState({ appId, ...extraState }, '', `#${appId}`);
     setCurrentApp(appId);
@@ -364,8 +372,10 @@ export default function App() {
     return <LockScreen user={user} onUnlock={handleUnlock} initialMessage={lockMessage} />;
   }
 
-  // UPDATED: Passing onLaunch to AlertsApp
+  // 5. Render Logic
   if (currentApp === 'alerts') return <AlertsApp user={user} cryptoKey={cryptoKey} onExit={exitApp} onLaunch={launchApp} />;
+  if (currentApp === 'banking') return <BankingApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
+  if (currentApp === 'finance') return <FinanceApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />; 
   
   if (currentApp === 'checklist') return <ChecklistApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
   if (currentApp === 'tasks') return <TasksApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
@@ -373,7 +383,7 @@ export default function App() {
   if (currentApp === 'counter') return <CounterApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
   if (currentApp === 'bookmarks') return <BookmarksApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
   if (currentApp === 'notes') return <NotesApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
-  if (currentApp === 'settings') return <SettingsApp user={user} onExit={exitApp} />;
+  if (currentApp === 'settings') return <SettingsApp user={user} cryptoKey={cryptoKey} onExit={exitApp} />;
 
   return <Launcher user={user} onLaunch={launchApp} />;
 }
