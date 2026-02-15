@@ -52,12 +52,69 @@
 
     Key Feature: End-to-end encrypted 1-to-1 chat. You can send text, and later, encrypted images. Since it's built on your platform, you can add "Self-destruct" timers to messages.
 
-7. Expense/Subscription Tracker (Financial Utility)
-    You already have a BankingApp. Adding a Subscription Manager helps track recurring "drain."
 
-    The Hook: Visualizes monthly burn.
 
-    Lucide Icon: Repeat or Receipt
 
-    Key Feature: A dashboard showing "Next Payment Due" and a total monthly cost of all active subscriptions (Netflix, Gym, etc.).
+// Project Structure:
+├── App.jsx
+├── apps
+│   ├── alerts
+│   │   └── Alerts.jsx
+│   ├── banking
+│   │   └── Banking.jsx
+│   ├── bookmarks
+│   │   └── Bookmarks.jsx
+│   ├── checklist
+│   │   └── Checklist.jsx
+│   ├── counter
+│   │   └── Counter.jsx
+│   ├── finance
+│   │   └── Finance.jsx
+│   ├── notes
+│   │   └── Notes.jsx
+│   ├── passwords
+│   │   ├── components
+│   │   │   ├── PasswordCard.jsx
+│   │   │   ├── PasswordEditor.jsx
+│   │   │   └── ServiceGroup.jsx
+│   │   └── Passwords.jsx
+│   ├── settings
+│   │   ├── AccountTab.jsx
+│   │   ├── constants.js
+│   │   ├── FinanceTab.jsx
+│   │   └── Settings.jsx
+│   ├── SharedNote.jsx
+│   └── tasks
+│       └── Tasks.jsx
+├── components
+│   ├── system
+│   │   ├── Launcher.jsx
+│   │   └── LockScreen.jsx
+│   └── ui
+│       ├── Button.jsx
+│       ├── index.js
+│       ├── Input.jsx
+│       ├── LoadingSpinner.jsx
+│       └── Modal.jsx
+├── context
+│   └── VaultContext.jsx
+├── hooks
+│   └── useClipboard.js
+├── index.css
+├── lib
+│   ├── crypto.js
+│   ├── dateUtils.js
+│   ├── firebase.js
+│   └── passwordUtils.js
+├── main.jsx
+└── services
+    ├── checklist.js
+    ├── firestoredb.js
+    ├── passwords.js
+    ├── settings.js
+    └── vault.js
+
+
+
+
 
