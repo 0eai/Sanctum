@@ -15,6 +15,8 @@ const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
 const SAFARI_RAM_LIMIT = 1.5 * 1024 * 1024 * 1024;
 // Detect Safari (StreamSaver explicitly disables SW streaming on Safari)
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || !!window.safari;
+// Check OPFS support (Safari 15.2+, Chrome, Firefox)
+const hasOPFS = 'storage' in navigator && 'getDirectory' in navigator.storage;
 
 const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const [status, setStatus] = useState('Initializing...');
@@ -50,6 +52,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
     // Large file streaming writer (StreamSaver or File System Access API)
     const streamWriterRef = useRef(null);
+    // OPFS file handle for Safari large file transfers
+    const opfsFileRef = useRef(null);
     // Sequential write queue for File System Access API path
     const writeQueueRef = useRef(Promise.resolve());
     // ACK flow control: sender waits for ack from receiver every N chunks
@@ -57,7 +61,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     // Guard to prevent double-calling cleanupRoom
     const roomCleanedUpRef = useRef(false);
 
-    // Track which streaming method is active: 'fsa' | 'streamsaver' | 'ram'
+    // Track which streaming method is active: 'fsa' | 'streamsaver' | 'opfs' | 'ram'
     const streamModeRef = useRef('ram');
 
     // --- WAKE LOCK LOGIC ---
@@ -106,7 +110,19 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         setStatus('Connection lost.');
                         addLog('Connection lost or peer disconnected.', 'error');
                         releaseWakeLock();
+                        addLog('Connection lost or peer disconnected.', 'error');
+                        releaseWakeLock();
                         if (streamWriterRef.current) { try { streamWriterRef.current.abort(); } catch (e) { } streamWriterRef.current = null; } // Cancel stream if dropped
+
+                        // Clean up any partial OPFS file
+                        if (opfsFileRef.current) {
+                            try {
+                                navigator.storage.getDirectory().then(root => {
+                                    root.removeEntry(opfsFileRef.current.name).catch(() => { });
+                                });
+                            } catch (e) { }
+                            opfsFileRef.current = null;
+                        }
                     }
                 };
 
@@ -236,6 +252,24 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                                 streamWriterRef.current = fileStream.getWriter();
                             }
                         });
+                    } else if (msg.size > LARGE_FILE_THRESHOLD && isSafari && hasOPFS) {
+                        // Safari/iOS: OPFS (Origin Private File System) — write chunks to private storage,
+                        // then share via navigator.share() — zero RAM accumulation during transfer.
+                        streamModeRef.current = 'opfs';
+                        writeQueueRef.current = writeQueueRef.current.then(async () => {
+                            try {
+                                const root = await navigator.storage.getDirectory();
+                                const fileHandle = await root.getFileHandle(msg.name, { create: true });
+                                opfsFileRef.current = fileHandle;
+                                streamWriterRef.current = await fileHandle.createWritable();
+                                addLog(`Writing to device storage via OPFS...`, 'info');
+                            } catch (err) {
+                                console.warn('OPFS failed, falling back to RAM buffer.', err);
+                                streamModeRef.current = 'ram';
+                                streamWriterRef.current = null;
+                                opfsFileRef.current = null;
+                            }
+                        });
                     } else if (msg.size > LARGE_FILE_THRESHOLD && !isSafari) {
                         // Firefox (non-Safari): StreamSaver via service worker
                         streamModeRef.current = 'streamsaver';
@@ -249,7 +283,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                             streamWriterRef.current = null;
                         }
                     } else {
-                        // Safari or small files: RAM buffer
+                        // Small files or unsupported: RAM buffer
                         streamModeRef.current = 'ram';
                         streamWriterRef.current = null;
                         writeQueueRef.current = Promise.resolve();
@@ -273,8 +307,34 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     const meta = incomingMetaRef.current;
 
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (streamWriterRef.current) {
-                            // Close the streaming writer (FSA or StreamSaver)
+                        if (streamWriterRef.current && streamModeRef.current === 'opfs') {
+                            // OPFS path: close the writable, then share via navigator.share()
+                            await streamWriterRef.current.close();
+                            streamWriterRef.current = null;
+                            try {
+                                const file = await opfsFileRef.current.getFile();
+                                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                    await navigator.share({ files: [file], title: meta?.name });
+                                    addLog(`Shared: ${meta?.name} via iOS share sheet.`, 'success');
+                                } else {
+                                    // Fallback: read back and download (last resort)
+                                    const url = URL.createObjectURL(file);
+                                    const a = document.createElement('a');
+                                    a.href = url; a.download = meta?.name;
+                                    document.body.appendChild(a); a.click();
+                                    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+                                    addLog(`Downloaded: ${meta?.name}.`, 'success');
+                                }
+                                // Clean up OPFS file
+                                const root = await navigator.storage.getDirectory();
+                                await root.removeEntry(meta?.name).catch(() => { });
+                            } catch (err) {
+                                console.warn('Share failed:', err);
+                                addLog(`Save failed: ${err.message}`, 'error');
+                            }
+                            opfsFileRef.current = null;
+                        } else if (streamWriterRef.current) {
+                            // FSA or StreamSaver: just close the writer
                             await streamWriterRef.current.close();
                             streamWriterRef.current = null;
                             const label = streamModeRef.current === 'fsa' ? 'via File System API' : 'via StreamSaver';
@@ -313,8 +373,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 if (streamModeRef.current === 'streamsaver' && streamWriterRef.current) {
                     // StreamSaver: write synchronously (the writer handles backpressure internally)
                     streamWriterRef.current.write(new Uint8Array(data));
-                } else if (streamModeRef.current === 'fsa') {
-                    // File System Access API: queue writes to maintain order
+                } else if (streamModeRef.current === 'fsa' || streamModeRef.current === 'opfs') {
+                    // File System Access API / OPFS: queue writes to maintain order
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
                         if (streamWriterRef.current) await streamWriterRef.current.write(data);
                     });
