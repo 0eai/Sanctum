@@ -21,6 +21,8 @@ const PasswordEditor = ({ item, onSave, onClose, onDelete, copyUtils }) => {
   const lastSavedRef = useRef(item);
   const timerRef = useRef(null);
   const notesRef = useRef(null);
+  const savePromiseRef = useRef(null);
+  const idRef = useRef(item.id || null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -40,10 +42,16 @@ const PasswordEditor = ({ item, onSave, onClose, onDelete, copyUtils }) => {
     }
   }, [data.notes]);
 
-  const triggerSave = (currentData, isUnmounting = false) => {
+  const triggerSave = async (currentData, isUnmounting = false) => {
+    // 1. If an auto-save is currently happening, WAIT for it to finish!
+    if (savePromiseRef.current) {
+        await savePromiseRef.current;
+    }
+
+    // 2. Safely grab the ID if it was just created by the previous save
+    if (idRef.current) currentData.id = idRef.current;
+
     const lastSaved = lastSavedRef.current;
-    
-    // Only save if there's actually a change
     const hasChanges = JSON.stringify(currentData) !== JSON.stringify(lastSaved);
     
     if (hasChanges) {
@@ -51,15 +59,31 @@ const PasswordEditor = ({ item, onSave, onClose, onDelete, copyUtils }) => {
         
         if (currentData.password !== lastSaved.password && lastSaved.password) {
             const historyEntry = { password: lastSaved.password, date: new Date().toISOString() };
-            const newHistory = [historyEntry, ...(currentData.history || [])]; 
-            newData.history = newHistory;
+            newData.history = [historyEntry, ...(currentData.history || [])]; 
         }
 
-        onSave(newData);
         lastSavedRef.current = newData;
 
+        // 3. Create the save operation and lock it into the ref
+        const saveOperation = async () => {
+            const savedId = await onSave(newData);
+            if (savedId && !idRef.current) {
+                idRef.current = savedId;
+                newData.id = savedId;
+                lastSavedRef.current.id = savedId;
+            }
+            return savedId;
+        };
+
+        savePromiseRef.current = saveOperation();
+        await savePromiseRef.current; // Execute the save
+        savePromiseRef.current = null; // Release the lock once finished
+
         if (!isUnmounting) setData(newData);
+        return newData; 
     }
+    
+    return currentData; 
   };
 
   const handleDataChange = (patch) => {
@@ -71,15 +95,15 @@ const PasswordEditor = ({ item, onSave, onClose, onDelete, copyUtils }) => {
     timerRef.current = setTimeout(() => {
         triggerSave(newData);
         timerRef.current = null;
-    }, 10000); // Save after 10 seconds of inactivity
+    }, 10000);
   };
 
-  // Safe Close Handler
-  const handleClose = () => {
+  const handleClose = async () => {
       setIsClosing(true);
       if (timerRef.current) clearTimeout(timerRef.current);
-      triggerSave(dataRef.current, true);
-      onClose(dataRef.current);
+      
+      const finalData = await triggerSave(dataRef.current, true);
+      onClose(finalData);
   };
 
   const handleGenerateClick = () => setGeneratedPassword(generateStrongPassword());

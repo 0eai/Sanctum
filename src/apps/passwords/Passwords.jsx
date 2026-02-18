@@ -126,16 +126,26 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleSave = async (itemData) => {
-    const savedId = await savePasswordItem(user.uid, cryptoKey, { ...itemData, parentId: currentFolderId });
-    if (editId === 'new') {
-        window.history.replaceState(null, '', `#passwords/edit/${savedId}`);
-    }
+    const finalParentId = itemData.parentId !== undefined ? itemData.parentId : (route.query?.folder || null);
+    
+    const savedId = await savePasswordItem(user.uid, cryptoKey, { 
+        ...itemData, 
+        parentId: finalParentId 
+    });
+
+    return savedId;
   };
 
   const handleCloseEditor = async (finalData) => {
-      navigate(currentBasePath);
-      if (finalData && !finalData.service && !finalData.username && !finalData.password && !finalData.notes) {
-          if (finalData.id) await deletePasswordItem(user.uid, finalData.id, allItems);
+      const backFolder = finalData?.parentId || route.query?.folder || null;
+      navigate(backFolder ? `#passwords/folder/${backFolder}` : `#passwords`);
+      
+      if (finalData) {
+          // Use .trim() to ensure a password with just a "space" typed in it gets deleted
+          const isEmpty = !finalData.service?.trim() && !finalData.username?.trim() && !finalData.password && !finalData.notes?.trim();
+          if (isEmpty && finalData.id) {
+              await deletePasswordItem(user.uid, finalData.id, allItems);
+          }
       }
   };
 
@@ -154,16 +164,15 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleMove = async (targetFolderId) => {
-    const payload = itemToMove.type === 'folder' 
-        ? { ...itemToMove, parentId: targetFolderId } // Service needs a specific updateFolder if hierarchy supported
-        : { ...itemToMove, parentId: targetFolderId };
-    
-    if (itemToMove.type !== 'folder') {
-        await savePasswordItem(user.uid, cryptoKey, payload);
+    // Check if we are moving a "ServiceGroup" block of passwords
+    if (itemToMove.type === 'service_group') {
+        const movePromises = itemToMove.items.map(item => 
+            savePasswordItem(user.uid, cryptoKey, { ...item, parentId: targetFolderId })
+        );
+        await Promise.all(movePromises);
     } else {
-        // Simple update for folder moving (you can add this to services later if needed, for now just update doc)
-        // Since we didn't add it to services, let's keep it simple and just use the password saver logic
-        // which works because our payload is encrypted.
+        // Normal single item/folder move
+        const payload = { ...itemToMove, parentId: targetFolderId };
         await savePasswordItem(user.uid, cryptoKey, payload);
     }
     
@@ -173,9 +182,11 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    await deletePasswordItem(user.uid, deleteConfirm.id, allItems);
+    if (deleteConfirm.id) {
+        await deletePasswordItem(user.uid, deleteConfirm.id, allItems);
+    }
     
-    if (editorItem && editorItem.id === deleteConfirm.id) navigate(currentBasePath);
+    if (editId) navigate(currentBasePath); // Force back to list view
     setDeleteConfirm(null);
   };
 
@@ -264,22 +275,37 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     {
       label: "New Password",
       icon: <Plus size={24} />,
-      onClick: () => navigate(`#passwords/edit/new`),
+      onClick: () => navigate(`#passwords/edit/new${currentFolderId ? `?folder=${currentFolderId}` : ''}`),
       variant: 'primary'
     }
-  ], [navigate]);
+  ], [navigate, currentFolderId]);
 
   // --- RENDER ---
   
   if (editId) {
       return (
-          <PasswordEditor 
-            item={editorItem || { parentId: currentFolderId }} 
-            onSave={handleSave}
-            onClose={handleCloseEditor}
-            onDelete={(item) => setDeleteConfirm(item)}
-            copyUtils={copyUtils}
-          />
+          <>
+            <PasswordEditor 
+              item={editorItem || { parentId: currentFolderId }} 
+              onSave={handleSave}
+              onClose={handleCloseEditor}
+              onDelete={(item) => setDeleteConfirm(item)}
+              copyUtils={copyUtils}
+            />
+            {/* Modal rendered HERE with zIndex so it pops over the editor */}
+            <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Item" zIndex={100}>
+              <div className="flex flex-col gap-4">
+                <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">
+                  Are you sure you want to delete <b>{deleteConfirm?.service || deleteConfirm?.title || "this entry"}</b>?
+                  {deleteConfirm?.type === 'folder' && <span className="block mt-1 font-bold">This deletes all contents!</span>}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+                  <Button variant="danger" onClick={handleDelete}>Delete</Button>
+                </div>
+              </div>
+            </Modal>
+          </>
       );
   }
 
@@ -354,6 +380,7 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onEdit={(i) => navigate(`#passwords/edit/${i.id}`)} 
                     onDelete={setDeleteConfirm} 
                     copyUtils={copyUtils} 
+                    onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }} // <--- Added this
                 />
             ) : (
                 <ServiceGroup 
@@ -363,6 +390,7 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onEdit={(i) => navigate(`#passwords/edit/${i.id}`)} 
                     onDelete={setDeleteConfirm} 
                     copyUtils={copyUtils} 
+                    onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }} // <--- Added this
                 />
             ))}
         </div>
@@ -403,19 +431,6 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         importLabel="Import CSV"
         exportLabel="Export CSV"
       />
-
-      <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Item">
-        <div className="flex flex-col gap-4">
-          <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">
-            Are you sure you want to delete <b>{deleteConfirm?.service || deleteConfirm?.title || "this entry"}</b>?
-            {deleteConfirm?.type === 'folder' && <span className="block mt-1 font-bold">This deletes all contents!</span>}
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-            <Button variant="danger" onClick={handleDelete}>Delete</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

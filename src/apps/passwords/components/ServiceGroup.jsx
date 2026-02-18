@@ -1,9 +1,19 @@
+// src/apps/passwords/components/ServiceGroup.jsx
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Key } from 'lucide-react';
+import { ChevronDown, ChevronRight, Key, ArrowRightLeft } from 'lucide-react';
 import PasswordCard from './PasswordCard';
 
-const ServiceGroup = ({ serviceName, items, onEdit, onDelete, copyUtils }) => {
+const ServiceGroup = ({ serviceName, items, onEdit, onDelete, copyUtils, onMove }) => {
   const [isOpen, setIsOpen] = useState(false);
+
+  // Helper to move all items in this group
+  const handleMoveGroup = (e) => {
+      e.stopPropagation();
+      if (onMove) {
+          // Wrap them in a pseudo-group object so Passwords.jsx knows to iterate them
+          onMove({ type: 'service_group', items: items });
+      }
+  };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -18,7 +28,16 @@ const ServiceGroup = ({ serviceName, items, onEdit, onDelete, copyUtils }) => {
           <h3 className="font-bold text-gray-800 truncate">{serviceName || "Untitled"}</h3>
           <p className="text-xs text-gray-500 mt-1">{items.length} accounts</p>
         </div>
-        <div className="text-gray-400">
+        <div className="flex items-center gap-2 text-gray-400">
+          {onMove && (
+              <button 
+                  onClick={handleMoveGroup} 
+                  title="Move all to folder"
+                  className="p-2 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
+              >
+                  <ArrowRightLeft size={18} />
+              </button>
+          )}
           {isOpen ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
         </div>
       </div>
@@ -33,6 +52,7 @@ const ServiceGroup = ({ serviceName, items, onEdit, onDelete, copyUtils }) => {
                 onDelete={onDelete} 
                 copyUtils={copyUtils} 
                 isGrouped={true} 
+                onMove={onMove}
             />
           ))}
         </div>

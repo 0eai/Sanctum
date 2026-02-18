@@ -1,8 +1,9 @@
+// src/apps/passwords/components/PasswordCard.jsx
 import React from 'react';
-import { Key, User, Check, Copy, Clock, Folder, MoreHorizontal } from 'lucide-react';
+import { Key, User, Check, Copy, Clock, Folder, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
 import { formatDate } from '../../../lib/dateUtils';
 
-const PasswordCard = ({ item, onEdit, onEnterFolder, copyUtils, isGrouped = false }) => {
+const PasswordCard = ({ item, onEdit, onEnterFolder, copyUtils, isGrouped = false, onMove }) => {
   const { copy, copiedId } = copyUtils;
 
   if (item.type === 'folder') {
@@ -50,6 +51,15 @@ const PasswordCard = ({ item, onEdit, onEnterFolder, copyUtils, isGrouped = fals
       </div>
 
       <div className="flex items-center gap-1">
+        {onMove && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onMove(item); }}
+              title="Move to Folder"
+              className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors hidden sm:flex"
+            >
+              <ArrowRightLeft size={16} />
+            </button>
+        )}
         <button 
           onClick={(e) => { e.stopPropagation(); copy(item.username, `user-${item.id}`); }}
           className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
