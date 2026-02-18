@@ -4,7 +4,7 @@ import streamSaver from 'streamsaver';
 import { Button } from '../../../components/ui';
 import { formatBytes } from '../../../lib/fileUtils';
 import {
-    rtcConfiguration, setRoomData, getRoomData, listenToRoom,
+    rtcConfiguration, setRoomData, listenToRoom,
     addIceCandidate, listenToIceCandidates, cleanupRoom
 } from '../../../services/transfer';
 
@@ -122,13 +122,25 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         if (event.candidate) addIceCandidate(user.uid, roomId, 'calleeCandidates', event.candidate);
                     };
 
-                    const roomData = await getRoomData(user.uid, roomId);
-                    if (!roomData || !roomData.offer) {
-                        setStatus('Room not found or expired.');
-                        return;
-                    }
+                    // Wait for the host's offer to appear (up to 30s) instead of a one-shot read
+                    // This fixes the race where the peer joins before the host finishes writing the offer.
+                    setStatus('Waiting for host offer...');
+                    const offerData = await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            unsub();
+                            reject(new Error('Timed out waiting for host offer.'));
+                        }, 30000);
 
-                    const offer = new RTCSessionDescription(roomData.offer);
+                        const unsub = listenToRoom(user.uid, roomId, (data) => {
+                            if (data?.offer) {
+                                clearTimeout(timeout);
+                                unsub();
+                                resolve(data);
+                            }
+                        });
+                    });
+
+                    const offer = new RTCSessionDescription(offerData.offer);
                     await pc.setRemoteDescription(offer);
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
