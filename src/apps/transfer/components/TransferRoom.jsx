@@ -44,12 +44,17 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
     // File System Access API writable ref (for large file streaming)
     const fsWritableRef = useRef(null);
+    // TransformStream controller ref (for streaming large files on Safari)
+    const streamControllerRef = useRef(null);
     // Sequential write queue — ensures disk writes are ordered without blocking onmessage
     const writeQueueRef = useRef(Promise.resolve());
     // ACK flow control: sender waits for ack from receiver every N chunks
     const ackResolverRef = useRef(null);
     // Guard to prevent double-calling cleanupRoom
     const roomCleanedUpRef = useRef(false);
+
+    // Whether the current large file is using TransformStream (vs RAM buffer)
+    const usingStreamRef = useRef(false);
 
     // --- WAKE LOCK LOGIC ---
     const requestWakeLock = async () => {
@@ -213,17 +218,41 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     requestWakeLock();
 
                     if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
-                        // Queue the async showSaveFilePicker call onto the write chain
+                        // Chrome/Edge: File System Access API — true streaming to disk
+                        usingStreamRef.current = false;
                         writeQueueRef.current = writeQueueRef.current.then(async () => {
                             try {
                                 const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
                                 fsWritableRef.current = await fileHandle.createWritable();
                             } catch (err) {
-                                console.warn('showSaveFilePicker cancelled, falling back to RAM buffer.', err);
+                                console.warn('showSaveFilePicker cancelled, falling back to stream.', err);
                                 fsWritableRef.current = null;
                             }
                         });
+                    } else if (msg.size > LARGE_FILE_THRESHOLD && typeof TransformStream !== 'undefined') {
+                        // Safari/Firefox: TransformStream → Response → Blob URL streaming
+                        // The browser downloads chunk-by-chunk without holding the whole file in RAM.
+                        usingStreamRef.current = true;
+                        fsWritableRef.current = null;
+                        writeQueueRef.current = Promise.resolve();
+
+                        const ts = new TransformStream();
+                        streamControllerRef.current = ts.writable.getWriter();
+
+                        // Kick off the download immediately — browser will stream as chunks arrive
+                        new Response(ts.readable).blob().then(blob => {
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.style.display = 'none';
+                            a.href = url;
+                            a.download = msg.name;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+                        });
                     } else {
+                        // Small files or fallback: RAM buffer
+                        usingStreamRef.current = false;
                         fsWritableRef.current = null;
                         writeQueueRef.current = Promise.resolve();
                     }
@@ -240,10 +269,18 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
                         if (fsWritableRef.current) {
+                            // File System Access API path
                             await fsWritableRef.current.close();
                             fsWritableRef.current = null;
                             addLog(`Saved: ${meta?.name} via File System API.`, 'success');
+                        } else if (usingStreamRef.current && streamControllerRef.current) {
+                            // TransformStream path — close the writer; the Response.blob() resolves
+                            await streamControllerRef.current.close();
+                            streamControllerRef.current = null;
+                            usingStreamRef.current = false;
+                            addLog(`Downloaded: ${meta?.name} (streamed).`, 'success');
                         } else {
+                            // RAM buffer path
                             const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
                             const downloadUrl = URL.createObjectURL(blob);
                             const a = document.createElement('a');
@@ -271,15 +308,21 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 }
             } else {
                 // --- INCOMING FILE CHUNK ---
-                // Queue the write so chunks are processed in order
                 const data = event.data;
-                writeQueueRef.current = writeQueueRef.current.then(async () => {
-                    if (fsWritableRef.current) {
-                        await fsWritableRef.current.write(data);
-                    } else {
-                        receiveBufferRef.current.push(data);
-                    }
-                });
+
+                if (usingStreamRef.current && streamControllerRef.current) {
+                    // TransformStream path: enqueue synchronously (no RAM accumulation)
+                    streamControllerRef.current.write(new Uint8Array(data));
+                } else {
+                    // File System Access or RAM buffer path: queue the write
+                    writeQueueRef.current = writeQueueRef.current.then(async () => {
+                        if (fsWritableRef.current) {
+                            await fsWritableRef.current.write(data);
+                        } else {
+                            receiveBufferRef.current.push(data);
+                        }
+                    });
+                }
 
                 receivedBytesRef.current += event.data.byteLength;
                 const meta = incomingMetaRef.current;
@@ -342,7 +385,14 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 // 2. ACK flow control: pause every ACK_EVERY chunks and wait for receiver ack
                 // This prevents flooding the receiver's memory on slow devices (iPad/Safari)
                 if (chunksSent % ACK_EVERY_SEND === 0) {
-                    await new Promise(resolve => { ackResolverRef.current = resolve; });
+                    // 15s timeout: if ack never arrives, continue anyway to avoid stalling
+                    await new Promise(resolve => {
+                        const timer = setTimeout(() => {
+                            ackResolverRef.current = null;
+                            resolve();
+                        }, 15000);
+                        ackResolverRef.current = () => { clearTimeout(timer); resolve(); };
+                    });
                 }
             }
 
