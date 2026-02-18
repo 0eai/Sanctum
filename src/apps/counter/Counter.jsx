@@ -4,7 +4,7 @@ import { Plus, Download, Upload, AlertCircle } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../lib/firebase';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
-import { encryptData, decryptData } from '../../lib/crypto'; 
+import { encryptData, decryptData } from '../../lib/crypto';
 
 // Sub-components
 import CounterHeader from './components/CounterHeader';
@@ -13,12 +13,12 @@ import CounterDetail from './components/CounterDetail';
 import CounterEditor from './components/CounterEditor';
 import EntryModal from './components/EntryModal';
 import ViewEntryModal from './components/ViewEntryModal';
-import Fab from '../../components/ui/Fab'; 
+import Fab from '../../components/ui/Fab';
 import ImportExportModal from '../../components/ui/ImportExportModal';
 
 // Services
-import { 
-  saveCounter, saveEntry, deleteCounterEntity, startTimer, stopTimer, 
+import {
+  saveCounter, saveEntry, deleteCounterEntity, startTimer, stopTimer,
   exportAllCounters, importCounters
 } from '../../services/counter';
 
@@ -26,7 +26,7 @@ import {
 const getNextDate = (currentDateStr, frequency) => {
   if (!currentDateStr) return null;
   const date = new Date(currentDateStr);
-  switch(frequency) {
+  switch (frequency) {
     case 'daily': date.setDate(date.getDate() + 1); break;
     case 'weekly': date.setDate(date.getDate() + 7); break;
     case 'monthly': date.setMonth(date.getMonth() + 1); break;
@@ -43,7 +43,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   const [loading, setLoading] = useState(true);
 
   // Tab State for Detail View
-  const [activeTab, setActiveTab] = useState('history'); 
+  const [activeTab, setActiveTab] = useState('history');
 
   // Modals
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
@@ -51,14 +51,14 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   const [viewingEntry, setViewingEntry] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const [processing, setProcessing] = useState(false); // For import/export spinner
-  
+
   // Location & Swipe
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const MIN_SWIPE_DISTANCE = 50;
 
   // --- 1. URL-Driven State & Routing ---
-  
+
   // View states derived from the URL path
   const view = route.resource === 'edit' ? 'editor' : route.resource === 'view' ? 'detail' : 'list';
   const isSettingsOpen = route.query?.modal === 'settings';
@@ -66,7 +66,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   // Identify the currently selected counter from the URL ID
   const selectedCounterId = route.resourceId !== 'new' ? route.resourceId : null;
   const selectedCounter = selectedCounterId ? counters.find(c => c.id === selectedCounterId) : null;
-  
+
   // We use this for the editor. If we are editing an existing counter, pass the data.
   // If we are creating a new one (id === 'new'), pass null.
   const editingCounterData = view === 'editor' && selectedCounterId ? selectedCounter : null;
@@ -74,9 +74,9 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   // Legacy URL Fallback: Redirect old `?openId=123` links to the new detail view
   useEffect(() => {
     if (route.query?.openId) {
-        window.location.replace(
-            `${window.location.pathname}${window.location.search}#counter/view/${route.query.openId}`
-        );
+      window.location.replace(
+        `${window.location.pathname}${window.location.search}#counter/view/${route.query.openId}`
+      );
     }
   }, [route]);
 
@@ -85,17 +85,17 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
     if (!user || !cryptoKey) return;
     setLoading(true);
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'counters'), orderBy('createdAt', 'desc'));
-    
+
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const data = await Promise.all(snapshot.docs.map(async doc => {
         const raw = doc.data();
         const decrypted = await decryptData(raw, cryptoKey);
-        return { 
-            id: doc.id, 
-            ...raw, 
-            ...decrypted,
-            dueDate: raw.dueDate || decrypted.dueDate || null,
-            repeat: raw.repeat || decrypted.repeat || 'none'
+        return {
+          id: doc.id,
+          ...raw,
+          ...decrypted,
+          dueDate: raw.dueDate || decrypted.dueDate || null,
+          repeat: raw.repeat || decrypted.repeat || 'none'
         };
       }));
       setCounters(data);
@@ -106,9 +106,9 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
   useEffect(() => {
     if (!user || !selectedCounter || !cryptoKey || view !== 'detail') return;
-    
+
     const q = query(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id, 'entries'), 
+      collection(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id, 'entries'),
       orderBy('timestamp', 'desc')
     );
 
@@ -116,8 +116,8 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       const data = await Promise.all(snapshot.docs.map(async doc => {
         const d = doc.data();
         const decryptedData = await decryptData(d, cryptoKey);
-        return { 
-          id: doc.id, 
+        return {
+          id: doc.id,
           ...decryptedData,
           timestamp: d.timestamp && typeof d.timestamp.toDate === 'function' ? d.timestamp.toDate() : null,
           endTimestamp: d.endTimestamp && typeof d.endTimestamp.toDate === 'function' ? d.endTimestamp.toDate() : null,
@@ -138,24 +138,24 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   };
 
   const handleOpenEditor = (counter = null) => {
-      if (counter) {
-          navigate(`#counter/edit/${counter.id}`);
-      } else {
-          navigate(`#counter/edit/new`);
-      }
+    if (counter) {
+      navigate(`#counter/edit/${counter.id}`);
+    } else {
+      navigate(`#counter/edit/new`);
+    }
   };
 
   const handleBack = () => {
     if (view === 'editor') {
-        if (editingCounterData) {
-            navigate(`#counter/view/${editingCounterData.id}`);
-        } else {
-            navigate(`#counter`);
-        }
-    } else if (view === 'detail') {
+      if (editingCounterData) {
+        navigate(`#counter/view/${editingCounterData.id}`);
+      } else {
         navigate(`#counter`);
+      }
+    } else if (view === 'detail') {
+      navigate(`#counter`);
     } else {
-        onExit();
+      onExit();
     }
   };
 
@@ -165,13 +165,13 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
     // Use selectedCounterId here in case we are editing an existing one
     const savedId = await saveCounter(user.uid, cryptoKey, {
-        title,
-        mode: e.target.mode.value,
-        groupBy: e.target.groupBy.value,
-        useTags: e.target.useTags.checked,
-        useNotes: e.target.useNotes.checked,
-        dueDate: dDate || null,
-        repeat: rFreq || 'none'
+      title,
+      mode: e.target.mode.value,
+      groupBy: e.target.groupBy.value,
+      useTags: e.target.useTags.checked,
+      useNotes: e.target.useNotes.checked,
+      dueDate: dDate || null,
+      repeat: rFreq || 'none'
     }, selectedCounterId);
 
     // After saving, route back to the detail view of that counter
@@ -180,20 +180,20 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
   const handleEntrySave = async (formData, location) => {
     const entryData = {
-        id: editingEntry?.id,
-        note: formData.note,
-        tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-        location: location && !editingEntry ? location : undefined,
-        timestamp: new Date(formData.startDate),
+      id: editingEntry?.id,
+      note: formData.note,
+      tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+      location: location && !editingEntry ? location : undefined,
+      timestamp: new Date(formData.startDate),
     };
     if (selectedCounter.mode === 'range') {
-        entryData.endTimestamp = new Date(formData.endDate);
+      entryData.endTimestamp = new Date(formData.endDate);
     }
 
-    if(!editingEntry && selectedCounter.repeat && selectedCounter.repeat !== 'none' && selectedCounter.dueDate) {
-        const nextDate = getNextDate(selectedCounter.dueDate, selectedCounter.repeat);
-        const encryptedMeta = await encryptData({ title: selectedCounter.title, dueDate: nextDate, repeat: selectedCounter.repeat }, cryptoKey);
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id), encryptedMeta);
+    if (!editingEntry && selectedCounter.repeat && selectedCounter.repeat !== 'none' && selectedCounter.dueDate) {
+      const nextDate = getNextDate(selectedCounter.dueDate, selectedCounter.repeat);
+      const encryptedMeta = await encryptData({ title: selectedCounter.title, dueDate: nextDate, repeat: selectedCounter.repeat }, cryptoKey);
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id), encryptedMeta);
     }
 
     await saveEntry(user.uid, selectedCounter.id, cryptoKey, entryData, selectedCounter);
@@ -202,18 +202,19 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
-    
-    const targetId = deleteConfirmation.type === 'counter' ? selectedCounter?.id : deleteConfirmation.id;
+
+    // Always use the parent counter's ID; only pass entryId when deleting an entry
+    const counterId = selectedCounter?.id;
     const entryId = deleteConfirmation.type === 'entry' ? deleteConfirmation.id : null;
-    
-    await deleteCounterEntity(user.uid, targetId, entryId);
-    
+
+    await deleteCounterEntity(user.uid, counterId, entryId);
+
     if (deleteConfirmation.type === 'counter') {
-        navigate(`#counter`);
+      navigate(`#counter`);
     }
-    
+
     setDeleteConfirmation(null);
-    if(viewingEntry) setViewingEntry(null);
+    if (viewingEntry) setViewingEntry(null);
   };
 
   // --- Export / Import Handlers ---
@@ -278,25 +279,25 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   // Handle loading state gracefully, particularly if we navigated directly to a detail view
   // but the counters haven't loaded yet.
   if (view === 'detail' && !selectedCounter && !loading) {
-       // If the counter doesn't exist (deleted or bad link), drop them back to list.
-       navigate('#counter');
-       return null; 
+    // If the counter doesn't exist (deleted or bad link), drop them back to list.
+    navigate('#counter');
+    return null;
   }
 
   if (view === 'editor') {
-      return (
-          <CounterEditor 
-            counter={editingCounterData}
-            onSave={handleCounterSave}
-            onBack={handleBack}
-          />
-      );
+    return (
+      <CounterEditor
+        counter={editingCounterData}
+        onSave={handleCounterSave}
+        onBack={handleBack}
+      />
+    );
   }
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 text-gray-900 font-sans overflow-hidden">
-      
-      <CounterHeader 
+
+      <CounterHeader
         view={view}
         title={view === 'detail' && selectedCounter ? selectedCounter.title : 'My Counters'}
         onBack={handleBack}
@@ -307,7 +308,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
         setActiveTab={setActiveTab}
       />
 
-      <main 
+      <main
         className="flex-1 overflow-y-auto pb-24 scroll-smooth"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -315,14 +316,14 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       >
         <div className="max-w-3xl mx-auto p-4">
           {loading ? <LoadingSpinner /> : view === 'list' ? (
-            <CounterList 
-              counters={counters} 
+            <CounterList
+              counters={counters}
               loading={loading}
               onOpen={handleOpenCounter}
               onCreate={() => handleOpenEditor(null)}
             />
           ) : (
-            <CounterDetail 
+            <CounterDetail
               counter={selectedCounter}
               entries={entries}
               activeTab={activeTab}
@@ -339,24 +340,24 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       </main>
 
       {/* REUSABLE FAB */}
-      <Fab 
-        onClick={() => view === 'list' ? handleOpenEditor(null) : (() => { setEditingEntry(null); setIsEntryModalOpen(true); })()} 
+      <Fab
+        onClick={() => view === 'list' ? handleOpenEditor(null) : (() => { setEditingEntry(null); setIsEntryModalOpen(true); })()}
         icon={<Plus size={28} />}
         maxWidth="max-w-4xl"
         ariaLabel={view === 'list' ? "New Counter" : "Add Entry"}
       />
 
-      <EntryModal 
-        isOpen={isEntryModalOpen} 
-        onClose={() => setIsEntryModalOpen(false)} 
-        onSave={handleEntrySave} 
+      <EntryModal
+        isOpen={isEntryModalOpen}
+        onClose={() => setIsEntryModalOpen(false)}
+        onSave={handleEntrySave}
         editingEntry={editingEntry}
         mode={selectedCounter?.mode}
         useTags={selectedCounter?.useTags}
         useNotes={selectedCounter?.useNotes}
       />
 
-      <ViewEntryModal 
+      <ViewEntryModal
         entry={viewingEntry}
         counter={selectedCounter}
         onClose={() => setViewingEntry(null)}
@@ -365,7 +366,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       />
 
       {/* IMPORT / EXPORT MODAL */}
-      <ImportExportModal 
+      <ImportExportModal
         isOpen={isSettingsOpen}
         onClose={() => navigate(currentBasePath)}
         onImport={handleImport}
