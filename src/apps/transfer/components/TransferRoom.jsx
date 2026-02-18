@@ -107,8 +107,9 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         }
                     } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                         setIsConnected(false);
-                        setStatus('Connection lost.');
-                        addLog('Connection lost or peer disconnected.', 'error');
+                        setIsConnected(false);
+                        setStatus(`Connection lost: ${pc.iceConnectionState}`);
+                        addLog(`Connection lost. ICE State: ${pc.iceConnectionState}`, 'error');
                         releaseWakeLock();
                         addLog('Connection lost or peer disconnected.', 'error');
                         releaseWakeLock();
@@ -385,9 +386,13 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         if (streamWriterRef.current) {
                             await streamWriterRef.current.write(data);
 
+
                             receivedBytesRef.current += event.data.byteLength;
                             chunksReceived++;
-                            if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
+                            if (chunksReceived % ACK_EVERY === 0) {
+                                channel.send(JSON.stringify({ type: 'ack' }));
+                                if (chunksReceived % (ACK_EVERY * 10) === 0) console.log(`[Recv] Sent ACK ${chunksReceived}`);
+                            }
 
                             if (incomingMetaRef.current?.size) {
                                 setProgress(Math.round((receivedBytesRef.current / incomingMetaRef.current.size) * 100));
@@ -460,14 +465,24 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 // 2. ACK flow control: pause every ACK_EVERY chunks and wait for receiver ack
                 // This prevents flooding the receiver's memory on slow devices (iPad/Safari)
                 if (chunksSent % ACK_EVERY_SEND === 0) {
-                    // 15s timeout: if ack never arrives, continue anyway to avoid stalling
-                    await new Promise(resolve => {
-                        const timer = setTimeout(() => {
-                            ackResolverRef.current = null;
-                            resolve();
-                        }, 15000);
-                        ackResolverRef.current = () => { clearTimeout(timer); resolve(); };
-                    });
+                    // console.log(`[Send] Waiting for ACK after ${chunksSent} chunks...`);
+                    try {
+                        await new Promise((resolve, reject) => {
+                            const timer = setTimeout(() => {
+                                if (ackResolverRef.current) {
+                                    ackResolverRef.current = null;
+                                    reject(new Error('ACK timeout (60s)'));
+                                }
+                            }, 60000); // 60s timeout
+                            ackResolverRef.current = () => { clearTimeout(timer); resolve(); };
+                        });
+                        // console.log('[Send] Resumed.');
+                    } catch (err) {
+                        console.error(err);
+                        addLog(`Transfer aborted: Receiver stopped responding.`, 'error');
+                        setIsSending(false);
+                        return; // Stop sending
+                    }
                 }
             }
 
