@@ -1,9 +1,32 @@
 import React from 'react';
-import { Key, User, Check, Copy, Clock } from 'lucide-react';
+import { Key, User, Check, Copy, Clock, Folder, MoreHorizontal } from 'lucide-react';
 import { formatDate } from '../../../lib/dateUtils';
 
-const PasswordCard = ({ item, onEdit, copyUtils, isGrouped = false }) => {
+const PasswordCard = ({ item, onEdit, onEnterFolder, copyUtils, isGrouped = false }) => {
   const { copy, copiedId } = copyUtils;
+
+  if (item.type === 'folder') {
+      return (
+        <div 
+          onClick={(e) => { e.stopPropagation(); onEnterFolder(item); }}
+          className="bg-blue-50/50 rounded-xl shadow-sm border border-blue-100 p-4 flex items-center gap-4 group active:scale-[0.99] transition-all cursor-pointer hover:border-blue-300"
+        >
+          <div className="w-10 h-10 rounded-full bg-blue-100 text-[#4285f4] flex items-center justify-center flex-shrink-0">
+            <Folder size={20} fill="currentColor" className="opacity-90" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-blue-900 truncate">{item.title}</h3>
+            <p className="text-xs text-blue-400 font-medium mt-1 flex items-center gap-1">Folder</p>
+          </div>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onEdit(item); }}
+            className="p-2 text-gray-300 hover:text-blue-500 hover:bg-white rounded-full transition-colors"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+        </div>
+      );
+  }
 
   return (
     <div 

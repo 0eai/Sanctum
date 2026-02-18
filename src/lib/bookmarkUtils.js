@@ -1,3 +1,4 @@
+// src/lib/bookmarkUtils.js
 export const normalizeUrl = (url) => {
   if (!url) return '';
   if (!/^https?:\/\//i.test(url)) return `https://${url}`;

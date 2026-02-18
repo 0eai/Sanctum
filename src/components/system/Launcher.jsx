@@ -4,7 +4,7 @@ import {
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, Cloud, Cast, Bookmark,
   FileText, ClipboardList, CreditCard, PieChart, Globe, FileCode,
   Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout,
-  Users, BellRing // <--- Added new icons
+  Users, BellRing, Share2
 } from 'lucide-react';
 import { listenToAppStats } from '../../services/firestoredb'; 
 
@@ -21,8 +21,9 @@ const getIconElement = (iconName) => {
         case 'Briefcase': return <Briefcase {...props} />;
         case 'Layout': return <Layout {...props} />;
         case 'FileCode': return <FileCode {...props} />;
-        case 'Users': return <Users {...props} />; // <--- Added Contacts Icon
-        case 'BellRing': return <BellRing {...props} />; // <--- Added Reminders Icon
+        case 'Users': return <Users {...props} />; 
+        case 'BellRing': return <BellRing {...props} />; 
+        case 'transfer': return <TransferApp {...props} />;
         case 'Globe': 
         default: return <Globe {...props} />;
     }
@@ -50,11 +51,12 @@ const Launcher = ({ user, onLaunch, enabledApps }) => {
     { id: 'counter', icon: <TrendingUp size={32} />, label: 'Counters', count: stats.counters },
     { id: 'notes', icon: <FileText size={32} />, label: 'Notes' }, 
     { id: 'markdown', icon: <FileCode size={32} />, label: 'Markdown' },
-    { id: 'contacts', icon: <Users size={32} />, label: 'Contacts' }, // <--- Added Contacts
+    { id: 'contacts', icon: <Users size={32} />, label: 'Contacts' }, 
     { id: 'passwords', icon: <Key size={32} />, label: 'Passwords', count: stats.passwords },
     { id: 'banking', icon: <CreditCard size={32} />, label: 'Wallet', count: stats.banking }, 
     { id: 'finance', icon: <PieChart size={32} />, label: 'Finance', count: stats.finance }, 
     { id: 'bookmarks', icon: <Bookmark size={32} />, label: 'Bookmarks' },
+    { id: 'transfer', icon: <Share2 size={32} />, label: 'Drop' },
     { id: 'streampi', icon: <Cast size={32} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
     { id: 'drive', icon: <Cloud size={32} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
     { id: 'settings', icon: <Sliders size={32} />, label: 'Settings' }, 

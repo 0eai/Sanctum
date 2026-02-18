@@ -30,6 +30,7 @@ import SharedNote from './apps/SharedNote';
 import MarkdownApp from './apps/markdown/Markdown';
 import RemindersApp from './apps/reminders/Reminders';
 import ContactsApp from './apps/contacts/Contacts';
+import TransferApp from './apps/transfer/Transfer';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -126,11 +127,11 @@ export default function App() {
     case 'passwords': return <PasswordsApp {...props} />;
     case 'counter': return <CounterApp {...props} />;
     case 'bookmarks': return <BookmarksApp {...props} />;
+    case 'transfer': return <TransferApp {...props} />;
     case 'notes': return <NotesApp {...props} />;
     case 'markdown': return <MarkdownApp {...props} />;
     case 'contacts': return <ContactsApp {...props} />;
     case 'settings': return <SettingsApp {...props} />;
-    // Launcher handles empty string or unrecognized appIds
     default: return <Launcher user={user} onLaunch={launchApp} enabledApps={enabledApps} />; 
   }
 }

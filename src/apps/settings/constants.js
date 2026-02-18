@@ -37,11 +37,14 @@ export const AVAILABLE_APPS = [
   { id: 'checklist', name: 'Checklist', icon: 'ListChecks' },
   { id: 'counter', name: 'Counters', icon: 'PlusSquare' },
   { id: 'markdown', name: 'Markdown', icon: 'FileCode' },
+  { id: 'contacts', name: 'Contacts', icon: 'Users' },
+  { id: 'reminders', name: 'Reminders', icon: 'BellRing' },
+  { id: 'transfer', name: 'Drop', icon: 'Share2' },
   { id: 'settings', name: 'Settings', icon: 'Settings', isSystem: true },
 ];
 // Collections map for Export/Import/Wipe
 export const DATA_COLLECTIONS = [
     'alerts', 'banking', 'bookmarks', 'checklists', 'counters', 
     'finance', 'notes', 'passwords', 'tasks', 'calendar_events',
-    'task_folders' // Helper collection
+    'task_folders', 'contacts', 'reminders', 'transfer'
 ];

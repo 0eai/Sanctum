@@ -89,3 +89,4 @@ sample_data/
 package-lock.json
 
 src/*copy*
+apps_list.txt

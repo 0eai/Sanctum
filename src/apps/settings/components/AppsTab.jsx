@@ -1,10 +1,10 @@
 // src/apps/settings/AppsTab.jsx
 import React, { useState, useEffect } from 'react';
-import { 
-  ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink,
-  Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
-  FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
-  Users, BellRing // <--- Added new icons
+import {
+    ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink,
+    Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
+    FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
+    Users, BellRing, Share2
 } from 'lucide-react';
 
 // Make sure your constants.js exports an array that looks like this:
@@ -12,23 +12,24 @@ const AVAILABLE_APPS = [
     { id: 'alerts', name: 'DayPulse', icon: 'Bell' },
     { id: 'tasks', name: 'Tasks', icon: 'ListChecks' },
     { id: 'checklist', name: 'Checklists', icon: 'CheckSquare' },
-    { id: 'reminders', name: 'Reminders', icon: 'BellRing' }, // <--- Added Reminders
+    { id: 'reminders', name: 'Reminders', icon: 'BellRing' }, 
     { id: 'counter', name: 'Counters', icon: 'PlusSquare' },
     { id: 'notes', name: 'Notes', icon: 'FileText' },
     { id: 'markdown', name: 'Markdown', icon: 'FileCode' },
-    { id: 'contacts', name: 'Contacts', icon: 'Users' }, // <--- Added Contacts
+    { id: 'contacts', name: 'Contacts', icon: 'Users' }, 
     { id: 'passwords', name: 'Passwords', icon: 'Key' },
     { id: 'banking', name: 'Wallet', icon: 'CreditCard' },
     { id: 'finance', name: 'Finance', icon: 'PieChart' },
     { id: 'bookmarks', name: 'Bookmarks', icon: 'Bookmark' },
+    { id: 'transfer', name: 'Drop', icon: 'Share2' },
     { id: 'streampi', name: 'StreamPi', icon: 'Cast', isExternal: true, url: 'https://aks-streampi.web.app' },
     { id: 'drive', name: 'Cloud Drive', icon: 'Cloud', isExternal: true, url: 'https://aks-cloud-drive.web.app' },
     { id: 'settings', name: 'Settings', icon: 'Settings' },
     { id: 'vault', name: 'Vault', icon: 'Shield' }
 ];
 
-import { fetchAppPreferences, saveAppPreferences } from '../../services/settings';
-import { Button, Input, Modal } from '../../components/ui';
+import { fetchAppPreferences, saveAppPreferences } from '../../../services/settings';
+import { Button, Input, Modal } from '../../../components/ui';
 
 // --- Icon Mapping Configuration ---
 const APP_TYPES = [
@@ -47,7 +48,7 @@ const APP_TYPES = [
 // Helper to get Icon Component from string name
 const getIconComponent = (iconName) => {
     // 1. Check Standard App Icons
-    switch(iconName) {
+    switch (iconName) {
         case 'Shield': return Shield;
         case 'FileText': return FileText;
         case 'CheckSquare': return CheckSquare;
@@ -56,11 +57,12 @@ const getIconComponent = (iconName) => {
         case 'Key': return Key;
         case 'ListChecks': return ListChecks;
         case 'PlusSquare': return PlusSquare;
-        case 'FileCode': return FileCode; 
+        case 'FileCode': return FileCode;
         case 'Settings': return Settings;
-        case 'Users': return Users;       // <--- Added Contacts Mapping
-        case 'BellRing': return BellRing; // <--- Added Reminders Mapping
-        case 'Bell': return Bell;         // <--- Added Alerts Mapping
+        case 'Users': return Users;       
+        case 'BellRing': return BellRing; 
+        case 'Bell': return Bell; 
+        case 'Share2': return Share2;
         default: break;
     }
 
@@ -71,10 +73,10 @@ const getIconComponent = (iconName) => {
 
 const AppsTab = ({ user, setLoading, setMessage }) => {
     // State
-    const [appList, setAppList] = useState(AVAILABLE_APPS); 
-    const [selectedIds, setSelectedIds] = useState(AVAILABLE_APPS.map(a => a.id)); 
+    const [appList, setAppList] = useState(AVAILABLE_APPS);
+    const [selectedIds, setSelectedIds] = useState(AVAILABLE_APPS.map(a => a.id));
     const [loadingData, setLoadingData] = useState(true);
-    
+
     // Modal State
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
@@ -101,7 +103,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
 
     const toggleApp = (id) => {
         if (id === 'vault' || id === 'settings') return;
-        setSelectedIds(prev => 
+        setSelectedIds(prev =>
             prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
         );
     };
@@ -118,13 +120,13 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
         const newApp = {
             id: `ext_${Date.now()}`,
             name,
-            icon: iconType, 
+            icon: iconType,
             url,
             isExternal: true
         };
 
         setAppList(prev => [...prev, newApp]);
-        setSelectedIds(prev => [...prev, newApp.id]); 
+        setSelectedIds(prev => [...prev, newApp.id]);
         setIsAddModalOpen(false);
     };
 
@@ -150,7 +152,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
         try {
             await saveAppPreferences(user.uid, selectedIds, appList);
             setMessage({ type: 'success', text: "App layout saved!" });
-            setTimeout(() => window.location.reload(), 1000); 
+            setTimeout(() => window.location.reload(), 1000);
         } catch (e) {
             setMessage({ type: 'error', text: "Failed to save." });
         } finally {
@@ -162,7 +164,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
 
     return (
         <div className="space-y-6">
-            
+
             {/* Toolbar */}
             <div className="flex justify-end">
                 <Button onClick={() => setIsAddModalOpen(true)} variant="secondary" className="flex items-center gap-2 text-xs py-2">
@@ -174,7 +176,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                 <div className="p-4 border-b border-gray-100 flex items-center gap-2 font-bold text-gray-800">
                     <Grid size={18} className="text-[#4285f4]" /> Customize Layout
                 </div>
-                
+
                 <div className="divide-y divide-gray-50">
                     {appList.map((app, index) => {
                         const isEnabled = selectedIds.includes(app.id);
@@ -193,7 +195,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                                     <div className={`p-2 rounded-lg ${isEnabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
                                         <IconComponent size={18} />
                                     </div>
-                                    
+
                                     <div>
                                         <p className={`text-sm font-medium ${isEnabled ? 'text-gray-800' : 'text-gray-400'}`}>
                                             {app.name}
@@ -212,7 +214,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                                             <Trash2 size={16} />
                                         </button>
                                     )}
-                                    
+
                                     {!isSystem && (
                                         <button onClick={() => toggleApp(app.id)} className={`transition-colors ${isEnabled ? 'text-[#4285f4]' : 'text-gray-300'}`}>
                                             {isEnabled ? <ToggleRight size={28} fill="currentColor" /> : <ToggleLeft size={28} />}
@@ -232,7 +234,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                 <form onSubmit={handleAddExternalApp} className="flex flex-col gap-4">
                     <Input name="name" label="App Name" placeholder="e.g. Google Drive" autoFocus required />
                     <Input name="url" label="URL" placeholder="https://drive.google.com" type="url" required />
-                    
+
                     {/* App Type / Icon Selector */}
                     <div className="flex flex-col gap-2">
                         <label className="text-xs font-bold text-gray-500 uppercase">App Type</label>

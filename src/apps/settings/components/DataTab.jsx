@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Download, Upload, Trash2, AlertTriangle, Database } from 'lucide-react';
-import { Button } from '../../components/ui';
-import { exportUserData, importUserData, wipeAllUserData } from '../../services/settings';
+import { Button } from '../../../components/ui';
+import { exportUserData, importUserData, wipeAllUserData } from '../../../services/settings';
 
 const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     const fileInputRef = useRef(null);
@@ -11,16 +11,16 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
         try {
             const collections = singleApp ? [singleApp] : undefined; // Default is all
             const data = await exportUserData(user.uid, cryptoKey, collections);
-            
+
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `sanctum_backup_${singleApp || 'full'}_${new Date().toISOString().slice(0,10)}.json`;
+            a.download = `sanctum_backup_${singleApp || 'full'}_${new Date().toISOString().slice(0, 10)}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            
+
             setMessage({ type: 'success', text: "Export successful." });
         } catch (e) {
             console.error(e);
@@ -32,8 +32,8 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
 
     const handleImport = (e) => {
         const file = e.target.files?.[0];
-        if(!file) return;
-        
+        if (!file) return;
+
         const reader = new FileReader();
         reader.onload = async (event) => {
             setLoading(true);
