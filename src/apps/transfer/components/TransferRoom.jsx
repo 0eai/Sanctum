@@ -24,6 +24,16 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const [incomingMeta, setIncomingMeta] = useState(null);
     const [isReceiving, setIsReceiving] = useState(false);
 
+    // Transfer Log
+    const [logs, setLogs] = useState([]);
+    const logEndRef = useRef(null);
+
+    const addLog = (message, type = 'info') => {
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLogs(prev => [...prev, { time, message, type }]);
+        setTimeout(() => logEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    };
+
     // WebRTC & Transfer Refs
     const pcRef = useRef(null);
     const channelRef = useRef(null);
@@ -76,6 +86,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                         setIsConnected(true);
                         setStatus('Connected securely!');
+                        addLog('Devices connected securely via WebRTC.', 'success');
                         // Delay cleanup by 5s so the peer finishes processing ICE candidates
                         if (!roomCleanedUpRef.current) {
                             roomCleanedUpRef.current = true;
@@ -84,6 +95,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                         setIsConnected(false);
                         setStatus('Connection lost.');
+                        addLog('Connection lost or peer disconnected.', 'error');
                         releaseWakeLock();
                         if (fsWritableRef.current) { fsWritableRef.current.abort(); fsWritableRef.current = null; } // Cancel stream if dropped
                     }
@@ -197,6 +209,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     receiveBufferRef.current = [];
                     chunksReceived = 0;
                     setStatus(`Receiving: ${msg.name}`);
+                    addLog(`Receiving: ${msg.name} (${formatBytes(msg.size)})`, 'info');
                     requestWakeLock();
 
                     if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
@@ -229,6 +242,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         if (fsWritableRef.current) {
                             await fsWritableRef.current.close();
                             fsWritableRef.current = null;
+                            addLog(`Saved: ${meta?.name} via File System API.`, 'success');
                         } else {
                             const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
                             const downloadUrl = URL.createObjectURL(blob);
@@ -240,6 +254,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                             a.click();
                             setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(downloadUrl); }, 250);
                             receiveBufferRef.current = [];
+                            addLog(`Downloaded: ${meta?.name}.`, 'success');
                         }
                         setProgress(100);
                         setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
@@ -249,6 +264,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     writeQueueRef.current = writeQueueRef.current.then(() => {
                         setIsReceiving(false);
                         setStatus('All files received! Disconnecting...');
+                        addLog('All files received.', 'success');
                         releaseWakeLock();
                         setTimeout(() => onLeave(), 2500);
                     });
@@ -303,6 +319,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             setStatus(`Sending file ${i + 1} of ${filesToSend.length}...`);
 
             channel.send(JSON.stringify({ type: 'meta', name: file.name, size: file.size, mimeType: file.type }));
+            addLog(`Sending: ${file.name} (${formatBytes(file.size)})`, 'info');
 
             let offset = 0;
             let chunksSent = 0;
@@ -330,12 +347,14 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             }
 
             channel.send(JSON.stringify({ type: 'eof' }));
+            addLog(`Sent: ${file.name}.`, 'success');
             await new Promise(res => setTimeout(res, 500));
         }
 
         channel.send(JSON.stringify({ type: 'done_all' }));
         setIsSending(false);
         setStatus('All files sent! Disconnecting...');
+        addLog('All files sent.', 'success');
 
         releaseWakeLock();
         setTimeout(() => onLeave(), 2500);
@@ -462,6 +481,30 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
                 </div>
             </main>
+
+            {/* Transfer Log */}
+            {logs.length > 0 && (
+                <div className="flex-none border-t border-gray-200 bg-gray-900 text-gray-300 font-mono text-xs">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
+                            <span className="text-gray-400 font-bold uppercase tracking-wider text-[10px]">Transfer Log</span>
+                            <button onClick={() => setLogs([])} className="text-gray-500 hover:text-gray-300 text-[10px] transition-colors">Clear</button>
+                        </div>
+                        <div className="overflow-y-auto max-h-36 px-4 py-2 flex flex-col gap-1">
+                            {logs.map((log, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                    <span className="text-gray-500 flex-shrink-0">{log.time}</span>
+                                    <span className={`flex-shrink-0 ${log.type === 'success' ? 'text-green-400' : log.type === 'error' ? 'text-red-400' : 'text-blue-400'}`}>
+                                        {log.type === 'success' ? '✓' : log.type === 'error' ? '✗' : '›'}
+                                    </span>
+                                    <span className={log.type === 'error' ? 'text-red-300' : 'text-gray-300'}>{log.message}</span>
+                                </div>
+                            ))}
+                            <div ref={logEndRef} />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
