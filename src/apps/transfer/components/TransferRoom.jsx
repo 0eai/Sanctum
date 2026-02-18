@@ -1,27 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, File, CheckCircle2, Loader2, UploadCloud, HardDrive } from 'lucide-react';
-import streamSaver from 'streamsaver'; 
+import streamSaver from 'streamsaver';
 import { Button } from '../../../components/ui';
 import { formatBytes } from '../../../lib/fileUtils';
-import { 
-    rtcConfiguration, setRoomData, getRoomData, listenToRoom, 
-    addIceCandidate, listenToIceCandidates, cleanupRoom 
+import {
+    rtcConfiguration, setRoomData, getRoomData, listenToRoom,
+    addIceCandidate, listenToIceCandidates, cleanupRoom
 } from '../../../services/transfer';
 
 streamSaver.mitm = '/mitm.html';
 // 50MB Threshold: Files larger than this will bypass RAM and stream to disk
-const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; 
+const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
 
 const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const [status, setStatus] = useState('Initializing...');
     const [progress, setProgress] = useState(0);
     const [isConnected, setIsConnected] = useState(false);
-    
+
     // Sender States
     const [filesToSend, setFilesToSend] = useState([]);
     const [currentFileIndex, setCurrentFileIndex] = useState(0);
     const [isSending, setIsSending] = useState(false);
-    
+
     // Receiver States
     const [incomingMeta, setIncomingMeta] = useState(null);
     const [isReceiving, setIsReceiving] = useState(false);
@@ -33,9 +33,12 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const receivedBytesRef = useRef(0);
     const incomingMetaRef = useRef(null);
     const wakeLockRef = useRef(null);
-    
-    // <--- NEW: Writer Ref for StreamSaver --->
-    const writerRef = useRef(null); 
+
+    // StreamSaver writer ref and write-promise chain ref (for backpressure)
+    const streamWriterRef = useRef(null);
+    const writePromiseRef = useRef(Promise.resolve());
+    // Guard to prevent double-calling cleanupRoom
+    const roomCleanedUpRef = useRef(false);
 
     // --- WAKE LOCK LOGIC ---
     const requestWakeLock = async () => {
@@ -43,7 +46,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             if ('wakeLock' in navigator) {
                 wakeLockRef.current = await navigator.wakeLock.request('screen');
             }
-        } catch (err) {}
+        } catch (err) { }
     };
 
     const releaseWakeLock = () => {
@@ -72,12 +75,16 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                         setIsConnected(true);
                         setStatus('Connected securely!');
-                        cleanupRoom(user.uid, roomId); 
+                        // Delay cleanup by 5s so the peer finishes processing ICE candidates
+                        if (!roomCleanedUpRef.current) {
+                            roomCleanedUpRef.current = true;
+                            setTimeout(() => cleanupRoom(user.uid, roomId), 5000);
+                        }
                     } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                         setIsConnected(false);
                         setStatus('Connection lost.');
-                        releaseWakeLock(); 
-                        if (writerRef.current) writerRef.current.abort(); // Cancel stream if dropped
+                        releaseWakeLock();
+                        if (streamWriterRef.current) streamWriterRef.current.abort(); // Cancel stream if dropped
                     }
                 };
 
@@ -143,7 +150,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             if (roomUnsub) roomUnsub();
             if (iceUnsub) iceUnsub();
             if (pcRef.current) pcRef.current.close();
-            cleanupRoom(user.uid, roomId); 
+            // Only cleanup if not already done on connect
+            if (!roomCleanedUpRef.current) cleanupRoom(user.uid, roomId);
         };
     }, [roomId, mode, user]);
 
@@ -151,84 +159,92 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const setupDataChannel = (channel) => {
         channelRef.current = channel;
         channel.binaryType = 'arraybuffer';
-        
+        // Fix Issue 3: set threshold so onbufferedamountlow fires before buffer is fully empty
+        channel.bufferedAmountLowThreshold = 65535;
+
         channel.onmessage = (event) => {
             if (typeof event.data === 'string') {
                 const msg = JSON.parse(event.data);
-                
+
                 if (msg.type === 'meta') {
-                    setIncomingMeta(msg); 
-                    incomingMetaRef.current = msg; 
-                    
+                    setIncomingMeta(msg);
+                    incomingMetaRef.current = msg;
+
                     setIsReceiving(true);
                     setProgress(0);
                     receivedBytesRef.current = 0;
                     receiveBufferRef.current = [];
                     setStatus(`Receiving: ${msg.name}`);
-                    requestWakeLock(); 
+                    requestWakeLock();
 
-                    // <--- HYBRID ROUTING LOGIC --->
+                    // HYBRID ROUTING LOGIC
                     if (msg.size > LARGE_FILE_THRESHOLD) {
                         // For large files, setup StreamSaver to pipe directly to disk
-                        console.log(`File is > 50MB. Streaming directly to disk via StreamSaver...`);
-                        const fileStream = streamSaver.createWriteStream(msg.name, {
-                            size: msg.size
-                        });
-                        writerRef.current = fileStream.getWriter();
+                        console.log(`File is >50MB. Streaming directly to disk via StreamSaver...`);
+                        const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
+                        streamWriterRef.current = fileStream.getWriter();
+                        writePromiseRef.current = Promise.resolve(); // Reset promise chain
                     } else {
                         // For small files, stick to RAM arrays for instant saving
-                        console.log(`File is < 50MB. Using RAM buffer...`);
-                        writerRef.current = null; 
+                        console.log(`File is <50MB. Using RAM buffer...`);
+                        streamWriterRef.current = null;
                     }
-                    
+
                 } else if (msg.type === 'eof') {
-                    const meta = incomingMetaRef.current; 
-                    
-                    if (writerRef.current) {
-                        // CLOSE STREAM SAVER
-                        writerRef.current.close();
-                        writerRef.current = null;
+                    const meta = incomingMetaRef.current;
+
+                    if (streamWriterRef.current) {
+                        // Wait for all queued writes to flush before closing (backpressure)
+                        writePromiseRef.current.then(() => {
+                            streamWriterRef.current.close();
+                            streamWriterRef.current = null;
+                        });
                     } else {
                         // STANDARD BLOB DOWNLOAD
                         const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
                         const downloadUrl = URL.createObjectURL(blob);
-                        
+
                         const a = document.createElement('a');
                         a.style.display = 'none';
                         a.href = downloadUrl;
                         a.download = meta?.name || 'shared_file';
-                        
+
                         document.body.appendChild(a);
                         a.click();
-                        
+
                         setTimeout(() => {
                             document.body.removeChild(a);
                             URL.revokeObjectURL(downloadUrl);
                         }, 250);
-                        
+
                         receiveBufferRef.current = [];
                     }
-                    
+
                     setProgress(100);
-                    
+                    // Fix Issue 6: reset receiver UI between files in a multi-file transfer
+                    setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
+
                 } else if (msg.type === 'done_all') {
                     setIsReceiving(false);
                     setStatus('All files received! Disconnecting...');
-                    releaseWakeLock(); 
+                    releaseWakeLock();
                     setTimeout(() => onLeave(), 2500);
                 }
             } else {
                 // --- INCOMING FILE CHUNK ---
-                if (writerRef.current) {
-                    // Pipe chunk to StreamSaver (must convert ArrayBuffer to Uint8Array)
-                    writerRef.current.write(new Uint8Array(event.data));
+                if (streamWriterRef.current) {
+                    // Chain writes to enforce backpressure — write() returns a Promise
+                    const chunk = new Uint8Array(event.data);
+                    writePromiseRef.current = writePromiseRef.current.then(() =>
+                        streamWriterRef.current?.write(chunk)
+                    );
                 } else {
                     // Push chunk to RAM buffer
                     receiveBufferRef.current.push(event.data);
                 }
 
                 receivedBytesRef.current += event.data.byteLength;
-                
+
                 const meta = incomingMetaRef.current;
                 if (meta?.size) {
                     const currentProgress = Math.round((receivedBytesRef.current / meta.size) * 100);
@@ -243,9 +259,9 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
         if (filesToSend.length === 0 || !channelRef.current) return;
 
         setIsSending(true);
-        await requestWakeLock(); 
+        await requestWakeLock();
         const channel = channelRef.current;
-        const CHUNK_SIZE = 16384; 
+        const CHUNK_SIZE = 16384;
 
         const readSlice = (file, o) => {
             return new Promise((resolve, reject) => {
@@ -263,11 +279,11 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             setProgress(0);
             setStatus(`Sending file ${i + 1} of ${filesToSend.length}...`);
 
-            channel.send(JSON.stringify({ 
-                type: 'meta', 
-                name: file.name, 
-                size: file.size, 
-                mimeType: file.type 
+            channel.send(JSON.stringify({
+                type: 'meta',
+                name: file.name,
+                size: file.size,
+                mimeType: file.type
             }));
 
             let offset = 0;
@@ -281,11 +297,11 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         };
                     });
                 }
-                
+
                 const buffer = await readSlice(file, offset);
                 channel.send(buffer);
                 offset += buffer.byteLength;
-                
+
                 setProgress(Math.round((offset / file.size) * 100));
             }
 
@@ -296,8 +312,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
         channel.send(JSON.stringify({ type: 'done_all' }));
         setIsSending(false);
         setStatus('All files sent! Disconnecting...');
-        
-        releaseWakeLock(); 
+
+        releaseWakeLock();
         setTimeout(() => onLeave(), 2500);
     };
 
@@ -320,7 +336,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
             <main className="flex-1 overflow-y-auto p-4 flex flex-col items-center py-10">
                 <div className="max-w-md w-full bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center text-center gap-6">
-                    
+
                     <div className="flex flex-col items-center gap-3 mb-2">
                         {isConnected ? (
                             <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center animate-in zoom-in">
@@ -350,14 +366,14 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                                         <UploadCloud size={32} className="text-gray-400 group-hover:text-[#4285f4]" />
                                         <div className="text-sm font-bold text-gray-700">Select files to send</div>
                                         <div className="text-xs text-gray-400">Any file type, any size</div>
-                                        <input 
-                                            type="file" 
+                                        <input
+                                            type="file"
                                             multiple
-                                            className="hidden" 
-                                            onChange={(e) => setFilesToSend(Array.from(e.target.files))} 
+                                            className="hidden"
+                                            onChange={(e) => setFilesToSend(Array.from(e.target.files))}
                                         />
                                     </label>
-                                    
+
                                     {filesToSend.length > 0 && (
                                         <div className="flex flex-col gap-3">
                                             <div className="bg-gray-50 p-3 rounded-xl flex items-center gap-3 text-left">

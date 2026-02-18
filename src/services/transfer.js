@@ -1,5 +1,5 @@
 // src/services/transfer.js
-import { doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
 
 export const rtcConfiguration = {
@@ -41,7 +41,7 @@ export const getDeviceName = () => {
 
 export const registerDevice = async (uid, deviceId, deviceName) => {
     const ref = doc(db, 'artifacts', appId, 'users', uid, 'transfer_devices', deviceId);
-    await setDoc(ref, { deviceName, lastActive: Date.now(), incomingRoomId: null }, { merge: true });
+    await setDoc(ref, { deviceName, lastActive: serverTimestamp(), incomingRoomId: null }, { merge: true });
 };
 
 export const unregisterDevice = async (uid, deviceId) => {
@@ -56,8 +56,10 @@ export const listenToActiveDevices = (uid, myDeviceId, callback) => {
         const devices = [];
         snap.forEach(d => {
             const data = d.data();
+            // Use .toMillis() to handle Firestore Timestamp; fall back to 0 if missing
+            const lastActiveMs = data.lastActive?.toMillis?.() ?? 0;
             // Filter out self and any device that hasn't pinged in the last 2 minutes
-            if (d.id !== myDeviceId && (now - data.lastActive < 120000)) {
+            if (d.id !== myDeviceId && (now - lastActiveMs < 120000)) {
                 devices.push({ id: d.id, ...data });
             }
         });
@@ -124,7 +126,7 @@ export const cleanupRoom = async (uid, roomId) => {
         const roomRef = doc(db, 'artifacts', appId, 'users', uid, 'transfers', roomId);
         const callerQuery = await getDocs(collection(roomRef, 'callerCandidates'));
         callerQuery.forEach(d => deleteDoc(d.ref));
-        
+
         const calleeQuery = await getDocs(collection(roomRef, 'calleeCandidates'));
         calleeQuery.forEach(d => deleteDoc(d.ref));
 
