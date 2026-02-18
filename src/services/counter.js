@@ -1,7 +1,7 @@
 // src/services/counter.js
 import {
     collection, query, orderBy, onSnapshot, addDoc, serverTimestamp,
-    updateDoc, setDoc, doc, deleteDoc, increment, getDocs
+    updateDoc, setDoc, doc, deleteDoc, increment, getDocs, writeBatch
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
 import { encryptData, decryptData } from '../lib/crypto';
@@ -10,7 +10,10 @@ import { getNextDate } from '../lib/dateUtils';
 // --- Listeners ---
 
 export const listenToCounters = (userId, cryptoKey, callback) => {
-    const q = query(collection(db, 'artifacts', appId, 'users', userId, 'counters'), orderBy('createdAt', 'desc'));
+    const q = query(
+        collection(db, 'artifacts', appId, 'users', userId, 'counters'),
+        orderBy('createdAt', 'desc')
+    );
     return onSnapshot(q, async (snapshot) => {
         const data = await Promise.all(snapshot.docs.map(async doc => {
             const raw = doc.data();
@@ -23,6 +26,14 @@ export const listenToCounters = (userId, cryptoKey, callback) => {
                 repeat: raw.repeat || decrypted.repeat || 'none'
             };
         }));
+
+        data.sort((a, b) => {
+            const orderA = a.order ?? 0;
+            const orderB = b.order ?? 0;
+            if (orderA !== orderB) return orderA - orderB;
+            return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+        });
+
         callback(data);
     });
 };
@@ -59,7 +70,9 @@ export const saveCounter = async (userId, cryptoKey, data, counterId = null) => 
         await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'counters', counterId), payload, { merge: true });
     } else {
         await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'counters'), {
-            ...payload, count: 0, createdAt: serverTimestamp()
+            ...payload, count: 0,
+            createdAt: serverTimestamp(),
+            order: Date.now()
         });
     }
 };
@@ -128,6 +141,57 @@ export const deleteCounterEntity = async (userId, counterId, entryId = null) => 
     } else {
         await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'counters', counterId));
     }
+};
+
+export const reorderCounter = async (userId, counterId, direction, allCounters) => {
+    const index = allCounters.findIndex(c => c.id === counterId);
+    if (index === -1) return;
+
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= allCounters.length) return;
+
+    const batch = writeBatch(db);
+
+    // Check if we need to initialize orders for the whole list
+    // This happens if the two swapped items have the same order (e.g. 0), 
+    // or if we suspect the list isn't fully ordered by 'order' field yet.
+    const itemA = allCounters[index];
+    const itemB = allCounters[targetIndex];
+
+    const needsInitialization = (itemA.order || 0) === (itemB.order || 0);
+
+    if (needsInitialization) {
+        // Full re-index based on current visual sort
+        // We assign spaced out order values to allow future inserts
+        const BASE_SPACING = 10000;
+
+        allCounters.forEach((item, idx) => {
+            let newOrder = idx * BASE_SPACING;
+
+            // Apply the swap logic locally during this iteration
+            if (idx === index) newOrder = targetIndex * BASE_SPACING;
+            else if (idx === targetIndex) newOrder = index * BASE_SPACING;
+
+            // Only update if the order has effectively changed or if it was missing
+            if (item.order !== newOrder) {
+                const ref = doc(db, 'artifacts', appId, 'users', userId, 'counters', item.id);
+                batch.update(ref, { order: newOrder });
+            }
+        });
+    } else {
+        // Optimized swap for already ordered lists
+        const orderA = itemA.order;
+        const orderB = itemB.order;
+
+        // Simple Swap
+        const refA = doc(db, 'artifacts', appId, 'users', userId, 'counters', itemA.id);
+        const refB = doc(db, 'artifacts', appId, 'users', userId, 'counters', itemB.id);
+
+        batch.update(refA, { order: orderB });
+        batch.update(refB, { order: orderA });
+    }
+
+    await batch.commit();
 };
 
 export const exportCounterData = async (userId, counter, cryptoKey) => {

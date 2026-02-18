@@ -1,10 +1,10 @@
 // src/apps/counter/Counter.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Download, Upload, AlertCircle } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, deleteDoc, getDocs } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { Plus, AlertCircle } from 'lucide-react';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../lib/firebase';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
-import { encryptData, decryptData } from '../../lib/crypto';
+import { encryptData } from '../../lib/crypto';
 
 // Sub-components
 import CounterHeader from './components/CounterHeader';
@@ -18,8 +18,9 @@ import ImportExportModal from '../../components/ui/ImportExportModal';
 
 // Services
 import {
+  listenToCounters, listenToEntries, // <-- ADDED THESE LISTENERS
   saveCounter, saveEntry, deleteCounterEntity, startTimer, stopTimer,
-  exportAllCounters, importCounters
+  exportAllCounters, importCounters, reorderCounter
 } from '../../services/counter';
 
 // --- Helpers ---
@@ -36,7 +37,6 @@ const getNextDate = (currentDateStr, frequency) => {
   return date.toISOString();
 };
 
-// FIXED: Accept route and navigate from props
 export default function CounterApp({ user, cryptoKey, onExit, route, navigate }) {
   const [counters, setCounters] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -68,10 +68,8 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   const selectedCounter = selectedCounterId ? counters.find(c => c.id === selectedCounterId) : null;
 
   // We use this for the editor. If we are editing an existing counter, pass the data.
-  // If we are creating a new one (id === 'new'), pass null.
   const editingCounterData = view === 'editor' && selectedCounterId ? selectedCounter : null;
 
-  // Legacy URL Fallback: Redirect old `?openId=123` links to the new detail view
   useEffect(() => {
     if (route.query?.openId) {
       window.location.replace(
@@ -80,52 +78,28 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
     }
   }, [route]);
 
-  // --- 2. Data Listeners ---
+  // --- 2. Data Listeners (FIXED) ---
+  
+  // Use the service listener so the custom 'order' property is respected!
   useEffect(() => {
     if (!user || !cryptoKey) return;
     setLoading(true);
-    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'counters'), orderBy('createdAt', 'desc'));
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const data = await Promise.all(snapshot.docs.map(async doc => {
-        const raw = doc.data();
-        const decrypted = await decryptData(raw, cryptoKey);
-        return {
-          id: doc.id,
-          ...raw,
-          ...decrypted,
-          dueDate: raw.dueDate || decrypted.dueDate || null,
-          repeat: raw.repeat || decrypted.repeat || 'none'
-        };
-      }));
-      setCounters(data);
-      setLoading(false);
-    }, (error) => { console.error("Error fetching counters:", error); setLoading(false); });
+    
+    const unsubscribe = listenToCounters(user.uid, cryptoKey, (data) => {
+        setCounters(data);
+        setLoading(false);
+    });
+    
     return () => unsubscribe();
   }, [user, cryptoKey]);
 
   useEffect(() => {
     if (!user || !selectedCounter || !cryptoKey || view !== 'detail') return;
 
-    const q = query(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id, 'entries'),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const data = await Promise.all(snapshot.docs.map(async doc => {
-        const d = doc.data();
-        const decryptedData = await decryptData(d, cryptoKey);
-        return {
-          id: doc.id,
-          ...decryptedData,
-          timestamp: d.timestamp && typeof d.timestamp.toDate === 'function' ? d.timestamp.toDate() : null,
-          endTimestamp: d.endTimestamp && typeof d.endTimestamp.toDate === 'function' ? d.endTimestamp.toDate() : null,
-          createdAt: d.createdAt && typeof d.createdAt.toDate === 'function' ? d.createdAt.toDate() : null
-        };
-      }));
-      setEntries(data);
-    }, (error) => console.error("Error fetching entries:", error));
+    const unsubscribe = listenToEntries(user.uid, selectedCounter.id, cryptoKey, (data) => {
+        setEntries(data);
+    });
+    
     return () => unsubscribe();
   }, [user, selectedCounter, cryptoKey, view]);
 
@@ -163,7 +137,6 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
     const title = e.target.title.value;
     if (!title) return;
 
-    // Use selectedCounterId here in case we are editing an existing one
     const savedId = await saveCounter(user.uid, cryptoKey, {
       title,
       mode: e.target.mode.value,
@@ -174,7 +147,6 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       repeat: rFreq || 'none'
     }, selectedCounterId);
 
-    // After saving, route back to the detail view of that counter
     navigate(`#counter/view/${savedId}`);
   };
 
@@ -203,7 +175,6 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
 
-    // Always use the parent counter's ID; only pass entryId when deleting an entry
     const counterId = selectedCounter?.id;
     const entryId = deleteConfirmation.type === 'entry' ? deleteConfirmation.id : null;
 
@@ -215,6 +186,15 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
     setDeleteConfirmation(null);
     if (viewingEntry) setViewingEntry(null);
+  };
+
+  const handleReorderCounter = async (counterId, direction) => {
+    try {
+      await reorderCounter(user.uid, counterId, direction, counters);
+    } catch (e) {
+      console.error("Reorder failed:", e);
+      alert("Failed to reorder: " + e.message);
+    }
   };
 
   // --- Export / Import Handlers ---
@@ -276,10 +256,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
 
   // --- RENDER LOGIC ---
 
-  // Handle loading state gracefully, particularly if we navigated directly to a detail view
-  // but the counters haven't loaded yet.
   if (view === 'detail' && !selectedCounter && !loading) {
-    // If the counter doesn't exist (deleted or bad link), drop them back to list.
     navigate('#counter');
     return null;
   }
@@ -321,6 +298,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
               loading={loading}
               onOpen={handleOpenCounter}
               onCreate={() => handleOpenEditor(null)}
+              onReorder={handleReorderCounter}
             />
           ) : (
             <CounterDetail
