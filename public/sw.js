@@ -96,8 +96,7 @@ self.onfetch = event => {
     'Content-Security-Policy': "default-src 'none'",
     'X-Content-Security-Policy': "default-src 'none'",
     'X-WebKit-CSP': "default-src 'none'",
-    'X-XSS-Protection': '1; mode=block',
-    'Cross-Origin-Embedder-Policy': 'require-corp'
+    'X-XSS-Protection': '1; mode=block'
   })
 
   let headers = new Headers(data.headers || {})

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, File, CheckCircle2, Loader2, UploadCloud, HardDrive } from 'lucide-react';
+import streamSaver from 'streamsaver';
 import { Button } from '../../../components/ui';
 import { formatBytes } from '../../../lib/fileUtils';
 import {
@@ -7,7 +8,8 @@ import {
     addIceCandidate, listenToIceCandidates, cleanupRoom
 } from '../../../services/transfer';
 
-// 50MB Threshold: Files larger than this use the File System Access API to stream to disk
+streamSaver.mitm = '/mitm.html';
+// 50MB threshold: files larger than this stream to disk instead of RAM
 const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
 
 const TransferRoom = ({ user, roomId, mode, onLeave }) => {
@@ -42,19 +44,17 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const incomingMetaRef = useRef(null);
     const wakeLockRef = useRef(null);
 
-    // File System Access API writable ref (for large file streaming)
-    const fsWritableRef = useRef(null);
-    // TransformStream controller ref (for streaming large files on Safari)
-    const streamControllerRef = useRef(null);
-    // Sequential write queue — ensures disk writes are ordered without blocking onmessage
+    // Large file streaming writer (StreamSaver or File System Access API)
+    const streamWriterRef = useRef(null);
+    // Sequential write queue for File System Access API path
     const writeQueueRef = useRef(Promise.resolve());
     // ACK flow control: sender waits for ack from receiver every N chunks
     const ackResolverRef = useRef(null);
     // Guard to prevent double-calling cleanupRoom
     const roomCleanedUpRef = useRef(false);
 
-    // Whether the current large file is using TransformStream (vs RAM buffer)
-    const usingStreamRef = useRef(false);
+    // Track which streaming method is active: 'fsa' | 'streamsaver' | 'ram'
+    const streamModeRef = useRef('ram');
 
     // --- WAKE LOCK LOGIC ---
     const requestWakeLock = async () => {
@@ -102,7 +102,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         setStatus('Connection lost.');
                         addLog('Connection lost or peer disconnected.', 'error');
                         releaseWakeLock();
-                        if (fsWritableRef.current) { fsWritableRef.current.abort(); fsWritableRef.current = null; } // Cancel stream if dropped
+                        if (streamWriterRef.current) { try { streamWriterRef.current.abort(); } catch (e) { } streamWriterRef.current = null; } // Cancel stream if dropped
                     }
                 };
 
@@ -218,42 +218,30 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     requestWakeLock();
 
                     if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
-                        // Chrome/Edge: File System Access API — true streaming to disk
-                        usingStreamRef.current = false;
+                        // Chrome/Edge: File System Access API — true streaming to disk, no SW needed
+                        streamModeRef.current = 'fsa';
                         writeQueueRef.current = writeQueueRef.current.then(async () => {
                             try {
                                 const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
-                                fsWritableRef.current = await fileHandle.createWritable();
+                                streamWriterRef.current = await fileHandle.createWritable();
                             } catch (err) {
-                                console.warn('showSaveFilePicker cancelled, falling back to stream.', err);
-                                fsWritableRef.current = null;
+                                // User cancelled — fall back to StreamSaver
+                                console.warn('showSaveFilePicker cancelled, falling back to StreamSaver.', err);
+                                streamModeRef.current = 'streamsaver';
+                                const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
+                                streamWriterRef.current = fileStream.getWriter();
                             }
                         });
-                    } else if (msg.size > LARGE_FILE_THRESHOLD && typeof TransformStream !== 'undefined') {
-                        // Safari/Firefox: TransformStream → Response → Blob URL streaming
-                        // The browser downloads chunk-by-chunk without holding the whole file in RAM.
-                        usingStreamRef.current = true;
-                        fsWritableRef.current = null;
+                    } else if (msg.size > LARGE_FILE_THRESHOLD) {
+                        // Safari/Firefox: StreamSaver (service worker based streaming to disk)
+                        streamModeRef.current = 'streamsaver';
                         writeQueueRef.current = Promise.resolve();
-
-                        const ts = new TransformStream();
-                        streamControllerRef.current = ts.writable.getWriter();
-
-                        // Kick off the download immediately — browser will stream as chunks arrive
-                        new Response(ts.readable).blob().then(blob => {
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.style.display = 'none';
-                            a.href = url;
-                            a.download = msg.name;
-                            document.body.appendChild(a);
-                            a.click();
-                            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
-                        });
+                        const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
+                        streamWriterRef.current = fileStream.getWriter();
                     } else {
-                        // Small files or fallback: RAM buffer
-                        usingStreamRef.current = false;
-                        fsWritableRef.current = null;
+                        // Small files: RAM buffer
+                        streamModeRef.current = 'ram';
+                        streamWriterRef.current = null;
                         writeQueueRef.current = Promise.resolve();
                     }
 
@@ -268,19 +256,14 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     const meta = incomingMetaRef.current;
 
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (fsWritableRef.current) {
-                            // File System Access API path
-                            await fsWritableRef.current.close();
-                            fsWritableRef.current = null;
-                            addLog(`Saved: ${meta?.name} via File System API.`, 'success');
-                        } else if (usingStreamRef.current && streamControllerRef.current) {
-                            // TransformStream path — close the writer; the Response.blob() resolves
-                            await streamControllerRef.current.close();
-                            streamControllerRef.current = null;
-                            usingStreamRef.current = false;
-                            addLog(`Downloaded: ${meta?.name} (streamed).`, 'success');
+                        if (streamWriterRef.current) {
+                            // Close the streaming writer (FSA or StreamSaver)
+                            await streamWriterRef.current.close();
+                            streamWriterRef.current = null;
+                            const label = streamModeRef.current === 'fsa' ? 'via File System API' : 'via StreamSaver';
+                            addLog(`Saved: ${meta?.name} ${label}.`, 'success');
                         } else {
-                            // RAM buffer path
+                            // RAM buffer — create Blob and trigger download
                             const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
                             const downloadUrl = URL.createObjectURL(blob);
                             const a = document.createElement('a');
@@ -310,18 +293,17 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 // --- INCOMING FILE CHUNK ---
                 const data = event.data;
 
-                if (usingStreamRef.current && streamControllerRef.current) {
-                    // TransformStream path: enqueue synchronously (no RAM accumulation)
-                    streamControllerRef.current.write(new Uint8Array(data));
-                } else {
-                    // File System Access or RAM buffer path: queue the write
+                if (streamModeRef.current === 'streamsaver' && streamWriterRef.current) {
+                    // StreamSaver: write synchronously (the writer handles backpressure internally)
+                    streamWriterRef.current.write(new Uint8Array(data));
+                } else if (streamModeRef.current === 'fsa') {
+                    // File System Access API: queue writes to maintain order
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (fsWritableRef.current) {
-                            await fsWritableRef.current.write(data);
-                        } else {
-                            receiveBufferRef.current.push(data);
-                        }
+                        if (streamWriterRef.current) await streamWriterRef.current.write(data);
                     });
+                } else {
+                    // RAM buffer
+                    receiveBufferRef.current.push(data);
                 }
 
                 receivedBytesRef.current += event.data.byteLength;
