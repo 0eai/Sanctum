@@ -372,26 +372,41 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 const data = event.data;
 
                 if (streamModeRef.current === 'streamsaver' && streamWriterRef.current) {
-                    // StreamSaver: write synchronously (the writer handles backpressure internally)
+                    // StreamSaver: write synchronously
                     streamWriterRef.current.write(new Uint8Array(data));
+
+                    receivedBytesRef.current += event.data.byteLength;
+                    chunksReceived++;
+                    if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
+
                 } else if (streamModeRef.current === 'fsa' || streamModeRef.current === 'opfs') {
-                    // File System Access API / OPFS: queue writes to maintain order
+                    // Async Disk Write (OPFS/FSA): Send ACK *after* write completes to enforce backpressure
                     writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (streamWriterRef.current) await streamWriterRef.current.write(data);
+                        if (streamWriterRef.current) {
+                            await streamWriterRef.current.write(data);
+
+                            receivedBytesRef.current += event.data.byteLength;
+                            chunksReceived++;
+                            if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
+
+                            if (incomingMetaRef.current?.size) {
+                                setProgress(Math.round((receivedBytesRef.current / incomingMetaRef.current.size) * 100));
+                            }
+                        }
                     });
                 } else {
                     // RAM buffer
                     receiveBufferRef.current.push(data);
+
+                    receivedBytesRef.current += event.data.byteLength;
+                    chunksReceived++;
+                    if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
                 }
 
-                receivedBytesRef.current += event.data.byteLength;
-                const meta = incomingMetaRef.current;
-                if (meta?.size) setProgress(Math.round((receivedBytesRef.current / meta.size) * 100));
-
-                // ACK flow control: tell sender it can send more
-                chunksReceived++;
-                if (chunksReceived % ACK_EVERY === 0) {
-                    channel.send(JSON.stringify({ type: 'ack' }));
+                // Update progress for sync paths (Ram/StreamSaver) immediately
+                if (streamModeRef.current !== 'fsa' && streamModeRef.current !== 'opfs') {
+                    const meta = incomingMetaRef.current;
+                    if (meta?.size) setProgress(Math.round((receivedBytesRef.current / meta.size) * 100));
                 }
             }
         };
