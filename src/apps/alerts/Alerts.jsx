@@ -1,19 +1,19 @@
 // src/apps/alerts/Alerts.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  ChevronLeft, Settings, Layers, RefreshCw, CloudOff, AlertCircle, Clock 
+import {
+    ChevronLeft, Settings, Layers, RefreshCw, CloudOff, AlertCircle, Clock
 } from 'lucide-react';
 
-import { LoadingSpinner, Button } from '../../components/ui'; 
+import { LoadingSpinner, Button } from '../../components/ui';
 import { getRelativeTime } from '../../lib/dateUtils';
 import { encryptData } from '../../lib/crypto';
-import { updateDoc, doc } from 'firebase/firestore';
+import { updateDoc, setDoc, doc } from 'firebase/firestore';
 import { db, appId } from '../../lib/firebase';
 
-import { 
-  listenToAlertsData, listenToCalendarEvents, 
-  initializeGoogleClient, createTokenClient, 
-  fetchAndSaveGcalEvents, checkStoredToken, disconnectGoogleCalendar 
+import {
+    listenToAlertsData, listenToCalendarEvents,
+    initializeGoogleClient, createTokenClient,
+    fetchAndSaveGcalEvents, checkStoredToken, disconnectGoogleCalendar
 } from '../../services/alerts';
 
 import AlertCard from './components/AlertCard';
@@ -57,12 +57,12 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     // --- URL-Driven State ---
     // Extract tab from route.resource (e.g., #alerts/today), fallback to 'today'
     const activeTab = TABS.find(t => t.id === route.resource)?.id || 'today';
-    
+
     // Extract modal state from query param (e.g., #alerts/today?modal=settings)
     const isSettingsOpen = route.query?.modal === 'settings';
 
     // Data
-    const [items, setItems] = useState({ tasks: [], notes: [], checklists: [], counters: [], finance: [], markdown: [] }); 
+    const [items, setItems] = useState({ tasks: [], notes: [], checklists: [], counters: [], finance: [], markdown: [] });
     const [calendarEvents, setCalendarEvents] = useState([]);
 
     // Google Auth
@@ -92,7 +92,7 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     // --- Google Calendar Init ---
     useEffect(() => {
         initializeGoogleClient(
-            (type) => { if(type === 'gapi') setGapiInited(true); else setTokenClient(createTokenClient(user.uid, cryptoKey, () => setGcalSignedIn(true))); },
+            (type) => { if (type === 'gapi') setGapiInited(true); else setTokenClient(createTokenClient(user.uid, cryptoKey, () => setGcalSignedIn(true))); },
             (err) => setGcalError(err)
         );
     }, [user, cryptoKey]);
@@ -118,9 +118,9 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     // --- Handlers ---
     const handleConnect = () => { if (tokenClient) tokenClient.requestAccessToken({ prompt: 'consent' }); };
-    const handleDisconnect = async () => { 
-        setGcalSignedIn(false); 
-        await disconnectGoogleCalendar(user.uid); 
+    const handleDisconnect = async () => {
+        setGcalSignedIn(false);
+        await disconnectGoogleCalendar(user.uid);
     };
 
     const handleAddCalendar = (input) => {
@@ -154,45 +154,47 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const handleSnooze = async (item) => {
         const newDate = new Date(item.date);
         newDate.setDate(newDate.getDate() + 1);
-        
+
         let collectionName = 'tasks';
         let dateField = 'dueDate';
-        
+
         if (item.source === 'note') collectionName = 'notes';
-        if (item.source === 'markdown') collectionName = 'markdown'; 
+        if (item.source === 'markdown') collectionName = 'markdown';
         if (item.source === 'checklist') collectionName = 'checklists';
         if (item.source === 'counter') collectionName = 'counters';
         // FIXED: Route snooze logic for Reminders
-        if (item.source === 'reminder') { collectionName = 'reminders'; dateField = 'datetime'; } 
+        if (item.source === 'reminder') { collectionName = 'reminders'; dateField = 'datetime'; }
         if (item.source.startsWith('finance')) { collectionName = 'finance'; dateField = item.source === 'finance_sub' ? 'nextDate' : 'dueDate'; }
 
         const newData = { ...item.original, [dateField]: newDate.toISOString() };
-        
+
         const payload = { ...newData };
         delete payload.id; delete payload.updatedAt; delete payload.createdAt;
         if (item.source === 'task') delete payload.completed;
 
         const encrypted = await encryptData(payload, cryptoKey);
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, item.id), encrypted);
+        // Use setDoc with merge:true instead of updateDoc to avoid 'not-found' errors
+        // when the document ID is stale or the doc was deleted.
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, item.id), encrypted, { merge: true });
     };
 
     const handleNavigate = (item) => {
-        if (item.source === 'calendar') { 
-            window.open(item.link, '_blank'); 
+        if (item.source === 'calendar') {
+            window.open(item.link, '_blank');
         } else {
-            const appMap = { 
-                task: 'tasks', 
-                note: 'notes', 
-                markdown: 'markdown', 
-                checklist: 'checklist', 
-                counter: 'counter', 
-                finance_sub: 'finance', 
+            const appMap = {
+                task: 'tasks',
+                note: 'notes',
+                markdown: 'markdown',
+                checklist: 'checklist',
+                counter: 'counter',
+                finance_sub: 'finance',
                 finance_bill: 'finance',
                 reminder: 'reminders' // <--- Added mapping
             };
-            
+
             const targetApp = appMap[item.source];
-            
+
             if (targetApp === 'markdown' || targetApp === 'notes') {
                 navigate(`#${targetApp}/doc/${item.id}`);
             } else if (targetApp === 'finance') {
@@ -273,7 +275,7 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     {focusItem ? (
                         <div className="rounded-2xl p-4 text-white shadow-md cursor-pointer bg-gradient-to-r from-blue-500 to-blue-600" onClick={() => handleNavigate(focusItem)}>
                             <div className="flex items-center gap-2 text-white/80 text-xs font-bold uppercase tracking-widest mb-1">
-                                {focusItem.date < new Date() ? <AlertCircle size={12} /> : <Clock size={12} />} 
+                                {focusItem.date < new Date() ? <AlertCircle size={12} /> : <Clock size={12} />}
                                 {focusItem.date < new Date() ? 'Overdue' : 'Next Up'}
                             </div>
                             <h2 className="text-lg font-bold truncate leading-tight text-white">{focusItem.title}</h2>
@@ -287,9 +289,9 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
                     <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4 border-b border-gray-100">
                         {TABS.map(tab => (
-                            <button 
-                                key={tab.id} 
-                                onClick={() => navigate(`#alerts/${tab.id}`)} 
+                            <button
+                                key={tab.id}
+                                onClick={() => navigate(`#alerts/${tab.id}`)}
                                 className={`flex-shrink-0 px-4 py-2.5 text-sm font-bold rounded-lg transition-colors relative ${activeTab === tab.id ? 'text-[#4285f4] bg-blue-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
                             >
                                 {tab.label} {totalCounts[tab.id] > 0 && <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${activeTab === tab.id ? 'bg-[#4285f4] text-white' : 'bg-gray-200 text-gray-500'}`}>{totalCounts[tab.id]}</span>}
@@ -299,7 +301,7 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 </div>
             </header>
 
-            <main 
+            <main
                 className="flex-1 overflow-y-auto scroll-smooth p-4 bg-gray-50"
                 onTouchStart={e => { setTouchStart(e.targetTouches[0].clientX); setTouchEnd(null); }}
                 onTouchMove={e => setTouchEnd(e.targetTouches[0].clientX)}
@@ -322,8 +324,8 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 </div>
             </main>
 
-            <AlertSettingsModal 
-                isOpen={isSettingsOpen} 
+            <AlertSettingsModal
+                isOpen={isSettingsOpen}
                 onClose={() => navigate(`#alerts/${activeTab}`)} // FIXED: Strip the modal query param to close it
                 gcalSignedIn={gcalSignedIn}
                 gcalError={gcalError}
