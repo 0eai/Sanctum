@@ -11,6 +11,10 @@ import {
 streamSaver.mitm = '/mitm.html';
 // 50MB threshold: files larger than this stream to disk instead of RAM
 const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
+// Safari cannot stream to disk — warn if file exceeds safe RAM limit (~1.5GB)
+const SAFARI_RAM_LIMIT = 1.5 * 1024 * 1024 * 1024;
+// Detect Safari (StreamSaver explicitly disables SW streaming on Safari)
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || !!window.safari;
 
 const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const [status, setStatus] = useState('Initializing...');
@@ -232,17 +236,30 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                                 streamWriterRef.current = fileStream.getWriter();
                             }
                         });
-                    } else if (msg.size > LARGE_FILE_THRESHOLD) {
-                        // Safari/Firefox: StreamSaver (service worker based streaming to disk)
+                    } else if (msg.size > LARGE_FILE_THRESHOLD && !isSafari) {
+                        // Firefox (non-Safari): StreamSaver via service worker
                         streamModeRef.current = 'streamsaver';
                         writeQueueRef.current = Promise.resolve();
-                        const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
-                        streamWriterRef.current = fileStream.getWriter();
+                        try {
+                            const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
+                            streamWriterRef.current = fileStream.getWriter();
+                        } catch (err) {
+                            console.warn('StreamSaver failed, falling back to RAM buffer.', err);
+                            streamModeRef.current = 'ram';
+                            streamWriterRef.current = null;
+                        }
                     } else {
-                        // Small files: RAM buffer
+                        // Safari or small files: RAM buffer
                         streamModeRef.current = 'ram';
                         streamWriterRef.current = null;
                         writeQueueRef.current = Promise.resolve();
+                        if (isSafari && msg.size > LARGE_FILE_THRESHOLD) {
+                            if (msg.size > SAFARI_RAM_LIMIT) {
+                                addLog(`⚠️ Warning: ${formatBytes(msg.size)} file may crash Safari — use Chrome/Edge to receive large files.`, 'error');
+                            } else {
+                                addLog(`⚠️ Safari detected: file will be buffered in RAM. Use Chrome/Edge for files over 1.5 GB.`, 'info');
+                            }
+                        }
                     }
 
                 } else if (msg.type === 'ack') {
