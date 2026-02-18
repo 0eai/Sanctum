@@ -1,18 +1,18 @@
 // src/apps/notes/Notes.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
+import {
   ChevronLeft, Plus, FolderPlus, Home, ChevronRight, LayoutGrid, List,
-  Loader, Link, Globe, Check, CloudOff, Folder, Settings 
+  Loader, Link, Globe, Check, CloudOff, Folder, Settings
 } from 'lucide-react';
 
-import { Modal, Button, Input } from '../../components/ui'; 
-import MultiFab from '../../components/ui/MultiFab'; 
-import ImportExportModal from '../../components/ui/ImportExportModal'; 
+import { Modal, Button, Input } from '../../components/ui';
+import MultiFab from '../../components/ui/MultiFab';
+import ImportExportModal from '../../components/ui/ImportExportModal';
 
-import { 
-  listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem, 
+import {
+  listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem,
   togglePin, rescheduleNote, shareNote, stopSharingNote,
-  exportNotes, importNotes 
+  exportNotes, importNotes
 } from '../../services/notes';
 
 import NoteCard from './components/NoteCard';
@@ -22,23 +22,23 @@ import NoteEditor from './components/NoteEditor';
 const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState('saved'); 
-  
+  const [saveStatus, setSaveStatus] = useState('saved');
+
   // Navigation & View State
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [folderPath, setFolderPath] = useState([{ id: null, title: 'Notes' }]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState('grid'); 
+  const [viewMode, setViewMode] = useState('grid');
 
   // Modal & Editor State
-  const [editorState, setEditorState] = useState(null); 
+  const [editorState, setEditorState] = useState(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
-  const [folderModalMode, setFolderModalMode] = useState('create'); 
+  const [folderModalMode, setFolderModalMode] = useState('create');
   const [folderToEdit, setFolderToEdit] = useState(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
-  const [shareModal, setShareModal] = useState(null); 
+  const [shareModal, setShareModal] = useState(null);
   const [processing, setProcessing] = useState(false);
 
   // --- URL-Driven Modal State ---
@@ -50,8 +50,8 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   useEffect(() => {
     if (!user || !cryptoKey) return;
     const unsub = listenToNotes(user.uid, cryptoKey, (data) => {
-        setItems(data);
-        setLoading(false);
+      setItems(data);
+      setLoading(false);
     });
     return () => unsub();
   }, [user, cryptoKey]);
@@ -59,75 +59,76 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // --- 2. URL Route Sync ---
   // FIXED: Sync internal state strictly to the URL route object
   useEffect(() => {
-    if (loading) return; 
+    if (loading) return;
 
     // FIXED: Catch legacy "?openId=123" deep links and redirect them to the new REST URL
     if (route.query?.openId) {
-        window.location.replace(
-            `${window.location.pathname}${window.location.search}#notes/doc/${route.query.openId}`
-        );
-        return; 
+      window.location.replace(
+        `${window.location.pathname}${window.location.search}#notes/doc/${route.query.openId}`
+      );
+      return;
     }
 
     const { resource, resourceId } = route;
 
     if (resource === 'folder' && resourceId) {
-        setCurrentFolderId(resourceId);
-        setEditorState(null);
-        buildBreadcrumbs(resourceId); 
+      setCurrentFolderId(resourceId);
+      setEditorState(null);
+      buildBreadcrumbs(resourceId);
 
     } else if (resource === 'doc' && resourceId) {
-        if (resourceId === 'new') {
-            setEditorState({ title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId });
-            return;
-        }
+      if (resourceId === 'new') {
+        setEditorState({ title: '', content: '', tags: [], attachments: [], isPinned: false, parentId: currentFolderId });
+        return;
+      }
 
-        const targetNote = items.find(i => i.id === resourceId);
-        if (targetNote) {
-            setEditorState(targetNote);
-            setCurrentFolderId(targetNote.parentId || null);
-            buildBreadcrumbs(targetNote.parentId);
-        }
+      const targetNote = items.find(i => i.id === resourceId);
+      if (targetNote) {
+        setEditorState(targetNote);
+        setCurrentFolderId(targetNote.parentId || null);
+        buildBreadcrumbs(targetNote.parentId);
+      }
     } else {
-        // Root path fallback
-        setCurrentFolderId(null);
-        setEditorState(null);
-        setFolderPath([{ id: null, title: 'Notes' }]);
+      // Root path fallback
+      setCurrentFolderId(null);
+      setEditorState(null);
+      setFolderPath([{ id: null, title: 'Notes' }]);
     }
-  }, [route, items, loading, currentFolderId, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, items, loading]);
 
   const buildBreadcrumbs = (startId) => {
-      const pathArray = [];
-      let currentId = startId;
-      while (currentId) {
-          const parentFolder = items.find(i => i.id === currentId);
-          if (parentFolder) {
-              pathArray.unshift({ id: parentFolder.id, title: parentFolder.title });
-              currentId = parentFolder.parentId;
-          } else {
-              break;
-          }
+    const pathArray = [];
+    let currentId = startId;
+    while (currentId) {
+      const parentFolder = items.find(i => i.id === currentId);
+      if (parentFolder) {
+        pathArray.unshift({ id: parentFolder.id, title: parentFolder.title });
+        currentId = parentFolder.parentId;
+      } else {
+        break;
       }
-      setFolderPath([{ id: null, title: 'Notes' }, ...pathArray]);
+    }
+    setFolderPath([{ id: null, title: 'Notes' }, ...pathArray]);
   };
 
   // --- 3. Derived State ---
   const displayedItems = useMemo(() => {
     let filtered = items;
     if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        filtered = items.filter(i => 
-            i.title?.toLowerCase().includes(q) || 
-            i.content?.toLowerCase().includes(q) ||
-            i.tags?.some(t => t.toLowerCase().includes(q))
-        );
+      const q = searchQuery.toLowerCase();
+      filtered = items.filter(i =>
+        i.title?.toLowerCase().includes(q) ||
+        i.content?.toLowerCase().includes(q) ||
+        i.tags?.some(t => t.toLowerCase().includes(q))
+      );
     } else {
-        filtered = items.filter(i => i.parentId === currentFolderId);
+      filtered = items.filter(i => i.parentId === currentFolderId);
     }
     return filtered.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-        return b.updatedAt - a.updatedAt;
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      return b.updatedAt - a.updatedAt;
     });
   }, [items, currentFolderId, searchQuery]);
 
@@ -140,23 +141,23 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // --- 4. Handlers ---
   const handleSaveNote = async (noteData) => {
     if (!noteData.title.trim() && !noteData.content.trim() && noteData.attachments.length === 0) {
-        if (noteData.id) await deleteNoteItem(user.uid, noteData, items);
-        return;
+      if (noteData.id) await deleteNoteItem(user.uid, noteData, items);
+      return;
     }
     setSaveStatus('saving');
     try {
-        const id = await saveNote(user.uid, cryptoKey, noteData, currentFolderId);
-        
-        // Silently update the URL from 'new' to the actual ID so refreshes work
-        if (!noteData.id) {
-            setEditorState(prev => ({ ...prev, id }));
-            window.history.replaceState(null, '', `#notes/doc/${id}/edit`);
-        }
-        
-        setSaveStatus('saved');
+      const id = await saveNote(user.uid, cryptoKey, noteData, currentFolderId);
+
+      // Silently update the URL from 'new' to the actual ID so refreshes work
+      if (!noteData.id) {
+        setEditorState(prev => ({ ...prev, id }));
+        window.history.replaceState(null, '', `#notes/doc/${id}/edit`);
+      }
+
+      setSaveStatus('saved');
     } catch (e) {
-        console.error(e);
-        setSaveStatus('error');
+      console.error(e);
+      setSaveStatus('error');
     }
   };
 
@@ -164,9 +165,9 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     e.preventDefault();
     const title = e.target.title.value;
     if (folderModalMode === 'create') {
-        await createFolder(user.uid, cryptoKey, title, currentFolderId);
+      await createFolder(user.uid, cryptoKey, title, currentFolderId);
     } else {
-        await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
+      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
     }
     setIsFolderModalOpen(false);
   };
@@ -184,18 +185,18 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleShare = async (note) => {
-      try {
-          const { sharedId, shareUrlKey } = await shareNote(user.uid, cryptoKey, note);
-          const url = `${window.location.origin}/#view?id=${sharedId}&k=${shareUrlKey}`;
-          if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId, shareUrlKey }));
-          setShareModal({ isOpen: true, note: { ...note, sharedId, shareUrlKey }, link: url });
-      } catch(e) { alert("Sharing failed."); }
+    try {
+      const { sharedId, shareUrlKey } = await shareNote(user.uid, cryptoKey, note);
+      const url = `${window.location.origin}/#view?id=${sharedId}&k=${shareUrlKey}`;
+      if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId, shareUrlKey }));
+      setShareModal({ isOpen: true, note: { ...note, sharedId, shareUrlKey }, link: url });
+    } catch (e) { alert("Sharing failed."); }
   };
 
   const handleStopShare = async (note) => {
-      await stopSharingNote(user.uid, cryptoKey, note);
-      if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId: null, shareUrlKey: null }));
-      setShareModal(null);
+    await stopSharingNote(user.uid, cryptoKey, note);
+    if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId: null, shareUrlKey: null }));
+    setShareModal(null);
   };
 
   // --- Import / Export Handlers ---
@@ -242,13 +243,13 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleBack = () => {
     if (editorState) {
-        if (currentFolderId) navigate(`#notes/folder/${currentFolderId}`);
-        else navigate(`#notes`);
+      if (currentFolderId) navigate(`#notes/folder/${currentFolderId}`);
+      else navigate(`#notes`);
     } else if (searchQuery) {
-        setSearchQuery("");
+      setSearchQuery("");
     } else {
-        if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
-        else navigate(''); // Exit to launcher
+      if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
+      else navigate(''); // Exit to launcher
     }
   };
 
@@ -266,18 +267,18 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       onClick: () => navigate(`#notes/doc/new/edit`), // FIXED: Push URL instead of setting state
       variant: 'primary'
     }
-  ], [currentFolderId, navigate]); 
+  ], [currentFolderId, navigate]);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
       {editorState ? (
-        <NoteEditor 
-            note={editorState}
-            onSave={handleSaveNote}
-            onBack={handleBack}
-            onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned)} 
-            onShare={(e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
-            saveStatus={saveStatus}
+        <NoteEditor
+          note={editorState}
+          onSave={handleSaveNote}
+          onBack={handleBack}
+          onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned)}
+          onShare={(e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
+          saveStatus={saveStatus}
         />
       ) : (
         <>
@@ -288,15 +289,15 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                   <button onClick={handleBack} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
                   <h1 className="text-xl font-bold">Notes</h1>
                 </div>
-                
+
                 <div className="flex items-center gap-1">
-                    <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                        {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
-                    </button>
-                    {/* FIXED: Open settings by pushing ?modal=settings to the current path */}
-                    <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                        <Settings size={20} />
-                    </button>
+                  <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                    {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
+                  </button>
+                  {/* FIXED: Open settings by pushing ?modal=settings to the current path */}
+                  <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                    <Settings size={20} />
+                  </button>
                 </div>
               </div>
               {!searchQuery && (
@@ -323,19 +324,19 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               ) : (
                 <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
                   {displayedItems.map(item => (
-                    <NoteCard 
-                        key={item.id} 
-                        item={item} 
-                        viewMode={viewMode}
-                        onOpen={() => navigate(`#notes/doc/${item.id}/edit`)} // FIXED: Drive by URL
-                        onFolderOpen={() => navigate(`#notes/folder/${item.id}`)} // FIXED: Drive by URL
-                        onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned); }}
-                        onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
-                        onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
-                        onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
-                        onShare={(e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
-                        onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item); }}
-                        folderCounts={folderCounts}
+                    <NoteCard
+                      key={item.id}
+                      item={item}
+                      viewMode={viewMode}
+                      onOpen={() => navigate(`#notes/doc/${item.id}/edit`)} // FIXED: Drive by URL
+                      onFolderOpen={() => navigate(`#notes/folder/${item.id}`)} // FIXED: Drive by URL
+                      onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned); }}
+                      onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
+                      onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
+                      onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
+                      onShare={(e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
+                      onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item); }}
+                      folderCounts={folderCounts}
                     />
                   ))}
                 </div>
@@ -357,14 +358,14 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
         <div className="flex flex-col gap-2">
-            <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home</button>
-            {items.filter(i => i.type === 'folder' && i.id !== itemToMove?.id).map(f => (
-                <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
-            ))}
+          <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home</button>
+          {items.filter(i => i.type === 'folder' && i.id !== itemToMove?.id).map(f => (
+            <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
+          ))}
         </div>
       </Modal>
 
-      <ImportExportModal 
+      <ImportExportModal
         isOpen={isSettingsOpen}
         onClose={() => navigate(currentBasePath)} // FIXED: Close settings modal via URL
         onImport={handleImport}
@@ -385,18 +386,18 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Note" zIndex={100}>
         <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
-                <div className="text-xs text-gray-500 break-all">{shareModal?.link || "Link not generated yet."}</div>
-            </div>
-            <div className="flex flex-col gap-2">
-                {shareModal?.link ? (
-                    <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert("Copied!"); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
-                ) : (
-                    <Button onClick={() => handleShare(shareModal.note)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate New Link</Button>
-                )}
-                <Button variant="danger" onClick={() => handleStopShare(shareModal.note)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
-            </div>
+          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            <div className="text-xs text-gray-500 break-all">{shareModal?.link || "Link not generated yet."}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {shareModal?.link ? (
+              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert("Copied!"); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
+            ) : (
+              <Button onClick={() => handleShare(shareModal.note)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate New Link</Button>
+            )}
+            <Button variant="danger" onClick={() => handleStopShare(shareModal.note)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+          </div>
         </div>
       </Modal>
     </div>

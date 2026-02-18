@@ -306,7 +306,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     return (
         <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
             <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 p-4">
-                <div className="max-w-xl mx-auto flex items-center justify-between">
+                <div className="max-w-4xl mx-auto flex items-center justify-between">
                     <button onClick={onLeave} className="p-1 hover:bg-white/20 rounded-full transition-colors flex items-center gap-1 text-sm font-bold">
                         <ChevronLeft /> Disconnect
                     </button>

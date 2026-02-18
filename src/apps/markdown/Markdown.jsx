@@ -1,36 +1,36 @@
 
 // src/apps/markdown/Markdown.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  ChevronLeft, Plus, Search, FileText, Settings, X, Star, FileCode, 
+import {
+  ChevronLeft, Plus, Search, FileText, Settings, X, Star, FileCode,
   FolderPlus, Folder, ChevronRight, Home
 } from 'lucide-react';
 
-import { Modal, Button, LoadingSpinner, Input } from '../../components/ui'; 
-import MultiFab from '../../components/ui/MultiFab'; 
-import ImportExportModal from '../../components/ui/ImportExportModal'; 
+import { Modal, Button, LoadingSpinner, Input } from '../../components/ui';
+import MultiFab from '../../components/ui/MultiFab';
+import ImportExportModal from '../../components/ui/ImportExportModal';
 
-import { 
+import {
   listenToMarkdownDocs, saveMarkdownDoc, deleteMarkdownItem, createFolder, updateFolder,
-  exportMarkdownDocs, importMarkdownDocs 
-} from '../../services/markdown'; 
+  exportMarkdownDocs, importMarkdownDocs
+} from '../../services/markdown';
 
 import MarkdownEditor from './components/MarkdownEditor';
-import MarkdownCard from './components/MarkdownCard'; 
+import MarkdownCard from './components/MarkdownCard';
 
 const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('saved');
-  
+
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [folderPath, setFolderPath] = useState([{ id: null, title: 'Markdown' }]);
   const [searchQuery, setSearchQuery] = useState("");
-  
+
   // Editor State
   const [editorDoc, setEditorDoc] = useState(null);
-  
+
   // Modals
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [folderModalMode, setFolderModalMode] = useState('create');
@@ -38,7 +38,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  
+
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -47,8 +47,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   useEffect(() => {
     if (!user || !cryptoKey) return;
     const unsub = listenToMarkdownDocs(user.uid, cryptoKey, (data) => {
-        setDocs(data);
-        setLoading(false);
+      setDocs(data);
+      setLoading(false);
     });
     return () => unsub();
   }, [user, cryptoKey]);
@@ -59,69 +59,69 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const { resource, resourceId, action } = route;
 
     if (resource === 'folder' && resourceId) {
-        setCurrentFolderId(resourceId);
-        setEditorDoc(null);
-        buildBreadcrumbs(resourceId); 
+      setCurrentFolderId(resourceId);
+      setEditorDoc(null);
+      buildBreadcrumbs(resourceId);
 
     } else if (resource === 'doc' && resourceId) {
-        // --- NEW DOC CREATION ---
-        if (resourceId === 'new') {
-            setEditorDoc({ title: '', content: '', isPinned: false, parentId: currentFolderId, initialPreview: false });
-            return; // Skip the rest
-        }
+      // --- NEW DOC CREATION ---
+      if (resourceId === 'new') {
+        setEditorDoc({ title: '', content: '', isPinned: false, parentId: currentFolderId, initialPreview: false });
+        return; // Skip the rest
+      }
 
-        // --- EXISTING DOC ---
-        const targetDoc = docs.find(d => d.id === resourceId);
-        if (targetDoc) {
-            setEditorDoc({ ...targetDoc, initialPreview: action !== 'edit' });
-            setCurrentFolderId(targetDoc.parentId || null);
-            buildBreadcrumbs(targetDoc.parentId);
-        }
+      // --- EXISTING DOC ---
+      const targetDoc = docs.find(d => d.id === resourceId);
+      if (targetDoc) {
+        setEditorDoc({ ...targetDoc, initialPreview: action !== 'edit' });
+        setCurrentFolderId(targetDoc.parentId || null);
+        buildBreadcrumbs(targetDoc.parentId);
+      }
     } else {
-        setCurrentFolderId(null);
-        setEditorDoc(null);
-        setFolderPath([{ id: null, title: 'Markdown' }]);
+      setCurrentFolderId(null);
+      setEditorDoc(null);
+      setFolderPath([{ id: null, title: 'Markdown' }]);
     }
   }, [route, docs, loading]);
 
   // Helper function to reconstruct path
   const buildBreadcrumbs = (startId) => {
-      const pathArray = [];
-      let currentId = startId;
-      while (currentId) {
-          const parentFolder = docs.find(d => d.id === currentId);
-          if (parentFolder) {
-              pathArray.unshift({ id: parentFolder.id, title: parentFolder.title });
-              currentId = parentFolder.parentId;
-          } else {
-              break;
-          }
+    const pathArray = [];
+    let currentId = startId;
+    while (currentId) {
+      const parentFolder = docs.find(d => d.id === currentId);
+      if (parentFolder) {
+        pathArray.unshift({ id: parentFolder.id, title: parentFolder.title });
+        currentId = parentFolder.parentId;
+      } else {
+        break;
       }
-      setFolderPath([{ id: null, title: 'Markdown' }, ...pathArray]);
+    }
+    setFolderPath([{ id: null, title: 'Markdown' }, ...pathArray]);
   };
 
   // --- Handlers ---
 
   const handleSave = async (docData) => {
     if (!docData.title?.trim() && !docData.content?.trim()) {
-        if (docData.id) await deleteMarkdownItem(user.uid, docData, docs);
-        return;
+      if (docData.id) await deleteMarkdownItem(user.uid, docData, docs);
+      return;
     }
 
     setSaveStatus('saving');
     try {
-        const id = await saveMarkdownDoc(user.uid, cryptoKey, docData, currentFolderId);
-        
-        if (!docData.id) {
-            setEditorDoc(prev => ({ ...prev, id }));
-            // Silently update the URL from 'new' to the actual ID so refreshes work safely
-            window.history.replaceState(null, '', `#markdown/doc/${id}/edit`); 
-        }
-        
-        setSaveStatus('saved');
+      const id = await saveMarkdownDoc(user.uid, cryptoKey, docData, currentFolderId);
+
+      if (!docData.id) {
+        setEditorDoc(prev => ({ ...prev, id }));
+        // Silently update the URL from 'new' to the actual ID so refreshes work safely
+        window.history.replaceState(null, '', `#markdown/doc/${id}/edit`);
+      }
+
+      setSaveStatus('saved');
     } catch (e) {
-        console.error(e);
-        setSaveStatus('error');
+      console.error(e);
+      setSaveStatus('error');
     }
   };
 
@@ -131,28 +131,23 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!title) return;
 
     if (folderModalMode === 'create') {
-        await createFolder(user.uid, cryptoKey, title, currentFolderId);
+      await createFolder(user.uid, cryptoKey, title, currentFolderId);
     } else {
-        await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
+      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
     }
     setIsFolderModalOpen(false);
     setFolderToEdit(null);
   };
 
   const handleMove = async (targetFolderId) => {
-    // Basic move logic
-    const payload = itemToMove.type === 'folder' ? itemToMove : { ...itemToMove, parentId: targetFolderId };
-    
-    // For docs, use saveMarkdownDoc which handles encryption
-    if (itemToMove.type !== 'folder') {
-        await saveMarkdownDoc(user.uid, cryptoKey, payload, currentFolderId);
+    if (itemToMove.type === 'folder') {
+      // Move folder: update its parentId via updateFolder
+      await updateFolder(user.uid, cryptoKey, itemToMove.id, itemToMove.title, targetFolderId);
     } else {
-        // For folders, we'd need a specific move service if hierarchy gets complex, 
-        // but for now re-saving the folder title with new parent is tricky if createFolder doesn't support updates.
-        // We'll skip complex folder moving logic for this snippet to avoid breaking existing service contract.
-        // Assuming we just updated the doc moving logic.
+      // Move doc: re-save with new parentId (saveMarkdownDoc handles encryption)
+      await saveMarkdownDoc(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId);
     }
-    
+
     setIsMoveModalOpen(false);
     setItemToMove(null);
   };
@@ -172,9 +167,9 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const handleBreadcrumbClick = (index) => {
     const targetFolder = folderPath[index];
     if (targetFolder.id === null) {
-        navigate(`#markdown`);
+      navigate(`#markdown`);
     } else {
-        navigate(`#markdown/folder/${targetFolder.id}`);
+      navigate(`#markdown/folder/${targetFolder.id}`);
     }
   };
 
@@ -215,16 +210,16 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const displayedItems = useMemo(() => {
     let filtered = docs;
     if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        filtered = docs.filter(d => d.title.toLowerCase().includes(q) || (d.content && d.content.toLowerCase().includes(q)));
+      const q = searchQuery.toLowerCase();
+      filtered = docs.filter(d => d.title.toLowerCase().includes(q) || (d.content && d.content.toLowerCase().includes(q)));
     } else {
-        filtered = docs.filter(d => d.parentId === currentFolderId);
+      filtered = docs.filter(d => d.parentId === currentFolderId);
     }
-    
+
     return filtered.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-        return new Date(b.updatedAt) - new Date(a.updatedAt);
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
     });
   }, [docs, currentFolderId, searchQuery]);
 
@@ -241,27 +236,27 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       onClick: () => navigate(`#markdown/doc/new/edit`), // <-- Let the URL do the work!
       variant: 'primary'
     }
-  ], [currentFolderId, navigate]); 
+  ], [currentFolderId, navigate]);
 
   // --- View: Editor ---
   if (editorDoc) {
-      return (
-          <MarkdownEditor 
-            item={editorDoc}
-            onSave={handleSave}
-            onBack={() => {
-                // Let the URL close the editor
-                if (currentFolderId) {
-                    navigate(`#markdown/folder/${currentFolderId}`);
-                } else {
-                    navigate(`#markdown`);
-                }
-            }}
-            onExport={(d) => { /* handle export */ }}
-            saveStatus={saveStatus}
-            navigate={navigate}
-          />
-      );
+    return (
+      <MarkdownEditor
+        item={editorDoc}
+        onSave={handleSave}
+        onBack={() => {
+          // Let the URL close the editor
+          if (currentFolderId) {
+            navigate(`#markdown/folder/${currentFolderId}`);
+          } else {
+            navigate(`#markdown`);
+          }
+        }}
+        onExport={(d) => { /* handle export */ }}
+        saveStatus={saveStatus}
+        navigate={navigate}
+      />
+    );
   }
 
   // --- View: List ---
@@ -272,20 +267,20 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button onClick={() => {
-                  if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
-                  else onExit();
+                if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
+                else onExit();
               }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
               <h1 className="text-xl font-bold">Markdown</h1>
             </div>
             <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                <Settings size={20} />
+              <Settings size={20} />
             </button>
           </div>
 
           <div className="relative">
             <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-            <input 
-              type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." 
+            <input
+              type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..."
               className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
             />
             {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
@@ -293,14 +288,14 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
           {!searchQuery && (
             <div className="flex items-center gap-1 text-sm text-blue-100 overflow-x-auto no-scrollbar whitespace-nowrap">
-                {folderPath.map((folder, index) => (
+              {folderPath.map((folder, index) => (
                 <React.Fragment key={index}>
-                    {index > 0 && <ChevronRight size={14} className="opacity-50" />}
-                    <button onClick={() => handleBreadcrumbClick(index)} className={`hover:text-white transition-colors flex items-center gap-1 ${index === folderPath.length - 1 ? 'font-bold text-white' : ''}`}>
+                  {index > 0 && <ChevronRight size={14} className="opacity-50" />}
+                  <button onClick={() => handleBreadcrumbClick(index)} className={`hover:text-white transition-colors flex items-center gap-1 ${index === folderPath.length - 1 ? 'font-bold text-white' : ''}`}>
                     {index === 0 && <Home size={14} />} {folder.title}
-                    </button>
+                  </button>
                 </React.Fragment>
-                ))}
+              ))}
             </div>
           )}
         </div>
@@ -308,37 +303,37 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <main className="flex-1 overflow-y-auto scroll-smooth p-4">
         <div className="max-w-3xl mx-auto pb-32">
-            {loading ? (
-                <div className="flex justify-center py-20"><LoadingSpinner /></div>
-            ) : displayedItems.length === 0 ? (
-                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-                    <div className="bg-white p-4 rounded-full shadow-sm"><FileCode size={32} className="opacity-50" /></div>
-                    <p>Empty folder.</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {displayedItems.map(item => (
-                        <MarkdownCard 
-                            key={item.id}
-                            item={item}
-                            docs={docs}
-                            onClick={() => item.type === 'folder' 
-                                ? navigate(`#markdown/folder/${item.id}`) 
-                                : navigate(`#markdown/doc/${item.id}`) // Defaults to view
-                            }
-                            onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
-                            onDelete={(i) => setDeleteConfirm(i)}
-                        />
-                    ))}
-                </div>
-            )}
+          {loading ? (
+            <div className="flex justify-center py-20"><LoadingSpinner /></div>
+          ) : displayedItems.length === 0 ? (
+            <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+              <div className="bg-white p-4 rounded-full shadow-sm"><FileCode size={32} className="opacity-50" /></div>
+              <p>Empty folder.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {displayedItems.map(item => (
+                <MarkdownCard
+                  key={item.id}
+                  item={item}
+                  docs={docs}
+                  onClick={() => item.type === 'folder'
+                    ? navigate(`#markdown/folder/${item.id}`)
+                    : navigate(`#markdown/doc/${item.id}`) // Defaults to view
+                  }
+                  onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
+                  onDelete={(i) => setDeleteConfirm(i)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </main>
 
       <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
 
       {/* --- MODALS --- */}
-      <ImportExportModal 
+      <ImportExportModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onImport={handleImport}
@@ -359,10 +354,10 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
         <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
-            <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home</button>
-            {docs.filter(d => d.type === 'folder' && d.id !== itemToMove?.id).map(f => (
-                <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
-            ))}
+          <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home</button>
+          {docs.filter(d => d.type === 'folder' && d.id !== itemToMove?.id).map(f => (
+            <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
+          ))}
         </div>
       </Modal>
 
