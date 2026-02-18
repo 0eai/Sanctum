@@ -212,12 +212,12 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     // Sender pauses until ack received. This is the only reliable cross-platform
     // backpressure mechanism — it works on Safari/iPad where the data channel
     // buffer can't be controlled from the receiver side.
-    const ACK_EVERY = 64;
+    const ACK_EVERY = 16; // 64KB * 16 = 1MB window
 
     const setupDataChannel = (channel) => {
         channelRef.current = channel;
         channel.binaryType = 'arraybuffer';
-        channel.bufferedAmountLowThreshold = 65535;
+        channel.bufferedAmountLowThreshold = 262144; // 256KB threshold
 
         let chunksReceived = 0;
 
@@ -423,9 +423,11 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
         setIsSending(true);
         await requestWakeLock();
+        setIsSending(true);
+        await requestWakeLock();
         const channel = channelRef.current;
-        const CHUNK_SIZE = 16384; // 16KB chunks
-        const ACK_EVERY_SEND = 64; // Must match receiver's ACK_EVERY
+        const CHUNK_SIZE = 65536; // 64KB chunks (increased from 16KB to reduce FS overhead)
+        const ACK_EVERY_SEND = 16; // Must match receiver's ACK_EVERY
 
         const readSlice = (file, o) => new Promise((resolve, reject) => {
             const slice = file.slice(o, o + CHUNK_SIZE);
