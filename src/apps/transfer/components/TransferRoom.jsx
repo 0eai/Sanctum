@@ -116,9 +116,10 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
                         // Clean up any partial OPFS file
                         if (opfsFileRef.current) {
+                            const name = opfsFileRef.current.name;
                             try {
                                 navigator.storage.getDirectory().then(root => {
-                                    root.removeEntry(opfsFileRef.current.name).catch(() => { });
+                                    root.removeEntry(name).catch(() => { });
                                 });
                             } catch (e) { }
                             opfsFileRef.current = null;
