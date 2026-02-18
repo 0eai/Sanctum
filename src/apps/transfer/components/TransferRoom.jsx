@@ -34,6 +34,10 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
 
     // File System Access API writable ref (for large file streaming)
     const fsWritableRef = useRef(null);
+    // Sequential write queue — ensures disk writes are ordered without blocking onmessage
+    const writeQueueRef = useRef(Promise.resolve());
+    // ACK flow control: sender waits for ack from receiver every N chunks
+    const ackResolverRef = useRef(null);
     // Guard to prevent double-calling cleanupRoom
     const roomCleanedUpRef = useRef(false);
 
@@ -165,123 +169,132 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     }, [roomId, mode, user]);
 
     // --- Data Channel Handlers ---
+    // ACK_EVERY: receiver sends an ack to the sender every N chunks.
+    // Sender pauses until ack received. This is the only reliable cross-platform
+    // backpressure mechanism — it works on Safari/iPad where the data channel
+    // buffer can't be controlled from the receiver side.
+    const ACK_EVERY = 64;
+
     const setupDataChannel = (channel) => {
         channelRef.current = channel;
         channel.binaryType = 'arraybuffer';
-        // Fix Issue 3: set threshold so onbufferedamountlow fires before buffer is fully empty
         channel.bufferedAmountLowThreshold = 65535;
 
-        channel.onmessage = async (event) => {
+        let chunksReceived = 0;
+
+        // Keep onmessage SYNCHRONOUS — async handlers don't block WebRTC delivery.
+        // Instead, queue disk writes onto a sequential promise chain.
+        channel.onmessage = (event) => {
             if (typeof event.data === 'string') {
                 const msg = JSON.parse(event.data);
 
                 if (msg.type === 'meta') {
                     setIncomingMeta(msg);
                     incomingMetaRef.current = msg;
-
                     setIsReceiving(true);
                     setProgress(0);
                     receivedBytesRef.current = 0;
                     receiveBufferRef.current = [];
+                    chunksReceived = 0;
                     setStatus(`Receiving: ${msg.name}`);
                     requestWakeLock();
 
-                    // HYBRID ROUTING LOGIC
                     if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
-                        // For large files, use the native File System Access API to stream to disk
-                        // This avoids loading the entire file into RAM
-                        console.log(`File is >50MB. Using File System Access API...`);
-                        try {
-                            const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
-                            fsWritableRef.current = await fileHandle.createWritable();
-                        } catch (err) {
-                            // User cancelled the save dialog — fall back to RAM buffer
-                            console.warn('showSaveFilePicker cancelled, falling back to RAM buffer.', err);
-                            fsWritableRef.current = null;
-                        }
+                        // Queue the async showSaveFilePicker call onto the write chain
+                        writeQueueRef.current = writeQueueRef.current.then(async () => {
+                            try {
+                                const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
+                                fsWritableRef.current = await fileHandle.createWritable();
+                            } catch (err) {
+                                console.warn('showSaveFilePicker cancelled, falling back to RAM buffer.', err);
+                                fsWritableRef.current = null;
+                            }
+                        });
                     } else {
-                        // For small files or unsupported browsers, use RAM buffer
-                        console.log(`Using RAM buffer...`);
                         fsWritableRef.current = null;
+                        writeQueueRef.current = Promise.resolve();
+                    }
+
+                } else if (msg.type === 'ack') {
+                    // Sender is waiting for this — resolve the pause
+                    if (ackResolverRef.current) {
+                        ackResolverRef.current();
+                        ackResolverRef.current = null;
                     }
 
                 } else if (msg.type === 'eof') {
                     const meta = incomingMetaRef.current;
 
-                    if (fsWritableRef.current) {
-                        // Close the File System Access API writable stream
-                        await fsWritableRef.current.close();
-                        fsWritableRef.current = null;
-                    } else {
-                        // STANDARD BLOB DOWNLOAD (small files or fallback)
-                        const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
-                        const downloadUrl = URL.createObjectURL(blob);
-
-                        const a = document.createElement('a');
-                        a.style.display = 'none';
-                        a.href = downloadUrl;
-                        a.download = meta?.name || 'shared_file';
-
-                        document.body.appendChild(a);
-                        a.click();
-
-                        setTimeout(() => {
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(downloadUrl);
-                        }, 250);
-
-                        receiveBufferRef.current = [];
-                    }
-
-                    setProgress(100);
-                    // Reset receiver UI between files in a multi-file transfer
-                    setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
+                    writeQueueRef.current = writeQueueRef.current.then(async () => {
+                        if (fsWritableRef.current) {
+                            await fsWritableRef.current.close();
+                            fsWritableRef.current = null;
+                        } else {
+                            const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
+                            const downloadUrl = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.style.display = 'none';
+                            a.href = downloadUrl;
+                            a.download = meta?.name || 'shared_file';
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(downloadUrl); }, 250);
+                            receiveBufferRef.current = [];
+                        }
+                        setProgress(100);
+                        setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
+                    });
 
                 } else if (msg.type === 'done_all') {
-                    setIsReceiving(false);
-                    setStatus('All files received! Disconnecting...');
-                    releaseWakeLock();
-                    setTimeout(() => onLeave(), 2500);
+                    writeQueueRef.current = writeQueueRef.current.then(() => {
+                        setIsReceiving(false);
+                        setStatus('All files received! Disconnecting...');
+                        releaseWakeLock();
+                        setTimeout(() => onLeave(), 2500);
+                    });
                 }
             } else {
                 // --- INCOMING FILE CHUNK ---
-                if (fsWritableRef.current) {
-                    // Write chunk directly to disk via File System Access API
-                    await fsWritableRef.current.write(event.data);
-                } else {
-                    // Push chunk to RAM buffer
-                    receiveBufferRef.current.push(event.data);
-                }
+                // Queue the write so chunks are processed in order
+                const data = event.data;
+                writeQueueRef.current = writeQueueRef.current.then(async () => {
+                    if (fsWritableRef.current) {
+                        await fsWritableRef.current.write(data);
+                    } else {
+                        receiveBufferRef.current.push(data);
+                    }
+                });
 
                 receivedBytesRef.current += event.data.byteLength;
-
                 const meta = incomingMetaRef.current;
-                if (meta?.size) {
-                    const currentProgress = Math.round((receivedBytesRef.current / meta.size) * 100);
-                    setProgress(currentProgress);
+                if (meta?.size) setProgress(Math.round((receivedBytesRef.current / meta.size) * 100));
+
+                // ACK flow control: tell sender it can send more
+                chunksReceived++;
+                if (chunksReceived % ACK_EVERY === 0) {
+                    channel.send(JSON.stringify({ type: 'ack' }));
                 }
             }
         };
     };
 
-    // --- Send Logic (Looping through multiple files) ---
+    // --- Send Logic ---
     const handleSendFile = async () => {
         if (filesToSend.length === 0 || !channelRef.current) return;
 
         setIsSending(true);
         await requestWakeLock();
         const channel = channelRef.current;
-        const CHUNK_SIZE = 16384;
+        const CHUNK_SIZE = 16384; // 16KB chunks
+        const ACK_EVERY_SEND = 64; // Must match receiver's ACK_EVERY
 
-        const readSlice = (file, o) => {
-            return new Promise((resolve, reject) => {
-                const slice = file.slice(o, o + CHUNK_SIZE);
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.onerror = reject;
-                reader.readAsArrayBuffer(slice);
-            });
-        };
+        const readSlice = (file, o) => new Promise((resolve, reject) => {
+            const slice = file.slice(o, o + CHUNK_SIZE);
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(slice);
+        });
 
         for (let i = 0; i < filesToSend.length; i++) {
             const file = filesToSend[i];
@@ -289,30 +302,31 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
             setProgress(0);
             setStatus(`Sending file ${i + 1} of ${filesToSend.length}...`);
 
-            channel.send(JSON.stringify({
-                type: 'meta',
-                name: file.name,
-                size: file.size,
-                mimeType: file.type
-            }));
+            channel.send(JSON.stringify({ type: 'meta', name: file.name, size: file.size, mimeType: file.type }));
 
             let offset = 0;
+            let chunksSent = 0;
 
             while (offset < file.size) {
+                // 1. Pause if the sender-side buffer is full (standard WebRTC backpressure)
                 if (channel.bufferedAmount > 65535) {
                     await new Promise(resolve => {
-                        channel.onbufferedamountlow = () => {
-                            channel.onbufferedamountlow = null;
-                            resolve();
-                        };
+                        channel.onbufferedamountlow = () => { channel.onbufferedamountlow = null; resolve(); };
                     });
                 }
 
                 const buffer = await readSlice(file, offset);
                 channel.send(buffer);
                 offset += buffer.byteLength;
+                chunksSent++;
 
                 setProgress(Math.round((offset / file.size) * 100));
+
+                // 2. ACK flow control: pause every ACK_EVERY chunks and wait for receiver ack
+                // This prevents flooding the receiver's memory on slow devices (iPad/Safari)
+                if (chunksSent % ACK_EVERY_SEND === 0) {
+                    await new Promise(resolve => { ackResolverRef.current = resolve; });
+                }
             }
 
             channel.send(JSON.stringify({ type: 'eof' }));
