@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, File, CheckCircle2, Loader2, UploadCloud, HardDrive } from 'lucide-react';
-import streamSaver from 'streamsaver';
 import { Button } from '../../../components/ui';
 import { formatBytes } from '../../../lib/fileUtils';
 import {
@@ -8,8 +7,7 @@ import {
     addIceCandidate, listenToIceCandidates, cleanupRoom
 } from '../../../services/transfer';
 
-streamSaver.mitm = '/mitm.html';
-// 50MB Threshold: Files larger than this will bypass RAM and stream to disk
+// 50MB Threshold: Files larger than this use the File System Access API to stream to disk
 const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
 
 const TransferRoom = ({ user, roomId, mode, onLeave }) => {
@@ -34,9 +32,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const incomingMetaRef = useRef(null);
     const wakeLockRef = useRef(null);
 
-    // StreamSaver writer ref and write-promise chain ref (for backpressure)
-    const streamWriterRef = useRef(null);
-    const writePromiseRef = useRef(Promise.resolve());
+    // File System Access API writable ref (for large file streaming)
+    const fsWritableRef = useRef(null);
     // Guard to prevent double-calling cleanupRoom
     const roomCleanedUpRef = useRef(false);
 
@@ -84,7 +81,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                         setIsConnected(false);
                         setStatus('Connection lost.');
                         releaseWakeLock();
-                        if (streamWriterRef.current) streamWriterRef.current.abort(); // Cancel stream if dropped
+                        if (fsWritableRef.current) { fsWritableRef.current.abort(); fsWritableRef.current = null; } // Cancel stream if dropped
                     }
                 };
 
@@ -174,7 +171,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
         // Fix Issue 3: set threshold so onbufferedamountlow fires before buffer is fully empty
         channel.bufferedAmountLowThreshold = 65535;
 
-        channel.onmessage = (event) => {
+        channel.onmessage = async (event) => {
             if (typeof event.data === 'string') {
                 const msg = JSON.parse(event.data);
 
@@ -190,29 +187,33 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     requestWakeLock();
 
                     // HYBRID ROUTING LOGIC
-                    if (msg.size > LARGE_FILE_THRESHOLD) {
-                        // For large files, setup StreamSaver to pipe directly to disk
-                        console.log(`File is >50MB. Streaming directly to disk via StreamSaver...`);
-                        const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
-                        streamWriterRef.current = fileStream.getWriter();
-                        writePromiseRef.current = Promise.resolve(); // Reset promise chain
+                    if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
+                        // For large files, use the native File System Access API to stream to disk
+                        // This avoids loading the entire file into RAM
+                        console.log(`File is >50MB. Using File System Access API...`);
+                        try {
+                            const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
+                            fsWritableRef.current = await fileHandle.createWritable();
+                        } catch (err) {
+                            // User cancelled the save dialog — fall back to RAM buffer
+                            console.warn('showSaveFilePicker cancelled, falling back to RAM buffer.', err);
+                            fsWritableRef.current = null;
+                        }
                     } else {
-                        // For small files, stick to RAM arrays for instant saving
-                        console.log(`File is <50MB. Using RAM buffer...`);
-                        streamWriterRef.current = null;
+                        // For small files or unsupported browsers, use RAM buffer
+                        console.log(`Using RAM buffer...`);
+                        fsWritableRef.current = null;
                     }
 
                 } else if (msg.type === 'eof') {
                     const meta = incomingMetaRef.current;
 
-                    if (streamWriterRef.current) {
-                        // Wait for all queued writes to flush before closing (backpressure)
-                        writePromiseRef.current.then(() => {
-                            streamWriterRef.current.close();
-                            streamWriterRef.current = null;
-                        });
+                    if (fsWritableRef.current) {
+                        // Close the File System Access API writable stream
+                        await fsWritableRef.current.close();
+                        fsWritableRef.current = null;
                     } else {
-                        // STANDARD BLOB DOWNLOAD
+                        // STANDARD BLOB DOWNLOAD (small files or fallback)
                         const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
                         const downloadUrl = URL.createObjectURL(blob);
 
@@ -233,7 +234,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                     }
 
                     setProgress(100);
-                    // Fix Issue 6: reset receiver UI between files in a multi-file transfer
+                    // Reset receiver UI between files in a multi-file transfer
                     setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
 
                 } else if (msg.type === 'done_all') {
@@ -244,12 +245,9 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                 }
             } else {
                 // --- INCOMING FILE CHUNK ---
-                if (streamWriterRef.current) {
-                    // Chain writes to enforce backpressure — write() returns a Promise
-                    const chunk = new Uint8Array(event.data);
-                    writePromiseRef.current = writePromiseRef.current.then(() =>
-                        streamWriterRef.current?.write(chunk)
-                    );
+                if (fsWritableRef.current) {
+                    // Write chunk directly to disk via File System Access API
+                    await fsWritableRef.current.write(event.data);
                 } else {
                     // Push chunk to RAM buffer
                     receiveBufferRef.current.push(event.data);
