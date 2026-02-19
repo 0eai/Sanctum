@@ -24,6 +24,12 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
     if(debouncedData) onSave(debouncedData);
   }, [debouncedData]);
 
+  useEffect(() => {
+    if (note.id && !data.id) {
+      setData(prev => ({ ...prev, id: note.id }));
+    }
+  }, [note.id, data.id]);
+
   // Auto-Resize Textarea
   useEffect(() => {
     if (textAreaRef.current) {
