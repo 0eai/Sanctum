@@ -1,144 +1,164 @@
 // src/components/system/Launcher.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
+import {
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, Cloud, Cast, Bookmark,
   FileText, ClipboardList, CreditCard, PieChart, Globe, FileCode,
   Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout,
   Users, BellRing, Share2
 } from 'lucide-react';
-import { listenToAppStats } from '../../services/firestoredb'; 
+import { listenToAppStats } from '../../services/firestoredb';
 
 // --- Icon Mapping Helper ---
 const getIconElement = (iconName) => {
-    const props = { size: 32 };
-    switch (iconName) {
-        case 'Cloud': return <Cloud {...props} />;
-        case 'Cast': return <Cast {...props} />;
-        case 'Music': return <Music {...props} />;
-        case 'Video': return <Video {...props} />;
-        case 'MessageSquare': return <MessageSquare {...props} />;
-        case 'ShoppingBag': return <ShoppingBag {...props} />;
-        case 'Briefcase': return <Briefcase {...props} />;
-        case 'Layout': return <Layout {...props} />;
-        case 'FileCode': return <FileCode {...props} />;
-        case 'Users': return <Users {...props} />; 
-        case 'BellRing': return <BellRing {...props} />; 
-        case 'transfer': return <TransferApp {...props} />;
-        case 'Globe': 
-        default: return <Globe {...props} />;
-    }
+  const props = { size: 32 };
+  switch (iconName) {
+    case 'Cloud': return <Cloud {...props} />;
+    case 'Cast': return <Cast {...props} />;
+    case 'Music': return <Music {...props} />;
+    case 'Video': return <Video {...props} />;
+    case 'MessageSquare': return <MessageSquare {...props} />;
+    case 'ShoppingBag': return <ShoppingBag {...props} />;
+    case 'Briefcase': return <Briefcase {...props} />;
+    case 'Layout': return <Layout {...props} />;
+    case 'FileCode': return <FileCode {...props} />;
+    case 'Users': return <Users {...props} />;
+    case 'BellRing': return <BellRing {...props} />;
+    case 'transfer': return <TransferApp {...props} />;
+    case 'Globe':
+    default: return <Globe {...props} />;
+  }
 };
 
-const Launcher = ({ user, onLaunch, enabledApps }) => {
-  const [stats, setStats] = useState({ 
-    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0 
+const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
+  const [stats, setStats] = useState({
+    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0, reminders: 0
   });
 
   useEffect(() => {
-    if(!user) return;
+    if (!user) return;
     const unsubscribe = listenToAppStats(user.uid, (colName, size) => {
-        setStats(prev => ({ ...prev, [colName]: size }));
+      setStats(prev => ({ ...prev, [colName]: size }));
     });
     return () => unsubscribe();
   }, [user]);
 
   // 1. Define Standard System Apps
   const systemApps = useMemo(() => [
-    { id: 'alerts', icon: <Bell size={32} />, label: 'DayPulse' }, 
-    { id: 'tasks', icon: <ClipboardList size={32} />, label: 'Tasks', count: stats.tasks },
-    { id: 'checklist', icon: <CheckSquare size={32} />, label: 'Checklists', count: stats.checklists },
-    { id: 'reminders', icon: <BellRing size={32} />, label: 'Reminders' }, // <--- Added Reminders
-    { id: 'counter', icon: <TrendingUp size={32} />, label: 'Counters', count: stats.counters },
-    { id: 'notes', icon: <FileText size={32} />, label: 'Notes' }, 
-    { id: 'markdown', icon: <FileCode size={32} />, label: 'Markdown' },
-    { id: 'contacts', icon: <Users size={32} />, label: 'Contacts' }, 
-    { id: 'passwords', icon: <Key size={32} />, label: 'Passwords', count: stats.passwords },
-    { id: 'banking', icon: <CreditCard size={32} />, label: 'Wallet', count: stats.banking }, 
-    { id: 'finance', icon: <PieChart size={32} />, label: 'Finance', count: stats.finance }, 
-    { id: 'bookmarks', icon: <Bookmark size={32} />, label: 'Bookmarks' },
-    { id: 'transfer', icon: <Share2 size={32} />, label: 'Drop' },
-    { id: 'streampi', icon: <Cast size={32} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
-    { id: 'drive', icon: <Cloud size={32} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
-    { id: 'settings', icon: <Sliders size={32} />, label: 'Settings' }, 
-    { id: 'vault', icon: <Lock size={32} className="text-yellow-400" />, label: 'Vault', locked: true },
+    { id: 'alerts', icon: <Bell size={24} />, label: 'DayPulse' },
+    { id: 'tasks', icon: <ClipboardList size={24} />, label: 'Tasks', count: stats.tasks },
+    { id: 'checklist', icon: <CheckSquare size={24} />, label: 'Checklists', count: stats.checklists },
+    { id: 'reminders', icon: <BellRing size={24} />, label: 'Reminders', count: stats.reminders },
+    { id: 'counter', icon: <TrendingUp size={24} />, label: 'Counters', count: stats.counters },
+    { id: 'notes', icon: <FileText size={24} />, label: 'Notes' },
+    { id: 'markdown', icon: <FileCode size={24} />, label: 'Markdown' },
+    { id: 'contacts', icon: <Users size={24} />, label: 'Contacts' },
+    { id: 'passwords', icon: <Key size={24} />, label: 'Passwords', count: stats.passwords },
+    { id: 'banking', icon: <CreditCard size={24} />, label: 'Wallet', count: stats.banking },
+    { id: 'finance', icon: <PieChart size={24} />, label: 'Finance', count: stats.finance },
+    { id: 'bookmarks', icon: <Bookmark size={24} />, label: 'Bookmarks' },
+    { id: 'transfer', icon: <Share2 size={24} />, label: 'Drop' },
+    { id: 'streampi', icon: <Cast size={24} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
+    { id: 'drive', icon: <Cloud size={24} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
+    { id: 'settings', icon: <Sliders size={24} />, label: 'Settings' },
+    { id: 'vault', icon: <Lock size={24} className="text-yellow-400" />, label: 'Vault', locked: true },
   ], [stats]);
 
   // 2. Merge & Sort Logic
   const finalApps = useMemo(() => {
-      let computedList = [];
+    let computedList = [];
 
-      if (!enabledApps) {
-          computedList = [...systemApps];
+    if (!enabledApps) {
+      computedList = [...systemApps];
+    } else {
+      const { customAppList, selectedApps } = enabledApps;
+
+      if (!customAppList) {
+        const ids = Array.isArray(enabledApps) ? enabledApps : (selectedApps || []);
+        computedList = systemApps.filter(app => ids.includes(app.id) || ['vault', 'settings'].includes(app.id));
       } else {
-          const { customAppList, selectedApps } = enabledApps;
-          
-          if (!customAppList) {
-              const ids = Array.isArray(enabledApps) ? enabledApps : (selectedApps || []);
-              computedList = systemApps.filter(app => ids.includes(app.id) || ['vault', 'settings'].includes(app.id));
-          } else {
-              computedList = customAppList
-                  .filter(savedApp => ['vault', 'settings'].includes(savedApp.id) || selectedApps.includes(savedApp.id))
-                  .map(savedApp => {
-                      const systemApp = systemApps.find(a => a.id === savedApp.id);
-                      if (systemApp) return systemApp; 
-                      
-                      return {
-                          ...savedApp,
-                          label: savedApp.name,
-                          icon: getIconElement(savedApp.icon),
-                          locked: false
-                      };
-                  });
-          }
+        computedList = customAppList
+          .filter(savedApp => ['vault', 'settings'].includes(savedApp.id) || selectedApps.includes(savedApp.id))
+          .map(savedApp => {
+            const systemApp = systemApps.find(a => a.id === savedApp.id);
+            if (systemApp) return systemApp;
+
+            return {
+              ...savedApp,
+              label: savedApp.name,
+              icon: getIconElement(savedApp.icon),
+              locked: false
+            };
+          });
       }
+    }
 
-      const settingsApp = systemApps.find(a => a.id === 'settings');
-      const listWithoutSettings = computedList.filter(app => app.id !== 'settings');
+    const settingsApp = systemApps.find(a => a.id === 'settings');
+    const listWithoutSettings = computedList.filter(app => app.id !== 'settings');
 
-      return settingsApp ? [...listWithoutSettings, settingsApp] : listWithoutSettings;
+    return settingsApp ? [...listWithoutSettings, settingsApp] : listWithoutSettings;
 
   }, [enabledApps, systemApps]);
 
   const handleAppClick = (app) => {
     if (app.locked) return;
     if (app.url) {
-        window.open(app.url, '_blank');
+      window.open(app.url, '_blank');
     } else {
-        onLaunch(app.id);
+      onLaunch(app.id);
     }
   };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-white">
       <header className="bg-white pt-6 pb-2 shadow-sm z-10">
-        <div className="max-w-3xl mx-auto px-6">
-          <h1 className="text-2xl font-bold text-gray-800">My Apps</h1>
-          <p className="text-gray-500 text-sm">Welcome back</p>
+        <div className="max-w-3xl mx-auto px-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">My Apps</h1>
+            <p className="text-gray-500 text-sm">Welcome back</p>
+          </div>
+          {onLock && (
+            <button
+              onClick={onLock}
+              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors flex flex-col items-center"
+              aria-label="Lock Workspace"
+            >
+              <Lock size={20} />
+            </button>
+          )}
         </div>
       </header>
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto p-6 grid grid-cols-2 md:grid-cols-3 gap-8">
+      <main className="flex-1 overflow-y-auto flex flex-col items-center">
+        <div className="max-w-3xl p-6 flex flex-wrap justify-center content-start gap-4 sm:gap-5 lg:gap-6 mb-8 w-full">
           {finalApps.map(app => {
-            // Updated to include 'reminders' and 'contacts' in the primary blue-background list
-            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance'].includes(app.id);
-            
+            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer'].includes(app.id);
+
             return (
-              <button key={app.id} onClick={() => handleAppClick(app)} className={`aspect-square rounded-3xl flex flex-col items-center justify-center gap-3 shadow-lg transition-transform active:scale-95 relative bg-[#4285f4] ${app.locked ? 'opacity-90' : 'hover:brightness-110'}`}>
-                <div className={`p-4 rounded-2xl ${isPrimary ? 'bg-white/20 text-white' : 'bg-white text-[#4285f4]'}`}>
-                    {app.icon}
+              <button
+                key={app.id}
+                onClick={() => handleAppClick(app)}
+                className={`w-[5.5rem] h-[5.5rem] sm:w-24 sm:h-24 md:w-[6.5rem] md:h-[6.5rem] rounded-3xl flex flex-col items-center justify-center gap-1 sm:gap-1.5 shadow-sm transition-transform active:scale-95 relative bg-[#4285f4] ${app.locked ? 'opacity-90' : 'hover:brightness-110'}`}
+              >
+                <div className={`p-2.5 sm:p-3 rounded-2xl ${isPrimary ? 'bg-white/20 text-white' : 'bg-white text-[#4285f4]'}`}>
+                  {app.icon}
                 </div>
-                {app.count !== undefined && <span className="absolute top-4 right-4 bg-white text-[#4285f4] text-xs font-bold px-2 py-0.5 rounded-full">{app.count > 9 ? '10+' : app.count}</span>}
-                <span className="text-sm font-medium text-white px-2 truncate w-full text-center">{app.label}</span>
+                {app.count !== undefined && app.count > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 sm:-top-2 sm:-right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-md border-2 border-white z-10 min-w-[20px] text-center">
+                    {app.count > 999 ? '1000+' : app.count}
+                  </span>
+                )}
+                <span className="text-[10px] sm:text-[11px] md:text-xs font-medium text-white px-2 truncate w-full text-center leading-tight">
+                  {app.label}
+                </span>
               </button>
             );
           })}
         </div>
-      </main>
-      <div className="bg-white p-6 mt-auto border-t border-gray-100">
-        <div className="max-w-3xl mx-auto text-center text-xs text-gray-300">
-          Encrypted Workspace
+        <div className="bg-white p-6 mt-auto border-t border-gray-100">
+          <div className="max-w-3xl mx-auto text-center text-xs text-gray-300">
+            Encrypted Workspace
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

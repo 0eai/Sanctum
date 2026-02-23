@@ -79,11 +79,11 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
         }
     `}</style>
 
-            <div ref={scrollRef} className="h-[100dvh] bg-gray-50 overflow-y-auto">
-                <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
+            <div className="flex flex-col h-[100dvh] bg-gray-50">
+                <div className="max-w-4xl mx-auto w-full h-full flex flex-col bg-white shadow-xl overflow-hidden relative">
 
                     {/* Toolbar - Now fixed because parent is h-full/overflow-hidden */}
-                    <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
+                    <div className="flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-20">
                         <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
                         <div className="flex gap-2 items-center">
                             <span className="text-xs text-gray-400 mr-2 uppercase tracking-wider font-medium">
@@ -99,7 +99,7 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                     </div>
 
                     {/* Content - Scrolls independently */}
-                    <div className="flex-1 w-full">
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto">
                         <div className="p-6 md:p-8 flex flex-col gap-4 min-h-full">
 
                             {/* Title */}

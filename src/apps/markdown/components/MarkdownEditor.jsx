@@ -113,11 +113,11 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
         }
     `}</style>
 
-            <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
-                <div className="max-w-4xl mx-auto w-full h-full flex flex-col bg-white shadow-xl overflow-hidden relative">
+            <div ref={scrollRef} className="fixed inset-0 z-50 bg-gray-50 overflow-y-auto">
+                <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
 
                     {/* Toolbar */}
-                    <div className="flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-20">
+                    <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
                         <div className="flex items-center gap-3 overflow-hidden">
                             <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 flex-shrink-0"><ChevronLeft /></button>
                             {/* Display current title in toolbar since main input is gone */}
@@ -154,7 +154,7 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
                     </div>
 
                     {/* Scrollable Content Container */}
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto w-full">
+                    <div className="flex-1 w-full">
                         <div className="p-6 md:p-10 flex flex-col gap-6 min-h-full">
 
                             {/* Meta Bar */}

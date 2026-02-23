@@ -1,13 +1,13 @@
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
-import { 
-  GoogleAuthProvider, signInWithPopup, signInWithCustomToken, onAuthStateChanged 
+import {
+  GoogleAuthProvider, signInWithPopup, signInWithCustomToken, onAuthStateChanged
 } from 'firebase/auth';
 import { Grid, LogIn } from 'lucide-react';
 
 import { auth } from './lib/firebase';
 import { Button, LoadingSpinner } from './components/ui';
-import { fetchAppPreferences } from './services/settings'; 
+import { fetchAppPreferences } from './services/settings';
 
 import { useHashRoute } from './hooks/useHashRoute';
 
@@ -16,17 +16,17 @@ import LockScreen from './components/system/LockScreen';
 import Launcher from './components/system/Launcher';
 
 // App Modules
-import ChecklistApp from './apps/checklist/Checklist'; 
+import ChecklistApp from './apps/checklist/Checklist';
 import CounterApp from './apps/counter/Counter';
 import BookmarksApp from './apps/bookmarks/Bookmarks';
 import NotesApp from './apps/notes/Notes';
-import TasksApp from './apps/tasks/Tasks'; 
-import PasswordsApp from './apps/passwords/Passwords'; 
-import AlertsApp from './apps/alerts/Alerts'; 
-import BankingApp from './apps/banking/Banking'; 
+import TasksApp from './apps/tasks/Tasks';
+import PasswordsApp from './apps/passwords/Passwords';
+import AlertsApp from './apps/alerts/Alerts';
+import BankingApp from './apps/banking/Banking';
 import FinanceApp from './apps/finance/Finance';
 import SettingsApp from './apps/settings/Settings';
-import SharedNote from './apps/SharedNote'; 
+import SharedNote from './apps/SharedNote';
 import MarkdownApp from './apps/markdown/Markdown';
 import RemindersApp from './apps/reminders/Reminders';
 import ContactsApp from './apps/contacts/Contacts';
@@ -36,8 +36,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [cryptoKey, setCryptoKey] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lockMessage, setLockMessage] = useState(""); 
-  const [enabledApps, setEnabledApps] = useState(null); 
+  const [lockMessage, setLockMessage] = useState("");
+  const [enabledApps, setEnabledApps] = useState(null);
 
   // --- 1. Router Hook ---
   const { route, navigate } = useHashRoute();
@@ -47,7 +47,7 @@ export default function App() {
     const timer = setTimeout(() => {
       setLockMessage("Session expired due to inactivity.");
       setCryptoKey(null);
-    }, 3600000); 
+    }, 3600000);
     return () => clearTimeout(timer);
   }, [cryptoKey]);
 
@@ -58,7 +58,7 @@ export default function App() {
       }
     };
     initAuth();
-    
+
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setLoading(false);
@@ -74,11 +74,11 @@ export default function App() {
 
   // --- Handlers ---
   const launchApp = (appId) => {
-    navigate(`#${appId}`); 
+    navigate(`#${appId}`);
   };
 
   const exitApp = () => {
-    navigate(''); 
+    navigate('');
   };
 
   const handleUnlock = (key) => {
@@ -87,15 +87,15 @@ export default function App() {
   };
 
   const handleLogin = async () => {
-    try { await signInWithPopup(auth, new GoogleAuthProvider()); } 
+    try { await signInWithPopup(auth, new GoogleAuthProvider()); }
     catch (e) { console.error(e); alert("Login failed"); }
   };
 
   // --- Render Logic ---
-  
+
   // FIXED: Use the route.appId instead of the deleted isSharedView state
-  if (route.appId === 'view') return <SharedNote />; 
-  
+  if (route.appId === 'view') return <SharedNote />;
+
   if (loading) return <div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>;
 
   if (!user) {
@@ -132,6 +132,6 @@ export default function App() {
     case 'markdown': return <MarkdownApp {...props} />;
     case 'contacts': return <ContactsApp {...props} />;
     case 'settings': return <SettingsApp {...props} />;
-    default: return <Launcher user={user} onLaunch={launchApp} enabledApps={enabledApps} />; 
+    default: return <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />;
   }
 }

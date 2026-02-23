@@ -252,7 +252,15 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             navigate(`#markdown`);
           }
         }}
-        onExport={(d) => { /* handle export */ }}
+        onExport={(d) => {
+          const blob = new Blob([d.content || ''], { type: 'text/markdown' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${d.title || 'Untitled_Document'}.md`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }}
         saveStatus={saveStatus}
         navigate={navigate}
       />
