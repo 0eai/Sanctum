@@ -1,17 +1,17 @@
 // src/apps/tasks/Tasks.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings 
+import {
+  ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home
 } from 'lucide-react';
 
-import { Modal, Button, Input, LoadingSpinner } from '../../components/ui'; 
-import Fab from '../../components/ui/Fab'; 
-import ImportExportModal from '../../components/ui/ImportExportModal'; 
+import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
+import Fab from '../../components/ui/Fab';
+import ImportExportModal from '../../components/ui/ImportExportModal';
 
-import { 
-  listenToTaskFolders, listenToTasks, saveTaskFolder, saveTask, 
+import {
+  listenToTaskFolders, listenToTasks, saveTaskFolder, saveTask,
   toggleTaskCompletion, deleteTaskEntity, reorderTasks,
-  exportTasks, importTasks 
+  exportTasks, importTasks
 } from '../../services/tasks';
 
 import TaskCard from './components/TaskCard';
@@ -28,32 +28,33 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [folders, setFolders] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [isCompletedOpen, setIsCompletedOpen] = useState(false); 
-  
+  const [isCompletedOpen, setIsCompletedOpen] = useState(false);
+
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null); 
-  const [draggedItemIndex, setDraggedItemIndex] = useState(null);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [itemToMove, setItemToMove] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [processing, setProcessing] = useState(false);
 
   // --- URL-Driven State ---
   // Determine current tab based on the URL path
   let currentTab = 'inbox';
   if (route.resource === 'folder' && route.resourceId) {
-      currentTab = route.resourceId;
+    currentTab = route.resourceId;
   } else if (['starred', 'reminders', 'inbox'].includes(route.resource)) {
-      currentTab = route.resource;
+    currentTab = route.resource;
   }
-  
+
   // Modal / Editor State
   const isSettingsOpen = route.query?.modal === 'settings';
   const editTaskId = route.query?.edit;
-  
+
   // If the URL has ?edit=id, find the task in our loaded data
   const editorTask = useMemo(() => {
-      if (!editTaskId) return null;
-      return tasks.find(t => t.id === editTaskId) || null;
+    if (!editTaskId) return null;
+    return tasks.find(t => t.id === editTaskId) || null;
   }, [editTaskId, tasks]);
 
   // Helper for generating the current base path
@@ -69,8 +70,8 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!user || !cryptoKey) return;
     const unsubFolders = listenToTaskFolders(user.uid, cryptoKey, setFolders);
     const unsubTasks = listenToTasks(user.uid, cryptoKey, (data) => {
-        setTasks(data);
-        setLoading(false);
+      setTasks(data);
+      setLoading(false);
     });
     return () => { unsubFolders(); unsubTasks(); };
   }, [user, cryptoKey]);
@@ -80,13 +81,13 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   useEffect(() => {
     const tabElement = document.getElementById(`tab-${currentTab}`);
     if (tabElement) {
-        tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
     }
   }, [currentTab]);
 
   // --- Derived State ---
   const allTabs = useMemo(() => {
-      return [...DEFAULT_TABS, ...folders];
+    return [...DEFAULT_TABS, ...folders];
   }, [folders]);
 
   const displayedItems = useMemo(() => {
@@ -95,28 +96,28 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (searchQuery.trim()) {
       filtered = tasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()));
     } else {
-      switch(currentTab) {
-        case 'starred': 
-          filtered = tasks.filter(t => t.isPinned); 
+      switch (currentTab) {
+        case 'starred':
+          filtered = tasks.filter(t => t.isPinned);
           break;
-        case 'reminders': 
+        case 'reminders':
           filtered = tasks.filter(t => t.dueDate || t.deadline)
-            .sort((a, b) => new Date(a.dueDate || a.deadline) - new Date(b.dueDate || b.deadline)); 
+            .sort((a, b) => new Date(a.dueDate || a.deadline) - new Date(b.dueDate || b.deadline));
           break;
-        case 'inbox': 
-          filtered = tasks.filter(t => !t.folderId); 
+        case 'inbox':
+          filtered = tasks.filter(t => !t.folderId);
           break;
-        default: 
-          filtered = tasks.filter(t => t.folderId === currentTab); 
+        default:
+          filtered = tasks.filter(t => t.folderId === currentTab);
           break;
       }
     }
-    
+
     const active = filtered.filter(t => !t.completed);
     const completed = filtered.filter(t => t.completed);
 
     if (currentTab !== 'starred' && currentTab !== 'reminders') {
-        active.sort((a, b) => (b.isPinned === a.isPinned ? 0 : b.isPinned ? 1 : -1));
+      active.sort((a, b) => (b.isPinned === a.isPinned ? 0 : b.isPinned ? 1 : -1));
     }
 
     return { active, completed };
@@ -134,27 +135,27 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleCreateNew = async () => {
-      const isSystemTab = ['starred', 'reminders', 'inbox'].includes(currentTab);
-      const targetFolderId = isSystemTab ? null : currentTab;
-      
-      const targetTab = isSystemTab ? 'inbox' : currentTab;
-      const targetPath = targetFolderId ? `#tasks/folder/${targetTab}` : `#tasks/${targetTab}`;
+    const isSystemTab = ['starred', 'reminders', 'inbox'].includes(currentTab);
+    const targetFolderId = isSystemTab ? null : currentTab;
 
-      const newTask = {
-          title: '',
-          folderId: targetFolderId,
-          completed: false,
-          isPinned: false,
-          createdAt: new Date().toISOString()
-      };
+    const targetTab = isSystemTab ? 'inbox' : currentTab;
+    const targetPath = targetFolderId ? `#tasks/folder/${targetTab}` : `#tasks/${targetTab}`;
 
-      try {
-          // Immediately save the ghost task and push its ID to the URL so the editor opens
-          const newId = await saveTask(user.uid, cryptoKey, newTask);
-          navigate(`${targetPath}?edit=${newId}`);
-      } catch (e) {
-          console.error("Failed to create task", e);
-      }
+    const newTask = {
+      title: '',
+      folderId: targetFolderId,
+      completed: false,
+      isPinned: false,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      // Immediately save the ghost task and push its ID to the URL so the editor opens
+      const newId = await saveTask(user.uid, cryptoKey, newTask);
+      navigate(`${targetPath}?edit=${newId}`);
+    } catch (e) {
+      console.error("Failed to create task", e);
+    }
   };
 
   const handleSaveTask = async (taskData) => {
@@ -162,19 +163,19 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleCloseEditor = async (finalTaskData) => {
-      // Close the editor by stripping the query parameter
-      navigate(currentBasePath);
+    // Close the editor by stripping the query parameter
+    navigate(currentBasePath);
 
-      if (!finalTaskData || !finalTaskData.id) return;
-      const title = finalTaskData.title ? finalTaskData.title.trim() : '';
-      
-      if (title === '') {
-          try {
-              await deleteTaskEntity(user.uid, { type: 'task', id: finalTaskData.id }, tasks);
-          } catch (error) {
-              console.error("Cleanup failed", error);
-          }
+    if (!finalTaskData || !finalTaskData.id) return;
+    const title = finalTaskData.title ? finalTaskData.title.trim() : '';
+
+    if (title === '') {
+      try {
+        await deleteTaskEntity(user.uid, { type: 'task', id: finalTaskData.id }, tasks);
+      } catch (error) {
+        console.error("Cleanup failed", error);
       }
+    }
   };
 
   const handleToggleTask = async (task) => {
@@ -185,13 +186,20 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     await deleteTaskEntity(user.uid, deleteConfirm, tasks);
-    
+
     // If we just deleted the folder we are currently viewing, go to Inbox
     if (deleteConfirm.type === 'folder' && currentTab === deleteConfirm.id) {
-        navigate(`#tasks/inbox`);
+      navigate(`#tasks/inbox`);
     }
-    
+
     setDeleteConfirm(null);
+  };
+
+  const handleItemMove = async (targetFolderId) => {
+    if (!itemToMove) return;
+    await saveTask(user.uid, cryptoKey, { ...itemToMove, folderId: targetFolderId });
+    setIsMoveModalOpen(false);
+    setItemToMove(null);
   };
 
   // --- Import / Export Handlers ---
@@ -233,18 +241,13 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     reader.readAsText(file);
   };
 
-  const onDragStart = (e, index) => {
-    setDraggedItemIndex(index);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const onDrop = async (e, dropIndex) => {
-    e.preventDefault();
-    if (draggedItemIndex === null || draggedItemIndex === dropIndex) return;
-    
+  const handleReorderTask = async (index, direction) => {
     const list = displayedItems.active;
-    await reorderTasks(user.uid, list[draggedItemIndex], list[dropIndex]);
-    setDraggedItemIndex(null);
+    const targetIndex = index + direction;
+
+    if (targetIndex < 0 || targetIndex >= list.length) return;
+
+    await reorderTasks(user.uid, list[index], list[targetIndex]);
   };
 
   // --- Swipe Logic ---
@@ -257,45 +260,49 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleTouchEnd = () => {
     if (!touchStart || !touchEnd) return;
-    
+
     const distance = touchStart - touchEnd;
     const isLeftSwipe = distance > MIN_SWIPE_DISTANCE;
     const isRightSwipe = distance < -MIN_SWIPE_DISTANCE;
 
     if (isLeftSwipe || isRightSwipe) {
-        const currentIndex = allTabs.findIndex(t => t.id === currentTab);
-        if (currentIndex === -1) return; 
+      const currentIndex = allTabs.findIndex(t => t.id === currentTab);
+      if (currentIndex === -1) return;
 
-        let nextIndex = currentIndex;
+      let nextIndex = currentIndex;
 
-        if (isLeftSwipe && currentIndex < allTabs.length - 1) {
-            nextIndex = currentIndex + 1;
-        } else if (isRightSwipe && currentIndex > 0) {
-            nextIndex = currentIndex - 1;
-        }
+      if (isLeftSwipe && currentIndex < allTabs.length - 1) {
+        nextIndex = currentIndex + 1;
+      } else if (isRightSwipe && currentIndex > 0) {
+        nextIndex = currentIndex - 1;
+      }
 
-        if (nextIndex !== currentIndex) {
-            const nextTab = allTabs[nextIndex];
-            const isSystem = ['starred', 'reminders', 'inbox'].includes(nextTab.id);
-            navigate(isSystem ? `#tasks/${nextTab.id}` : `#tasks/folder/${nextTab.id}`);
-        }
+      if (nextIndex !== currentIndex) {
+        const nextTab = allTabs[nextIndex];
+        const isSystem = ['starred', 'reminders', 'inbox'].includes(nextTab.id);
+        navigate(isSystem ? `#tasks/${nextTab.id}` : `#tasks/folder/${nextTab.id}`);
+      }
     }
   };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
-      
+
       {/* EDITOR VIEW */}
       {/* FIXED: We only render the editor if we successfully found the task AND the URL has ?edit= */}
       {editTaskId && editorTask ? (
-        <TaskEditor 
-          task={editorTask} 
-          onSave={handleSaveTask} 
+        <TaskEditor
+          task={editorTask}
+          onSave={handleSaveTask}
           onClose={handleCloseEditor}
-          onDelete={(item) => { 
-              setDeleteConfirm(item); 
-              navigate(currentBasePath); // Close editor immediately on delete request
-          }} 
+          onDelete={(item) => {
+            setDeleteConfirm(item);
+            navigate(currentBasePath); // Close editor immediately on delete request
+          }}
+          onMove={(item) => {
+            setItemToMove(item);
+            setIsMoveModalOpen(true);
+          }}
         />
       ) : (
         /* LIST VIEW */
@@ -310,15 +317,15 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 </div>
                 {/* FIXED: Push ?modal=settings to URL */}
                 <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                    <Settings size={20} />
+                  <Settings size={20} />
                 </button>
               </div>
 
               <div className="relative">
                 <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-                <input 
-                  type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." 
-                  className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm" 
+                <input
+                  type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..."
+                  className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
                 />
                 {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
               </div>
@@ -326,7 +333,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               {/* TAB BAR */}
               <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
                 {DEFAULT_TABS.map(tab => (
-                  <button 
+                  <button
                     key={tab.id}
                     id={`tab-${tab.id}`}
                     onClick={() => navigate(`#tasks/${tab.id}`)} // FIXED: Drive by URL
@@ -337,51 +344,53 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 ))}
                 <div className="w-px h-6 bg-blue-400/50 mx-1 flex-shrink-0" />
                 {folders.map(folder => (
-                    <button
-                        key={folder.id}
-                        id={`tab-${folder.id}`}
-                        onClick={() => navigate(`#tasks/folder/${folder.id}`)} // FIXED: Drive by URL
-                        className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap group ${currentTab === folder.id ? 'bg-gray-50 text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                    >
-                        <Folder size={14} fill={currentTab === folder.id ? "currentColor" : "none"} /> 
-                        <span className="max-w-[100px] truncate">{folder.name}</span>
-                        {currentTab === folder.id && (
-                            <span onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'folder', id: folder.id, title: folder.name }); }} className="opacity-50 hover:opacity-100 hover:text-red-500"><X size={12} /></span>
-                        )}
-                    </button>
+                  <button
+                    key={folder.id}
+                    id={`tab-${folder.id}`}
+                    onClick={() => navigate(`#tasks/folder/${folder.id}`)} // FIXED: Drive by URL
+                    className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap group ${currentTab === folder.id ? 'bg-gray-50 text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
+                  >
+                    <Folder size={14} fill={currentTab === folder.id ? "currentColor" : "none"} />
+                    <span className="max-w-[100px] truncate">{folder.name}</span>
+                    {currentTab === folder.id && (
+                      <span onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'folder', id: folder.id, title: folder.name }); }} className="opacity-50 hover:opacity-100 hover:text-red-500"><X size={12} /></span>
+                    )}
+                  </button>
                 ))}
                 <button onClick={() => setIsFolderModalOpen(true)} className="px-3 py-2.5 text-blue-200 hover:text-white"><Plus size={16} /></button>
               </div>
             </div>
           </header>
 
-          <main 
+          <main
             className="flex-1 overflow-y-auto scroll-smooth p-4"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
             <div className="max-w-3xl mx-auto pb-32 space-y-4">
-              
+
               {loading && <div className="flex justify-center py-10"><LoadingSpinner /></div>}
 
               {!loading && displayedItems.active.length === 0 && displayedItems.completed.length === 0 && (
-                 <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-                   <div className="bg-white p-4 rounded-full shadow-sm"><CheckSquare size={32} className="opacity-50" /></div>
-                   <p>No tasks.</p>
-                 </div>
+                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+                  <div className="bg-white p-4 rounded-full shadow-sm"><CheckSquare size={32} className="opacity-50" /></div>
+                  <p>No tasks.</p>
+                </div>
               )}
 
               {/* ACTIVE TASKS */}
               <div className="flex flex-col gap-2">
                 {displayedItems.active.map((task, index) => (
-                  <TaskCard 
-                    key={task.id} task={task} index={index} 
+                  <TaskCard
+                    key={task.id} task={task} index={index}
+                    totalActiveCount={displayedItems.active.length}
                     onToggle={handleToggleTask}
                     onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)} // FIXED: Push edit to URL
                     setDeleteConfirm={setDeleteConfirm}
-                    onDragStart={onDragStart} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}
-                    isDraggable={true} 
+                    onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                    onReorder={handleReorderTask}
+                    isDraggable={true}
                   />
                 ))}
               </div>
@@ -389,32 +398,33 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               {/* COMPLETED SECTION */}
               {displayedItems.completed.length > 0 && (
                 <div className="mt-6">
-                    <button onClick={() => setIsCompletedOpen(!isCompletedOpen)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-wider mb-3 select-none">
-                        {isCompletedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        Completed ({displayedItems.completed.length})
-                    </button>
-                    
-                    {isCompletedOpen && (
-                        <div className="flex flex-col gap-2 opacity-70">
-                            {displayedItems.completed.map((task) => (
-                                <TaskCard 
-                                    key={task.id} task={task} 
-                                    onToggle={handleToggleTask}
-                                    onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)} // FIXED: Push edit to URL
-                                    setDeleteConfirm={setDeleteConfirm}
-                                    isDraggable={false} 
-                                />
-                            ))}
-                        </div>
-                    )}
+                  <button onClick={() => setIsCompletedOpen(!isCompletedOpen)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-wider mb-3 select-none">
+                    {isCompletedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    Completed ({displayedItems.completed.length})
+                  </button>
+
+                  {isCompletedOpen && (
+                    <div className="flex flex-col gap-2 opacity-70">
+                      {displayedItems.completed.map((task) => (
+                        <TaskCard
+                          key={task.id} task={task}
+                          onToggle={handleToggleTask}
+                          onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)} // FIXED: Push edit to URL
+                          setDeleteConfirm={setDeleteConfirm}
+                          onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                          isDraggable={false}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </main>
 
           {/* REUSABLE FAB COMPONENT */}
-          <Fab 
-            onClick={handleCreateNew} 
+          <Fab
+            onClick={handleCreateNew}
             icon={<Plus size={28} />}
             maxWidth="max-w-4xl" // Align with header
             ariaLabel="Create Task"
@@ -430,7 +440,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </form>
       </Modal>
 
-      <ImportExportModal 
+      <ImportExportModal
         isOpen={isSettingsOpen}
         onClose={() => navigate(currentBasePath)}
         onImport={handleImport}
@@ -452,6 +462,15 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
             <Button variant="danger" onClick={handleDelete}>Delete</Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
+        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
+          <button onClick={() => handleItemMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Inbox / No Folder</button>
+          {folders.filter(f => f.id !== itemToMove?.id).map(f => (
+            <button key={f.id} onClick={() => handleItemMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.name}</button>
+          ))}
         </div>
       </Modal>
 

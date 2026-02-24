@@ -2,10 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, Star, Trash2, CheckSquare, Square, Clock, RotateCcw,
-  AlertCircle, Plus, X, FileText
+  AlertCircle, Plus, X, FileText, Move
 } from 'lucide-react';
 
-const TaskEditor = ({ task, onSave, onClose, onDelete }) => {
+const TaskEditor = ({ task, onSave, onClose, onDelete, onMove }) => {
   const [data, setData] = useState({
     ...task,
     dueDate: task.dueDate || '',
@@ -98,11 +98,16 @@ const TaskEditor = ({ task, onSave, onClose, onDelete }) => {
       <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
         <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
           <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
-          <div className="flex gap-2">
-            <button onClick={() => update({ isPinned: !data.isPinned })} className={`p-2 rounded-full ${data.isPinned ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:bg-gray-100'}`}>
+          <div className="flex gap-1">
+            {onMove && (
+              <button onClick={() => onMove(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors">
+                <Move size={20} />
+              </button>
+            )}
+            <button onClick={() => update({ isPinned: !data.isPinned })} className={`p-2 rounded-full transition-colors ${data.isPinned ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:bg-gray-100'}`}>
               <Star size={20} fill={data.isPinned ? "currentColor" : "none"} />
             </button>
-            <button onClick={() => onDelete({ type: 'task', id: data.id, title: data.title })} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full">
+            <button onClick={() => onDelete({ type: 'task', id: data.id, title: data.title })} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
               <Trash2 size={20} />
             </button>
           </div>
