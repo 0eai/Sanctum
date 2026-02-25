@@ -1,10 +1,10 @@
 // src/apps/markdown/components/MarkdownCard.jsx
 import React from 'react';
 import {
-    FileText, Folder, Star, X, Move, Paperclip, Clock
+    FileText, Folder, Star, X, Move, Paperclip, Clock, Globe
 } from 'lucide-react';
 
-const MarkdownCard = ({ item, docs, onClick, onMove, onDelete }) => {
+const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare }) => {
 
     // Format Date & Time
     const formatDateTime = (dateVal) => {
@@ -74,6 +74,15 @@ const MarkdownCard = ({ item, docs, onClick, onMove, onDelete }) => {
                     {formatDateTime(item.updatedAt)}
                 </span>
                 <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    {item.type !== 'folder' && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onShare?.(item); }}
+                            className={`p-1 ${item.sharedId ? 'text-green-500' : 'text-gray-300 hover:text-blue-500'}`}
+                            title={item.sharedId ? 'Shared' : 'Share'}
+                        >
+                            <Globe size={14} />
+                        </button>
+                    )}
                     <button
                         onClick={(e) => { e.stopPropagation(); onMove(item); }}
                         className="text-gray-300 hover:text-blue-500 p-1"

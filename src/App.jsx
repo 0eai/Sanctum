@@ -9,6 +9,8 @@ import { auth } from './lib/firebase';
 import { Button, LoadingSpinner } from './components/ui';
 import { fetchAppPreferences } from './services/settings';
 import { syncUserProfile } from './services/profile';
+import { logActivity } from './services/activityLog';
+import { registerDevice, updateDeviceActivity } from './services/deviceTracker';
 
 import { useHashRoute } from './hooks/useHashRoute';
 
@@ -45,14 +47,47 @@ export default function App() {
   // --- 1. Router Hook ---
   const { route, navigate } = useHashRoute();
 
+  // --- Auto-lock timer (configurable from Settings > Security) ---
   useEffect(() => {
-    if (!cryptoKey) return;
-    const timer = setTimeout(() => {
-      setLockMessage("Session expired due to inactivity.");
-      setCryptoKey(null);
-    }, 3600000);
-    return () => clearTimeout(timer);
-  }, [cryptoKey]);
+    if (!cryptoKey || !user) return;
+
+    const getTimeout = () => {
+      const saved = localStorage.getItem('sanctum_autolock');
+      const minutes = saved ? parseInt(saved) : 60;
+      return minutes === 0 ? null : minutes * 60000; // 0 = Never
+    };
+
+    let timer = null;
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      const timeout = getTimeout();
+      if (timeout) {
+        timer = setTimeout(() => {
+          logActivity(user.uid, 'Vault Auto-Locked', 'info', 'Lock');
+          setLockMessage('Session expired due to inactivity.');
+          setCryptoKey(null);
+        }, timeout);
+      }
+    };
+
+    resetTimer();
+
+    // Reset timer on user interaction
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(e => window.addEventListener(e, resetTimer, { passive: true }));
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      events.forEach(e => window.removeEventListener(e, resetTimer));
+    };
+  }, [cryptoKey, user]);
+
+  // --- Periodic device activity update (every 5 min while vault open) ---
+  useEffect(() => {
+    if (!cryptoKey || !user) return;
+    const interval = setInterval(() => updateDeviceActivity(user.uid), 5 * 60000);
+    return () => clearInterval(interval);
+  }, [cryptoKey, user]);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -88,6 +123,8 @@ export default function App() {
   const handleUnlock = (key) => {
     setLockMessage("");
     setCryptoKey(key);
+    logActivity(user.uid, 'Vault Unlocked', 'success', 'Lock');
+    registerDevice(user.uid);
   };
 
   const handleLogin = async () => {

@@ -76,7 +76,7 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                     <Database size={18} className="text-[#4285f4]" /> Backup & Restore
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                    <Button onClick={() => handleExport()} variant="secondary" className="flex flex-col items-center py-4 h-auto gap-2">
+                    <Button onClick={() => handleExport()} variant="secondary" className="flex flex-col items-center py-4 h-auto gap-2 min-h-[56px]">
                         <Download size={24} /> <span>Export All Data</span>
                     </Button>
                     <Button onClick={() => fileInputRef.current.click()} variant="secondary" className="flex flex-col items-center py-4 h-auto gap-2">

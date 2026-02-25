@@ -85,11 +85,11 @@ const AccountTab = ({ user, setLoading, setMessage }) => {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <h2 className="font-bold text-gray-800 mb-4">Session</h2>
         <div className="flex flex-col gap-3">
-          <Button variant="secondary" onClick={() => window.confirm("Sign out?") && signOut(auth)} className="w-full">
+          <Button variant="secondary" onClick={() => window.confirm("Sign out?") && signOut(auth)} className="w-full min-h-[48px]">
             <LogOut size={18} /> Sign Out
           </Button>
           <div className="border-t border-gray-100 my-2"></div>
-          <Button variant="danger" onClick={handleDeleteAccount} className="w-full bg-red-50 text-red-600 border-red-100 hover:bg-red-100 hover:text-red-700">
+          <Button variant="danger" onClick={handleDeleteAccount} className="w-full min-h-[48px] bg-red-50 text-red-600 border-red-100 hover:bg-red-100 hover:text-red-700">
             <Trash2 size={18} /> Delete Account
           </Button>
         </div>

@@ -191,7 +191,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                             <div
                                 key={app.id}
                                 onClick={() => !isSystem && toggleApp(app.id)}
-                                className={`p-3 flex items-center justify-between hover:bg-gray-50 transition-colors group ${!isSystem ? 'cursor-pointer' : ''}`}
+                                className={`p-4 flex items-center justify-between hover:bg-gray-50 transition-colors group min-h-[48px] ${!isSystem ? 'cursor-pointer' : ''}`}
                             >
                                 <div className="flex items-center gap-3">
                                     {/* Reorder Buttons */}

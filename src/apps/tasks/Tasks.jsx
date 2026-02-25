@@ -1,7 +1,8 @@
 // src/apps/tasks/Tasks.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home
+  ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home,
+  Link, Globe, Check, CloudOff
 } from 'lucide-react';
 
 import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
@@ -13,6 +14,7 @@ import {
   toggleTaskCompletion, deleteTaskEntity, reorderTasks,
   exportTasks, importTasks
 } from '../../services/tasks';
+import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 import TaskCard from './components/TaskCard';
 import TaskEditor from './components/TaskEditor';
@@ -36,6 +38,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [shareModal, setShareModal] = useState(null);
   const [processing, setProcessing] = useState(false);
 
   // --- URL-Driven State ---
@@ -250,6 +253,30 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     await reorderTasks(user.uid, list[index], list[targetIndex]);
   };
 
+  // --- Sharing Handlers ---
+  const handleShareTask = async (task) => {
+    try {
+      const payload = {
+        sharedType: 'task',
+        title: task.title,
+        notes: task.notes || '',
+        subtasks: task.subtasks || [],
+        dueDate: task.dueDate || null,
+        completed: task.completed || false,
+        date: new Date().toISOString()
+      };
+      const { sharedId, shareUrlKey } = await shareItem(payload);
+      const url = buildShareUrl(sharedId, shareUrlKey);
+      setShareModal({ isOpen: true, task, link: url, sharedId, shareUrlKey });
+    } catch (e) { alert('Sharing failed.'); }
+  };
+
+  const handleStopShareTask = async () => {
+    if (!shareModal?.sharedId) return;
+    await unshareItem(shareModal.sharedId);
+    setShareModal(null);
+  };
+
   // --- Swipe Logic ---
   const handleTouchStart = (e) => {
     setTouchEnd(null);
@@ -297,12 +324,13 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           onClose={handleCloseEditor}
           onDelete={(item) => {
             setDeleteConfirm(item);
-            navigate(currentBasePath); // Close editor immediately on delete request
+            navigate(currentBasePath);
           }}
           onMove={(item) => {
             setItemToMove(item);
             setIsMoveModalOpen(true);
           }}
+          onShare={(task) => handleShareTask(task)}
         />
       ) : (
         /* LIST VIEW */
@@ -471,6 +499,23 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           {folders.filter(f => f.id !== itemToMove?.id).map(f => (
             <button key={f.id} onClick={() => handleItemMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.name}</button>
           ))}
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Task" zIndex={100}>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {shareModal?.link ? (
+              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
+            ) : (
+              <Button onClick={() => handleShareTask(shareModal.task)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
+            )}
+            <Button variant="danger" onClick={handleStopShareTask} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+          </div>
         </div>
       </Modal>
 

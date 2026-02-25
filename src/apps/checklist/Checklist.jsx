@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, Trash2, CheckSquare, Check, X, Plus, AlertCircle,
-  Bell, Clock, RotateCcw, Edit2, RefreshCw, Settings, MoveUp, MoveDown
+  Bell, Clock, RotateCcw, Edit2, RefreshCw, Settings, MoveUp, MoveDown,
+  Globe, Link, CloudOff
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
@@ -14,8 +15,9 @@ import {
   listenToChecklists, listenToItems, createChecklist,
   updateChecklistEntity, addChecklistItem, toggleChecklistItem,
   resetChecklist, deleteChecklistEntity, exportChecklists,
-  importChecklists, reorderList, reorderItem
+  importChecklists, reorderList, reorderItem, fetchChecklistItemsForShare
 } from '../../services/checklist';
+import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 // FIXED: Accept route and navigate from props
 const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
@@ -41,6 +43,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // State for loading indicator during import/export
   const [processing, setProcessing] = useState(false);
+  const [shareModal, setShareModal] = useState(null);
 
   // --- URL-Driven State ---
   const isSettingsOpen = route.query?.modal === 'settings';
@@ -253,6 +256,32 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     reader.readAsText(file);
   };
 
+  // --- Sharing Handlers ---
+  const handleShareChecklist = async (list) => {
+    try {
+      const fetchedItems = await fetchChecklistItemsForShare(user.uid, list.id, cryptoKey);
+      const payload = {
+        sharedType: 'checklist',
+        title: list.title,
+        items: fetchedItems,
+        progress: list.itemCount > 0 ? Math.round(((list.completedCount || 0) / list.itemCount) * 100) : 0,
+        date: new Date().toISOString()
+      };
+      const { sharedId, shareUrlKey } = await shareItem(payload);
+      const url = buildShareUrl(sharedId, shareUrlKey);
+      setShareModal({ isOpen: true, list, link: url, sharedId, shareUrlKey });
+    } catch (e) {
+      console.error(e);
+      alert('Sharing failed.');
+    }
+  };
+
+  const handleStopShareChecklist = async () => {
+    if (!shareModal?.sharedId) return;
+    await unshareItem(shareModal.sharedId);
+    setShareModal(null);
+  };
+
   // --- 4. Render ---
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50">
@@ -311,6 +340,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); handleShareChecklist(list); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50" title="Share"><Globe size={16} /></button>
                       <button onClick={(e) => { e.stopPropagation(); openEditModal({ type: 'list', ...list }); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50"><Edit2 size={16} /></button>
                       <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ type: 'list', data: list }); }} className="p-2 text-gray-300 hover:text-red-500 rounded-full hover:bg-gray-50"><Trash2 size={16} /></button>
                     </div>
@@ -476,6 +506,23 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         <div className="flex flex-col gap-4">
           <div className="flex items-start gap-3 bg-red-50 p-3 rounded-lg text-red-700 text-sm"><AlertCircle className="shrink-0 mt-0.5" size={18} /><div><p className="font-semibold">Are you sure?</p><p>{deleteConfirmation?.type === 'list' ? "This will permanently delete the checklist." : "This will delete this item."}</p></div></div>
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDeleteConfirmation(null)}>Cancel</Button><Button variant="danger" onClick={handleProceedDelete}>Delete</Button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Checklist" zIndex={100}>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {shareModal?.link ? (
+              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
+            ) : (
+              <Button onClick={() => handleShareChecklist(shareModal.list)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
+            )}
+            <Button variant="danger" onClick={handleStopShareChecklist} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+          </div>
         </div>
       </Modal>
     </div >

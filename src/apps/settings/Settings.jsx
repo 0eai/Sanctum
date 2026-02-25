@@ -1,10 +1,21 @@
 // src/apps/settings/Settings.jsx
 import React, { useState } from 'react';
-import { ChevronLeft, Shield, Wallet, Grid, Database, CheckCircle, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Shield, Grid, Monitor, Activity, Wallet, Database, CheckCircle, AlertCircle } from 'lucide-react';
 import AccountTab from './components/AccountTab';
 import FinanceTab from './components/FinanceTab';
 import AppsTab from './components/AppsTab';
 import DataTab from './components/DataTab';
+import DevicesTab from './components/DevicesTab';
+import SecurityTab from './components/SecurityTab';
+
+const TABS = [
+  { id: 'account', label: 'Account', icon: Shield },
+  { id: 'apps', label: 'Apps', icon: Grid },
+  { id: 'devices', label: 'Devices', icon: Monitor },
+  { id: 'security', label: 'Security', icon: Activity },
+  { id: 'finance', label: 'Finance', icon: Wallet },
+  { id: 'data', label: 'Data', icon: Database },
+];
 
 const SettingsApp = ({ user, cryptoKey, onExit }) => {
   const [activeTab, setActiveTab] = useState('account');
@@ -16,7 +27,7 @@ const SettingsApp = ({ user, cryptoKey, onExit }) => {
   const [touchEnd, setTouchEnd] = useState(null);
   const MIN_SWIPE_DISTANCE = 50;
 
-  const TABS = ['account', 'apps', 'finance', 'data'];
+  const TAB_IDS = TABS.map(t => t.id);
 
   // --- Swipe Logic ---
   const onTouchStart = (e) => {
@@ -28,37 +39,45 @@ const SettingsApp = ({ user, cryptoKey, onExit }) => {
 
   const onTouchEnd = () => {
     if (!touchStart || !touchEnd) return;
-
     const distance = touchStart - touchEnd;
     const isLeftSwipe = distance > MIN_SWIPE_DISTANCE;
     const isRightSwipe = distance < -MIN_SWIPE_DISTANCE;
+    const currIdx = TAB_IDS.indexOf(activeTab);
 
-    const currIdx = TABS.indexOf(activeTab);
-
-    if (isLeftSwipe && currIdx < TABS.length - 1) {
-      setActiveTab(TABS[currIdx + 1]);
+    if (isLeftSwipe && currIdx < TAB_IDS.length - 1) {
+      setActiveTab(TAB_IDS[currIdx + 1]);
     } else if (isRightSwipe && currIdx > 0) {
-      setActiveTab(TABS[currIdx - 1]);
+      setActiveTab(TAB_IDS[currIdx - 1]);
     }
   };
 
-  const TabButton = ({ id, icon: Icon, label }) => (
-    <button
-      onClick={() => setActiveTab(id)}
-      className={`flex-1 py-2 text-xs md:text-sm font-bold rounded-lg flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${activeTab === id ? 'bg-[#4285f4] text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}
-    >
-      <Icon size={18} /> {label}
-    </button>
-  );
-
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 overflow-hidden relative">
-      {/* Header */}
-      <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 p-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+
+      {/* Header with Wallet-style tabs */}
+      <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
+        <div className="max-w-xl md:max-w-4xl mx-auto px-4 pt-4 pb-0 flex flex-col gap-4">
           <div className="flex items-center gap-2">
-            <button onClick={onExit} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
+            <button onClick={onExit} className="p-2 hover:bg-white/20 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center">
+              <ChevronLeft size={24} />
+            </button>
             <h1 className="text-xl font-bold">Settings</h1>
+          </div>
+
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap flex-1 justify-center min-h-[44px] ${activeTab === tab.id
+                  ? 'bg-gray-50 text-[#4285f4]'
+                  : 'text-blue-100 hover:bg-white/10'
+                  }`}
+              >
+                <tab.icon size={16} fill={activeTab === tab.id ? "currentColor" : "none"} />
+                <span className="hidden sm:inline">{tab.label}</span>
+              </button>
+            ))}
           </div>
         </div>
       </header>
@@ -73,34 +92,29 @@ const SettingsApp = ({ user, cryptoKey, onExit }) => {
 
           {/* Notification Banner */}
           {message && (
-            <div className={`p-4 rounded-xl text-sm flex items-center gap-3 shadow-sm animate-in slide-in-from-top-2 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            <div className={`p-4 rounded-xl text-sm flex items-center gap-3 shadow-sm ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
               {message.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
               {message.text}
             </div>
           )}
 
-          {/* Tab Switcher */}
-          <div className="flex p-1 bg-white rounded-xl border border-gray-200 shadow-sm">
-            <TabButton id="account" icon={Shield} label="Account" />
-            <TabButton id="apps" icon={Grid} label="Apps" />
-            <TabButton id="finance" icon={Wallet} label="Finance" />
-            <TabButton id="data" icon={Database} label="Data" />
-          </div>
-
           {/* Render Tab Content */}
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div>
             {activeTab === 'account' && (
               <AccountTab user={user} setLoading={setLoading} setMessage={setMessage} />
             )}
-
             {activeTab === 'apps' && (
               <AppsTab user={user} setLoading={setLoading} setMessage={setMessage} />
             )}
-
+            {activeTab === 'devices' && (
+              <DevicesTab user={user} setMessage={setMessage} />
+            )}
+            {activeTab === 'security' && (
+              <SecurityTab user={user} setMessage={setMessage} />
+            )}
             {activeTab === 'finance' && (
               <FinanceTab user={user} cryptoKey={cryptoKey} setLoading={setLoading} setMessage={setMessage} />
             )}
-
             {activeTab === 'data' && (
               <DataTab user={user} cryptoKey={cryptoKey} setLoading={setLoading} setMessage={setMessage} />
             )}

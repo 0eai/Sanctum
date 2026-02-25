@@ -291,6 +291,17 @@ export const exportChecklists = async (userId, cryptoKey) => {
     return exportData;
 };
 
+// --- Sharing Helper ---
+export const fetchChecklistItemsForShare = async (userId, listId, cryptoKey) => {
+    const itemsQuery = query(collection(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items'));
+    const itemsSnapshot = await getDocs(itemsQuery);
+    return Promise.all(itemsSnapshot.docs.map(async (itemDoc) => {
+        const raw = itemDoc.data();
+        const decrypted = await decryptData(raw, cryptoKey);
+        return { text: decrypted.text || '', completed: raw.isCompleted || false };
+    }));
+};
+
 export const importChecklists = async (userId, cryptoKey, data) => {
     if (!Array.isArray(data)) throw new Error("Invalid format");
 

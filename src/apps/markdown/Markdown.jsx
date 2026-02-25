@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronLeft, Plus, Search, FileText, Settings, X, Star, FileCode,
-  FolderPlus, Folder, ChevronRight, Home
+  FolderPlus, Folder, ChevronRight, Home, Link, Globe, Check, CloudOff
 } from 'lucide-react';
 
 import { Modal, Button, LoadingSpinner, Input } from '../../components/ui';
@@ -14,6 +14,7 @@ import {
   listenToMarkdownDocs, saveMarkdownDoc, deleteMarkdownItem, createFolder, updateFolder,
   exportMarkdownDocs, importMarkdownDocs
 } from '../../services/markdown';
+import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 import MarkdownEditor from './components/MarkdownEditor';
 import MarkdownCard from './components/MarkdownCard';
@@ -38,6 +39,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [shareModal, setShareModal] = useState(null);
 
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -156,6 +158,31 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!deleteConfirm) return;
     await deleteMarkdownItem(user.uid, deleteConfirm, docs);
     setDeleteConfirm(null);
+  };
+
+  // --- Sharing Handlers ---
+  const handleShare = async (item) => {
+    try {
+      const payload = {
+        sharedType: 'markdown',
+        title: item.title,
+        content: item.content,
+        tags: item.tags || [],
+        attachments: item.attachments || [],
+        date: new Date().toISOString()
+      };
+      const { sharedId, shareUrlKey } = await shareItem(payload);
+      // Save sharedId back to the doc
+      await saveMarkdownDoc(user.uid, cryptoKey, { ...item, sharedId, shareUrlKey }, currentFolderId);
+      const url = buildShareUrl(sharedId, shareUrlKey);
+      setShareModal({ isOpen: true, item: { ...item, sharedId, shareUrlKey }, link: url });
+    } catch (e) { alert('Sharing failed.'); }
+  };
+
+  const handleStopShare = async (item) => {
+    await unshareItem(item.sharedId);
+    await saveMarkdownDoc(user.uid, cryptoKey, { ...item, sharedId: null, shareUrlKey: null }, currentFolderId);
+    setShareModal(null);
   };
 
   // --- Navigation Handlers ---
@@ -333,6 +360,13 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                   }
                   onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
                   onDelete={(i) => setDeleteConfirm(i)}
+                  onShare={(i) => {
+                    if (i.sharedId) {
+                      setShareModal({ isOpen: true, item: i, link: buildShareUrl(i.sharedId, i.shareUrlKey) });
+                    } else {
+                      handleShare(i);
+                    }
+                  }}
                 />
               ))}
             </div>
@@ -378,6 +412,23 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             {deleteConfirm?.type === 'folder' && <span className="block mt-1 font-bold text-xs">This will delete all documents inside!</span>}
           </div>
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button><Button variant="danger" onClick={handleDelete}>Delete</Button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Document" zIndex={100}>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {shareModal?.link ? (
+              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
+            ) : (
+              <Button onClick={() => handleShare(shareModal.item)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
+            )}
+            <Button variant="danger" onClick={() => handleStopShare(shareModal.item)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+          </div>
         </div>
       </Modal>
     </div>

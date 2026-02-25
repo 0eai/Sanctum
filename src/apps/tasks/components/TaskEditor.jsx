@@ -2,10 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, Star, Trash2, CheckSquare, Square, Clock, RotateCcw,
-  AlertCircle, Plus, X, FileText, Move
+  AlertCircle, Plus, X, FileText, Move, Globe
 } from 'lucide-react';
 
-const TaskEditor = ({ task, onSave, onClose, onDelete, onMove }) => {
+const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
   const [data, setData] = useState({
     ...task,
     dueDate: task.dueDate || '',
@@ -102,6 +102,11 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove }) => {
             {onMove && (
               <button onClick={() => onMove(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors">
                 <Move size={20} />
+              </button>
+            )}
+            {onShare && (
+              <button onClick={() => onShare(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors" title="Share">
+                <Globe size={20} />
               </button>
             )}
             <button onClick={() => update({ isPinned: !data.isPinned })} className={`p-2 rounded-full transition-colors ${data.isPinned ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:bg-gray-100'}`}>

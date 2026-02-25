@@ -46,7 +46,9 @@ export const saveMarkdownDoc = async (userId, cryptoKey, docData, parentId) => {
         tags: docData.tags || [],
         attachments: docData.attachments || [],
         dueDate: docData.dueDate || null,
-        repeat: docData.repeat || 'none'
+        repeat: docData.repeat || 'none',
+        sharedId: docData.sharedId || null,
+        shareUrlKey: docData.shareUrlKey || null
     };
 
     const encrypted = await encryptData(payload, cryptoKey);

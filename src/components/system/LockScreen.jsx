@@ -3,16 +3,17 @@ import React, { useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { Lock, RotateCcw } from 'lucide-react';
 import { db } from '../../lib/firebase';
-import { 
-  deriveKeyFromPasskey, generateSalt, encryptData, decryptData, 
-  generateMasterKey, exportKey, importMasterKey 
+import {
+  deriveKeyFromPasskey, generateSalt, encryptData, decryptData,
+  generateMasterKey, exportKey, importMasterKey
 } from '../../lib/crypto';
-import { resetUserVault, initializeUserKeys } from '../../services/firestoredb'; // Imported service
+import { resetUserVault, initializeUserKeys } from '../../services/firestoredb';
+import { logActivity } from '../../services/activityLog';
 
 const LockScreen = ({ user, onUnlock, initialMessage }) => {
-  const [keyInput, setKeyInput] = useState(""); 
+  const [keyInput, setKeyInput] = useState("");
   const [isDeriving, setIsDeriving] = useState(false);
-  const [status, setStatus] = useState(initialMessage || ""); 
+  const [status, setStatus] = useState(initialMessage || "");
   const [errorShake, setErrorShake] = useState(false);
 
   const handleKeyDown = (e) => {
@@ -23,24 +24,25 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
     if (!window.confirm("⚠️ FACTORY RESET VAULT?\n\nThis will PERMANENTLY DELETE all data.\nAre you sure?")) return;
 
     setStatus("Wiping data...");
-    setIsDeriving(true); 
+    setIsDeriving(true);
 
     try {
-        await resetUserVault(user.uid);
-        alert("Vault Reset Complete. All data erased.");
-        window.location.reload(); 
+      await resetUserVault(user.uid);
+      logActivity(user.uid, 'Vault Reset', 'danger', 'AlertTriangle');
+      alert("Vault Reset Complete. All data erased.");
+      window.location.reload();
     } catch (e) {
-        console.error(e);
-        alert("Reset Error: " + e.message);
-        setIsDeriving(false);
-        setStatus("");
+      console.error(e);
+      alert("Reset Error: " + e.message);
+      setIsDeriving(false);
+      setStatus("");
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (keyInput.length < 4) return;
-    
+
     setIsDeriving(true);
     setErrorShake(false);
     setStatus("Accessing vault...");
@@ -49,7 +51,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
       const userData = userDoc.exists() ? userDoc.data() : {};
-      
+
       let salt = userData.encryptionSalt;
       let encryptedMasterKeyBlob = userData.encryptedMasterKey;
 
@@ -60,26 +62,26 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
         const masterKey = await generateMasterKey();
         const wrapperKey = await deriveKeyFromPasskey(keyInput, salt);
         const masterKeyJWK = await exportKey(masterKey);
-        
+
         const encryptedMasterKey = await encryptData(masterKeyJWK, wrapperKey);
         const validationPayload = await encryptData({ check: "VALID" }, masterKey);
-        
+
         await initializeUserKeys(user.uid, salt, encryptedMasterKey, validationPayload);
         onUnlock(masterKey);
-      } 
+      }
       // Case 2: Existing User (Unlock)
       else {
         setStatus("Unlocking...");
         const wrapperKey = await deriveKeyFromPasskey(keyInput, salt);
         const masterKeyJWK = await decryptData(encryptedMasterKeyBlob, wrapperKey);
-        
+
         if (!masterKeyJWK) throw new Error("WRONG_PASSWORD");
-        
+
         const masterKey = await importMasterKey(masterKeyJWK);
-        
+
         if (userData.encryptedValidator) {
-            const check = await decryptData(userData.encryptedValidator, masterKey);
-            if (!check || check.check !== "VALID") throw new Error("INTEGRITY_FAIL");
+          const check = await decryptData(userData.encryptedValidator, masterKey);
+          if (!check || check.check !== "VALID") throw new Error("INTEGRITY_FAIL");
         }
         onUnlock(masterKey);
       }
@@ -88,6 +90,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
       setIsDeriving(false);
       setStatus("Incorrect Passkey");
       setErrorShake(true);
+      logActivity(user.uid, 'Failed Passkey Attempt', 'danger', 'AlertTriangle');
       setTimeout(() => setErrorShake(false), 500);
     }
   };
@@ -103,10 +106,10 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           {status || "Enter your session passkey to decrypt your data."}
         </p>
         <form onSubmit={handleSubmit}>
-          <input 
+          <input
             type="password"
-            value={keyInput} 
-            onChange={(e) => { setKeyInput(e.target.value); if(status && status !== "Wiping data...") setStatus(""); }}
+            value={keyInput}
+            onChange={(e) => { setKeyInput(e.target.value); if (status && status !== "Wiping data...") setStatus(""); }}
             onKeyDown={handleKeyDown}
             placeholder="Enter Passkey"
             className="w-full p-4 rounded-xl bg-black border border-[#27272a] text-white mb-4 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-medium tracking-wide"
@@ -117,9 +120,9 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           </button>
         </form>
         <div className="mt-8 text-center">
-            <button onClick={handleHardReset} className="text-[10px] uppercase tracking-widest text-gray-600 hover:text-red-500 flex items-center justify-center gap-2 mx-auto transition-colors font-semibold">
-                <RotateCcw size={12} /> Reset Vault
-            </button>
+          <button onClick={handleHardReset} className="text-[10px] uppercase tracking-widest text-gray-600 hover:text-red-500 flex items-center justify-center gap-2 mx-auto transition-colors font-semibold">
+            <RotateCcw size={12} /> Reset Vault
+          </button>
         </div>
       </div>
       <style>{`@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } } .animate-shake { animation: shake 0.4s ease-in-out; }`}</style>

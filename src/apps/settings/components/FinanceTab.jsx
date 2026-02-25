@@ -66,7 +66,7 @@ const FinanceTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                 </div>
                 <div className="p-4 grid grid-cols-2 gap-2">
                     {DEFAULT_CURRENCIES.map(curr => (
-                        <button key={curr.code} type="button" onClick={() => toggleCurrency(curr.code)} className={`p-3 rounded-lg border text-sm font-bold flex justify-between items-center ${settings.activeCurrencies.includes(curr.code) ? 'bg-blue-50 border-[#4285f4] text-[#4285f4]' : 'bg-white border-gray-200 text-gray-600'}`}>
+                        <button key={curr.code} type="button" onClick={() => toggleCurrency(curr.code)} className={`p-4 min-h-[48px] rounded-lg border text-sm font-bold flex justify-between items-center ${settings.activeCurrencies.includes(curr.code) ? 'bg-blue-50 border-[#4285f4] text-[#4285f4]' : 'bg-white border-gray-200 text-gray-600'}`}>
                             <span>{curr.code} <span className="text-xs font-normal opacity-70 ml-1">({curr.name})</span></span>
                             {settings.activeCurrencies.includes(curr.code) && <Check size={14} />}
                         </button>
