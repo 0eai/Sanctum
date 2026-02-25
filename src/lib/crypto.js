@@ -1,7 +1,7 @@
 // crypto.js
 
 // Configuration
-const ITERATIONS = 100000;
+const DEFAULT_ITERATIONS = 600000; // OWASP 2024 recommendation for SHA-256
 const ALGO_NAME = "AES-GCM";
 const HASH_NAME = "SHA-256";
 
@@ -35,6 +35,8 @@ export const generateSalt = () => {
   return Array.from(randomValues).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+export const getDefaultIterations = () => DEFAULT_ITERATIONS;
+
 export const generateMasterKey = async () => {
   return window.crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
@@ -58,7 +60,7 @@ export const importMasterKey = async (jwkData) => {
   );
 };
 
-export const deriveKeyFromPasskey = async (passkey, saltString) => {
+export const deriveKeyFromPasskey = async (passkey, saltString, iterations = DEFAULT_ITERATIONS) => {
   const textEncoder = new TextEncoder();
   const keyMaterial = await window.crypto.subtle.importKey(
     "raw",
@@ -72,7 +74,7 @@ export const deriveKeyFromPasskey = async (passkey, saltString) => {
     {
       name: "PBKDF2",
       salt: textEncoder.encode(saltString),
-      iterations: ITERATIONS,
+      iterations: iterations,
       hash: HASH_NAME
     },
     keyMaterial,

@@ -476,17 +476,49 @@ export const addGroupMember = async (groupId, newUid, groupKey) => {
 };
 
 /**
- * Remove a member from the group.
- * In production you'd rotate the group key here; for now we just remove access.
+ * Remove a member from the group and rotate the group key.
+ * After removal, a new AES key is generated and re-encrypted for all remaining members.
+ * This ensures the removed member cannot decrypt future messages.
  */
 export const removeGroupMember = async (groupId, uid) => {
+    // 1. Remove the member's encrypted key doc
     await deleteDoc(doc(db, 'artifacts', appId, 'groups', groupId, 'group_members', uid));
 
+    // 2. Update memberUids array on the group doc
     const groupRef = doc(db, 'artifacts', appId, 'groups', groupId);
     const groupSnap = await getDoc(groupRef);
-    if (groupSnap.exists()) {
-        const existing = groupSnap.data().memberUids || [];
-        await setDoc(groupRef, { memberUids: existing.filter(u => u !== uid) }, { merge: true });
+    if (!groupSnap.exists()) return;
+
+    const existing = groupSnap.data().memberUids || [];
+    const remainingUids = existing.filter(u => u !== uid);
+    await setDoc(groupRef, { memberUids: remainingUids }, { merge: true });
+
+    // 3. Rotate group key — generate new AES key for remaining members
+    if (remainingUids.length === 0) return;
+
+    const newGroupKey = await window.crypto.subtle.generateKey(
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt", "decrypt"]
+    );
+    const exportedKey = await window.crypto.subtle.exportKey("raw", newGroupKey);
+    const keyArray = Array.from(new Uint8Array(exportedKey));
+    const keyJson = JSON.stringify(keyArray);
+
+    // Re-encrypt the new key for each remaining member
+    for (const memberUid of remainingUids) {
+        try {
+            const pubKey = await getRecipientPublicKey(memberUid);
+            if (!pubKey) continue;
+            const encryptedGroupKey = await encryptRSA(keyJson, pubKey);
+            await setDoc(doc(db, 'artifacts', appId, 'groups', groupId, 'group_members', memberUid), {
+                uid: memberUid,
+                encryptedGroupKey,
+                rotatedAt: serverTimestamp()
+            }, { merge: true });
+        } catch (e) {
+            console.warn(`Key rotation failed for member ${memberUid}:`, e);
+        }
     }
 };
 

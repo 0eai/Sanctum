@@ -1,11 +1,11 @@
 // src/services/notes.js
-import { 
-  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, 
+import {
+  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp,
   updateDoc, doc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
-import { 
-  encryptData, decryptData, generateMasterKey, keyToUrlString 
+import {
+  encryptData, decryptData, generateMasterKey, keyToUrlString
 } from '../lib/crypto';
 import { getNextDate } from '../lib/dateUtils';
 
@@ -13,7 +13,7 @@ import { getNextDate } from '../lib/dateUtils';
 
 export const listenToNotes = (userId, cryptoKey, callback) => {
   const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'notes'), 
+    collection(db, 'artifacts', appId, 'users', userId, 'notes'),
     orderBy('updatedAt', 'desc')
   );
 
@@ -21,10 +21,10 @@ export const listenToNotes = (userId, cryptoKey, callback) => {
     const data = await Promise.all(snapshot.docs.map(async doc => {
       const raw = doc.data();
       const decrypted = await decryptData(raw, cryptoKey);
-      return { 
-        id: doc.id, 
-        ...raw, 
-        ...decrypted, 
+      return {
+        id: doc.id,
+        ...raw,
+        ...decrypted,
         tags: decrypted?.tags || [],
         attachments: decrypted?.attachments || [],
         dueDate: decrypted?.dueDate || null,
@@ -106,10 +106,10 @@ export const rescheduleNote = async (userId, cryptoKey, note) => {
   const payload = { ...note, dueDate: nextDate };
   // Clean metadata before re-encrypting
   delete payload.id; delete payload.updatedAt; delete payload.createdAt; delete payload.type; delete payload.isPinned;
-  
+
   const encrypted = await encryptData(payload, cryptoKey);
   await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', note.id), {
-      ...encrypted, updatedAt: serverTimestamp()
+    ...encrypted, updatedAt: serverTimestamp()
   });
 };
 
@@ -125,13 +125,13 @@ export const shareNote = async (userId, cryptoKey, note) => {
     date: new Date().toISOString()
   };
   const encryptedBlob = await encryptData(payload, shareKey);
-  
-  const docRef = await addDoc(collection(db, 'shared_notes'), { data: encryptedBlob, createdAt: serverTimestamp() });
+
+  const docRef = await addDoc(collection(db, 'shared_notes'), { data: encryptedBlob, createdBy: userId, createdAt: serverTimestamp() });
   const keyString = await keyToUrlString(shareKey);
-  
+
   const privatePayload = { ...note, sharedId: docRef.id, shareUrlKey: keyString };
   delete privatePayload.id; delete privatePayload.updatedAt; delete privatePayload.createdAt; delete privatePayload.type; delete privatePayload.isPinned;
-  
+
   const encryptedPrivate = await encryptData(privatePayload, cryptoKey);
   await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', note.id), { ...encryptedPrivate });
 
@@ -139,11 +139,11 @@ export const shareNote = async (userId, cryptoKey, note) => {
 };
 
 export const stopSharingNote = async (userId, cryptoKey, note) => {
-  try { await deleteDoc(doc(db, 'shared_notes', note.sharedId)); } catch(e) { console.warn("Cleanup error", e); }
+  try { await deleteDoc(doc(db, 'shared_notes', note.sharedId)); } catch (e) { console.warn("Cleanup error", e); }
 
   const privatePayload = { ...note, sharedId: null, shareUrlKey: null };
   delete privatePayload.id; delete privatePayload.updatedAt; delete privatePayload.createdAt; delete privatePayload.type; delete privatePayload.isPinned;
-  
+
   const encryptedPrivate = await encryptData(privatePayload, cryptoKey);
   await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', note.id), { ...encryptedPrivate });
 };
@@ -151,7 +151,7 @@ export const stopSharingNote = async (userId, cryptoKey, note) => {
 export const exportNotes = async (userId, cryptoKey) => {
   const q = query(collection(db, 'artifacts', appId, 'users', userId, 'notes'));
   const snapshot = await getDocs(q);
-  
+
   return Promise.all(snapshot.docs.map(async (doc) => {
     const raw = doc.data();
     const decrypted = await decryptData(raw, cryptoKey);
@@ -162,7 +162,7 @@ export const exportNotes = async (userId, cryptoKey) => {
       oldId: doc.id,
       createdAt: raw.createdAt?.toDate?.()?.toISOString() || null,
       updatedAt: raw.updatedAt?.toDate?.()?.toISOString() || null,
-      dueDate: decrypted.dueDate || null 
+      dueDate: decrypted.dueDate || null
     };
   }));
 };

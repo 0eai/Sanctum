@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import "katex/dist/katex.min.css";
 
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -58,7 +59,20 @@ const MarkdownViewer = ({ content }) => {
       <article className="prose prose-slate max-w-none break-words text-gray-800">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={[
+            [rehypeSanitize, {
+              ...defaultSchema,
+              attributes: {
+                ...defaultSchema.attributes,
+                code: [...(defaultSchema.attributes?.code || []), 'className'],
+                span: [...(defaultSchema.attributes?.span || []), 'className', 'style'],
+                div: [...(defaultSchema.attributes?.div || []), 'className', 'style'],
+                math: [...(defaultSchema.attributes?.math || []), 'className'],
+              },
+              tagNames: [...(defaultSchema.tagNames || []), 'math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mover', 'munder', 'mtable', 'mtr', 'mtd', 'annotation'],
+            }],
+            rehypeKatex
+          ]}
           components={{
             h1: ({ node, ...props }) => (
               <h1 className="text-3xl font-bold pb-2 border-b border-gray-200 mt-8 mb-4 text-gray-900" {...props} />

@@ -3,7 +3,7 @@
 import {
     collection, addDoc, deleteDoc, doc, serverTimestamp
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { encryptData, generateMasterKey, keyToUrlString } from '../lib/crypto';
 
 /**
@@ -16,6 +16,7 @@ export const shareItem = async (payload) => {
     const encryptedBlob = await encryptData(payload, shareKey);
     const docRef = await addDoc(collection(db, 'shared_notes'), {
         data: encryptedBlob,
+        createdBy: auth.currentUser?.uid || null,
         createdAt: serverTimestamp()
     });
     const keyString = await keyToUrlString(shareKey);
