@@ -6,7 +6,6 @@ import {
 
 import { Modal, Button, LoadingSpinner, Input } from '../../components/ui'; 
 import MultiFab from '../../components/ui/MultiFab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import { useClipboard } from '../../hooks/useClipboard';
 import { escapeCSV } from '../../lib/passwordUtils';
@@ -191,79 +190,6 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   // --- Export / Import Logic ---
-  const handleExport = () => {
-    if (allItems.length === 0) return alert("No passwords to export.");
-    const headers = ['name', 'url', 'username', 'password', 'note'];
-    const csvRows = [headers.join(',')];
-
-    allItems.filter(i => i.type !== 'folder').forEach(item => {
-      csvRows.push([
-        escapeCSV(item.service),
-        escapeCSV(item.url),
-        escapeCSV(item.username),
-        escapeCSV(item.password),
-        escapeCSV(item.notes)
-      ].join(','));
-    });
-
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `passwords_export_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    navigate(currentBasePath); 
-  };
-
-  const handleImport = async (file) => {
-    if (!file) return;
-    setImporting(true);
-    
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const lines = text.split(/\r\n|\n/);
-        const dataStart = lines[0].startsWith('name') ? 1 : 0;
-        let count = 0;
-        
-        for (let i = dataStart; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            
-            const row = []; 
-            let inQuote = false; 
-            let token = '';
-            for(let c of line) {
-                if (c === '"') inQuote = !inQuote;
-                else if (c === ',' && !inQuote) { row.push(token); token = ''; }
-                else token += c;
-            }
-            row.push(token);
-
-            const [name, url, userField, pass, note] = row.map(cell => {
-                let v = cell.trim();
-                return (v.startsWith('"') && v.endsWith('"')) ? v.slice(1, -1).replace(/""/g, '"') : v;
-            });
-
-            if (name || userField || pass) {
-                await savePasswordItem(user.uid, cryptoKey, { 
-                    type: 'password', service: name, url, username: userField, password: pass, notes: note, parentId: currentFolderId 
-                });
-                count++;
-            }
-        }
-        alert(`Imported ${count} passwords.`);
-        navigate(currentBasePath);
-      } catch (err) {
-        alert("Import failed.");
-      } finally {
-        setImporting(false);
-      }
-    };
-    reader.readAsText(file);
-  };
 
   const fabActions = useMemo(() => [
     {
@@ -419,18 +345,6 @@ const PasswordsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             ))}
         </div>
       </Modal>
-
-      <ImportExportModal 
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={importing}
-        title="Manage Passwords"
-        accept=".csv"
-        importLabel="Import CSV"
-        exportLabel="Export CSV"
-      />
     </div>
   );
 };

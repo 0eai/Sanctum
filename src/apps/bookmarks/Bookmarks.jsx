@@ -7,7 +7,6 @@ import {
 
 import { Button, LoadingSpinner, Modal } from '../../components/ui'; 
 import MultiFab from '../../components/ui/MultiFab'; 
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import { useClipboard } from '../../hooks/useClipboard';
 import { getDomain, parseNetscapeHtml } from '../../lib/bookmarkUtils';
@@ -136,76 +135,6 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     navigate(currentBasePath); // Ensure modals are closed if deleted from one
   };
 
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const root = parseNetscapeHtml(event.target.result);
-        if (root) {
-          await importBookmarksFromHtml(user.uid, cryptoKey, root, currentFolderId);
-          alert("Import successful!");
-          navigate(currentBasePath); // Close Modal
-        } else {
-          alert("Invalid bookmark file format.");
-        }
-      } catch (err) {
-        alert("Import failed.");
-      }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleExport = () => {
-    setProcessing(true);
-    try {
-      let html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n`;
-
-      const buildHtml = (parentId) => {
-        const items = allItems.filter(i => i.parentId === parentId);
-        let chunk = "";
-        
-        items.forEach(item => {
-          let addDate = 0;
-          if (item.createdAt && typeof item.createdAt.seconds === 'number') {
-             addDate = item.createdAt.seconds;
-          } else if (item.createdAt instanceof Date) {
-             addDate = Math.floor(item.createdAt.getTime() / 1000);
-          } else if (typeof item.createdAt === 'string') {
-             addDate = Math.floor(new Date(item.createdAt).getTime() / 1000);
-          }
-
-          if (item.type === 'folder') {
-            chunk += `    <DT><H3 ADD_DATE="${addDate}" LAST_MODIFIED="${addDate}">${item.title}</H3>\n    <DL><p>\n${buildHtml(item.id)}    </DL><p>\n`;
-          } else {
-            chunk += `    <DT><A HREF="${item.url}" ADD_DATE="${addDate}">${item.title}</A>\n`;
-          }
-        });
-        return chunk;
-      };
-
-      html += buildHtml(null);
-      html += `</DL><p>`;
-
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `bookmarks_backup_${new Date().toISOString().slice(0,10)}.html`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Export failed.");
-    }
-    setProcessing(false);
-    navigate(currentBasePath); // Close Modal
-  };
-
   const fabActions = useMemo(() => [
     {
       label: "New Folder",
@@ -303,18 +232,6 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         onEdit={(item) => navigate(`${currentBasePath}?edit=${item.id}`)}
         onDelete={(item) => setDeleteConfirmation(item)}
         copyUtils={copyUtils}
-      />
-
-      <ImportExportModal 
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Bookmarks"
-        accept=".html"
-        importLabel="Import HTML"
-        exportLabel="Export HTML"
       />
 
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Delete Item">

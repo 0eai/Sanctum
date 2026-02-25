@@ -1,7 +1,7 @@
 // src/apps/settings/AppsTab.jsx
 import React, { useState, useEffect } from 'react';
 import {
-    ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink,
+    ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink, ChevronDown,
     Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
     FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
     Users, BellRing, Share2, ShieldCheck, MessageCircle
@@ -73,6 +73,27 @@ const getIconComponent = (iconName) => {
     // 2. Check Custom App Types
     const type = APP_TYPES.find(t => t.value === iconName);
     return type ? type.icon : Globe; // Default
+};
+
+const CollapsibleLayoutCard = ({ children }) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <button
+                onClick={() => setOpen(!open)}
+                className="w-full p-4 flex items-center gap-2 font-bold text-gray-800 text-sm"
+            >
+                <Grid size={18} className="text-[#4285f4]" />
+                Customize Layout
+                <ChevronDown size={16} className={`ml-auto text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+            </button>
+            <div className={`transition-all duration-200 ease-in-out overflow-hidden ${open ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="border-t border-gray-100">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const AppsTab = ({ user, setLoading, setMessage }) => {
@@ -176,10 +197,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                 </Button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 flex items-center gap-2 font-bold text-gray-800">
-                    <Grid size={18} className="text-[#4285f4]" /> Customize Layout
-                </div>
+            <CollapsibleLayoutCard>
 
                 <div className="divide-y divide-gray-50">
                     {appList.map((app, index) => {
@@ -233,7 +251,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                         );
                     })}
                 </div>
-            </div>
+            </CollapsibleLayoutCard>
 
             <Button onClick={handleSave} className="w-full py-3 text-lg shadow-lg">Save Layout</Button>
 

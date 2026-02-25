@@ -8,7 +8,6 @@ import {
 
 import { Modal, Button, LoadingSpinner, Input } from '../../components/ui';
 import MultiFab from '../../components/ui/MultiFab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import {
   listenToMarkdownDocs, saveMarkdownDoc, deleteMarkdownItem, createFolder, updateFolder,
@@ -200,39 +199,6 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }
   };
 
-  // --- Import / Export Handlers ---
-  const handleExport = async () => {
-    setProcessing(true);
-    try {
-      const data = await exportMarkdownDocs(user.uid, cryptoKey);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `markdown_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) { alert("Export failed."); }
-    setProcessing(false);
-    setIsSettingsOpen(false);
-  };
-
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target.result);
-        const count = await importMarkdownDocs(user.uid, cryptoKey, json);
-        alert(`Imported ${count} items.`);
-        setIsSettingsOpen(false);
-      } catch (e) { alert("Import failed."); }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
-  };
-
   // --- Render Helpers ---
   const displayedItems = useMemo(() => {
     let filtered = docs;
@@ -377,17 +343,6 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
 
       {/* --- MODALS --- */}
-      <ImportExportModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Markdown"
-        accept=".json"
-        importLabel="Import JSON"
-        exportLabel="Export JSON"
-      />
 
       <Modal isOpen={isFolderModalOpen} onClose={() => setIsFolderModalOpen(false)} title={folderModalMode === 'create' ? "New Folder" : "Rename Folder"}>
         <form onSubmit={handleFolderAction} className="flex flex-col gap-4">

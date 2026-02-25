@@ -8,7 +8,6 @@ import {
 
 import { Modal, Button, Input } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import { formatDate } from '../../lib/dateUtils';
 import {
@@ -217,44 +216,6 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   // Import/Export
-  const handleExport = async () => {
-    setProcessing(true);
-    try {
-      const data = await exportChecklists(user.uid, cryptoKey);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `checklists_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Export failed. Please check console.");
-    }
-    setProcessing(false);
-    navigate(currentBasePath); // Close via URL
-  };
-
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target.result);
-        const count = await importChecklists(user.uid, cryptoKey, json);
-        alert(`Successfully imported ${count} checklists.`);
-        navigate(currentBasePath); // Close via URL
-      } catch (e) {
-        alert("Import failed. Invalid file format.");
-      }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
-  };
 
   // --- Sharing Handlers ---
   const handleShareChecklist = async (list) => {
@@ -489,18 +450,6 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           <Button type="submit" className="w-full">Save Changes</Button>
         </form>
       </Modal>
-
-      <ImportExportModal
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Checklists"
-        accept=".json"
-        importLabel="Import Data"
-        exportLabel="Export Data"
-      />
 
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Confirm Delete">
         <div className="flex flex-col gap-4">

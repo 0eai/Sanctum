@@ -7,7 +7,6 @@ import {
 
 import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import {
   listenToTaskFolders, listenToTasks, saveTaskFolder, saveTask,
@@ -203,45 +202,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     await saveTask(user.uid, cryptoKey, { ...itemToMove, folderId: targetFolderId });
     setIsMoveModalOpen(false);
     setItemToMove(null);
-  };
-
-  // --- Import / Export Handlers ---
-  const handleExport = async () => {
-    setProcessing(true);
-    try {
-      const data = await exportTasks(user.uid, cryptoKey);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tasks_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Export failed.");
-    }
-    setProcessing(false);
-    navigate(currentBasePath);
-  };
-
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target.result);
-        const count = await importTasks(user.uid, cryptoKey, json);
-        alert(`Successfully imported ${count} tasks.`);
-        navigate(currentBasePath);
-      } catch (e) {
-        alert("Import failed. Invalid file format.");
-      }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
   };
 
   const handleReorderTask = async (index, direction) => {
@@ -467,18 +427,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           <Button type="submit" className="w-full">Create Folder</Button>
         </form>
       </Modal>
-
-      <ImportExportModal
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Tasks"
-        accept=".json"
-        importLabel="Import Data"
-        exportLabel="Export Data"
-      />
 
       <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title={`Delete ${deleteConfirm?.type === 'folder' ? 'Folder' : 'Task'}`} zIndex={100}>
         <div className="flex flex-col gap-4">

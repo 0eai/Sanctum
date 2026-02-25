@@ -2,17 +2,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronLeft, Plus, FolderPlus, Home, ChevronRight, LayoutGrid, List,
-  Loader, Link, Globe, Check, CloudOff, Folder, Settings
+  Loader, Link, Globe, Check, CloudOff, Folder
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
 import MultiFab from '../../components/ui/MultiFab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import {
   listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem,
-  togglePin, rescheduleNote, shareNote, stopSharingNote,
-  exportNotes, importNotes
+  togglePin, rescheduleNote, shareNote, stopSharingNote
 } from '../../services/notes';
 
 import NoteCard from './components/NoteCard';
@@ -40,9 +38,6 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const [shareModal, setShareModal] = useState(null);
   const [processing, setProcessing] = useState(false);
-
-  // --- URL-Driven Modal State ---
-  const isSettingsOpen = route.query?.modal === 'settings';
   // Helper to get the current base path for opening/closing modals without losing folder context
   const currentBasePath = route.resourceId ? `#notes/${route.resource}/${route.resourceId}` : `#notes`;
 
@@ -199,40 +194,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     setShareModal(null);
   };
 
-  // --- Import / Export Handlers ---
-  const handleExport = async () => {
-    setProcessing(true);
-    try {
-      const data = await exportNotes(user.uid, cryptoKey);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `notes_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) { alert("Export failed."); }
-    setProcessing(false);
-    navigate(currentBasePath); // Close modal
-  };
 
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target.result);
-        const count = await importNotes(user.uid, cryptoKey, json);
-        alert(`Successfully imported ${count} items.`);
-        navigate(currentBasePath); // Close modal
-      } catch (e) { alert("Import failed. Invalid file format."); }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
-  };
 
   // --- Navigation Handlers ---
   const handleBreadcrumbClick = (index) => {
@@ -293,10 +255,6 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 <div className="flex items-center gap-1">
                   <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
                     {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
-                  </button>
-                  {/* FIXED: Open settings by pushing ?modal=settings to the current path */}
-                  <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                    <Settings size={20} />
                   </button>
                 </div>
               </div>
@@ -365,17 +323,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </div>
       </Modal>
 
-      <ImportExportModal
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)} // FIXED: Close settings modal via URL
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Notes"
-        accept=".json"
-        importLabel="Import JSON"
-        exportLabel="Export JSON"
-      />
+
 
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Delete Item">
         <div className="flex flex-col gap-4">

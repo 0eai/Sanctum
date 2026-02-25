@@ -1,12 +1,11 @@
 // src/apps/reminders/Reminders.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Plus, Settings, Bell, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, Plus, Bell, CheckCircle2 } from 'lucide-react';
 
 import { LoadingSpinner, Button, Modal } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
-import { listenToReminders, saveReminder, deleteReminder, exportReminders, importReminders } from '../../services/reminders';
+import { listenToReminders, saveReminder, deleteReminder } from '../../services/reminders';
 import ReminderCard from './components/ReminderCard';
 import ReminderFormModal from './components/ReminderFormModal';
 
@@ -28,14 +27,14 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     // --- URL-Driven State ---
     const activeTab = TABS.find(t => t.id === route.resource)?.id || 'upcoming';
-    const isSettingsOpen = route.query?.modal === 'settings';
+
     const editId = route.query?.edit;
     const currentBasePath = `#reminders/${activeTab}`;
 
     // Determine what to show in the editor modal
     const editingItem = useMemo(() => {
         if (!editId) return null;
-        if (editId === 'new') return null; 
+        if (editId === 'new') return null;
         return reminders.find(r => r.id === editId) || null;
     }, [editId, reminders]);
 
@@ -53,7 +52,7 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     // Smooth scroll the active tab into view
     useEffect(() => {
         const tabEl = document.getElementById(`tab-${activeTab}`);
-        if(tabEl) tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        if (tabEl) tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }, [activeTab]);
 
     // --- Derived State ---
@@ -95,52 +94,21 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     const handleTouchEnd = () => {
         if (!touchStart || !touchEnd) return;
-        
+
         const distance = touchStart - touchEnd;
         const currentIndex = TABS.findIndex(t => t.id === activeTab);
-        
+
         // Swipe Left -> Next Tab
         if (distance > MIN_SWIPE_DISTANCE && currentIndex < TABS.length - 1) {
             navigate(`#reminders/${TABS[currentIndex + 1].id}`);
-        } 
+        }
         // Swipe Right -> Prev Tab
         else if (distance < -MIN_SWIPE_DISTANCE && currentIndex > 0) {
             navigate(`#reminders/${TABS[currentIndex - 1].id}`);
         }
     };
 
-    // --- Import / Export ---
-    const handleExport = async () => {
-        setProcessing(true);
-        try {
-            const data = await exportReminders(user.uid, cryptoKey);
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `reminders_backup_${new Date().toISOString().slice(0, 10)}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) { alert("Export failed."); }
-        setProcessing(false);
-        navigate(currentBasePath);
-    };
 
-    const handleImport = async (file) => {
-        if (!file) return;
-        setProcessing(true);
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const json = JSON.parse(event.target.result);
-                const count = await importReminders(user.uid, cryptoKey, json);
-                alert(`Imported ${count} reminders.`);
-                navigate(currentBasePath);
-            } catch (e) { alert("Import failed."); }
-            setProcessing(false);
-        };
-        reader.readAsText(file);
-    };
 
     return (
         <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
@@ -151,15 +119,12 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                             <button onClick={onExit} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
                             <h1 className="text-xl font-bold flex items-center gap-2">Reminders</h1>
                         </div>
-                        <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                            <Settings size={20} />
-                        </button>
                     </div>
 
                     {/* Tab Bar */}
                     <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
                         {TABS.map(tab => (
-                            <button 
+                            <button
                                 key={tab.id}
                                 id={`tab-${tab.id}`}
                                 onClick={() => navigate(`#reminders/${tab.id}`)}
@@ -176,7 +141,7 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 </div>
             </header>
 
-            <main 
+            <main
                 className="flex-1 overflow-y-auto scroll-smooth p-4"
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
@@ -191,12 +156,12 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     ) : (
                         <div className="flex flex-col gap-3">
                             {displayedReminders.map(item => (
-                                <ReminderCard 
-                                    key={item.id} 
-                                    item={item} 
+                                <ReminderCard
+                                    key={item.id}
+                                    item={item}
                                     onToggle={handleToggle}
                                     onEdit={(i) => navigate(`${currentBasePath}?edit=${i.id}`)}
-                                    onDelete={setDeleteConfirm} 
+                                    onDelete={setDeleteConfirm}
                                 />
                             ))}
                         </div>
@@ -204,30 +169,18 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 </div>
             </main>
 
-            <Fab 
-                onClick={() => navigate(`${currentBasePath}?edit=new`)} 
+            <Fab
+                onClick={() => navigate(`${currentBasePath}?edit=new`)}
                 icon={<Plus size={28} />}
                 maxWidth="max-w-4xl"
                 ariaLabel="New Reminder"
             />
 
-            <ReminderFormModal 
+            <ReminderFormModal
                 isOpen={!!editId}
                 onClose={() => navigate(currentBasePath)}
                 onSave={handleSave}
                 editingItem={editingItem}
-            />
-
-            <ImportExportModal 
-                isOpen={isSettingsOpen}
-                onClose={() => navigate(currentBasePath)}
-                onImport={handleImport}
-                onExport={handleExport}
-                isImporting={processing}
-                title="Manage Reminders"
-                accept=".json"
-                importLabel="Import Data"
-                exportLabel="Export Data"
             />
 
             <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Reminder">

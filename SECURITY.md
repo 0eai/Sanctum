@@ -1,4 +1,4 @@
-# Security Review — Sanctum v1.0.0
+# Security Review — Sanctum v1.0.2
 
 **Date:** February 25, 2026  
 **Scope:** Full client-side security audit of encryption, authentication, data storage, sharing, and Firestore rules.
@@ -222,12 +222,12 @@ https://app.example.com/#view?id=DOC_ID&k=AES_KEY_BASE64
 | Vault factory reset | ✅ Deletes all collections + key material |
 | XSS protection | ⚠️ React's default escaping. ReactMarkdown with `remarkGfm` could render HTML in shared content |
 | CSRF | ✅ N/A — Firebase Auth tokens, no cookies |
-| Content Security Policy | ⚠️ Not configured — recommended for production |
+| Content Security Policy | ✅ Configured | `firebase.json` headers enforce CSP |
 
 ### Recommendations
-- Add **Content Security Policy** headers via Firebase Hosting config
+- ✅ **CSP headers configured** in `firebase.json`
 - Sanitize shared markdown content (use `rehype-sanitize` with ReactMarkdown)  
-- Consider **Firebase App Check** to prevent unauthorized API access
+- ✅ **Firebase App Check** configured with ReCAPTCHA v3
 
 ---
 

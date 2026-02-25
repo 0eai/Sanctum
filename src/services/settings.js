@@ -1,21 +1,21 @@
-import { 
-  doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, deleteDoc 
+import {
+    doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, deleteDoc
 } from 'firebase/firestore';
-import { deleteUser } from 'firebase/auth'; 
+import { deleteUser } from 'firebase/auth';
 import { db, appId } from '../lib/firebase';
-import { 
-  encryptData, decryptData, deriveKeyFromPasskey, generateSalt 
+import {
+    encryptData, decryptData, deriveKeyFromPasskey, generateSalt
 } from '../lib/crypto';
 import { DEFAULT_CATEGORIES } from '../apps/settings/constants';
 
 // Ensure we target all specific app collections
 const TARGET_COLLECTIONS = [
-    'notes', 
-    'bookmarks', 
-    'tasks', 
-    'passwords', 
-    'banking', 
-    'finance', 
+    'notes',
+    'bookmarks',
+    'tasks',
+    'passwords',
+    'banking',
+    'finance',
     'checklists', // Has sub-collection: 'items'
     'counters'    // Has sub-collection: 'entries'
 ];
@@ -41,24 +41,25 @@ export const fetchAppPreferences = async (userId) => {
 };
 
 export const saveAppPreferences = async (userId, selectedApps, customAppList) => {
-    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'apps'), { 
+    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'apps'), {
         selectedApps,
-        customAppList 
+        customAppList
     });
 };
 
 // --- Data Management (Deep Export/Import) ---
 
-export const exportUserData = async (userId, cryptoKey) => {
+export const exportUserData = async (userId, cryptoKey, collections = null) => {
     const exportData = {};
-    
-    for (const colName of TARGET_COLLECTIONS) {
+    const targetCols = collections || TARGET_COLLECTIONS;
+
+    for (const colName of targetCols) {
         const colRef = collection(db, 'artifacts', appId, 'users', userId, colName);
         const snapshot = await getDocs(colRef);
-        
+
         const items = await Promise.all(snapshot.docs.map(async (docSnap) => {
             const raw = docSnap.data();
-            let docData = { _id: docSnap.id }; 
+            let docData = { _id: docSnap.id };
 
             // 1. Decrypt Parent Document
             try {
@@ -79,7 +80,7 @@ export const exportUserData = async (userId, cryptoKey) => {
             }
 
             // 2. Handle Sub-Collections (Deep Fetch)
-            
+
             // -> Checklists: Fetch 'items'
             if (colName === 'checklists') {
                 const subRef = collection(db, 'artifacts', appId, 'users', userId, colName, docSnap.id, 'items');
@@ -120,7 +121,7 @@ export const exportUserData = async (userId, cryptoKey) => {
 };
 
 export const importUserData = async (userId, cryptoKey, jsonData) => {
-    const batchSize = 400; 
+    const batchSize = 400;
     let batch = writeBatch(db);
     let count = 0;
 
@@ -131,20 +132,20 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
     };
 
     for (const [colName, items] of Object.entries(jsonData)) {
-        if (!TARGET_COLLECTIONS.includes(colName)) continue; 
+        if (!TARGET_COLLECTIONS.includes(colName)) continue;
 
         for (const item of items) {
             // Extract special fields (added 'entries')
             const { _id, _createdAt, _updatedAt, _decryptionFailed, _error, items: subItems, entries: subEntries, ...data } = item;
-            
+
             // Re-encrypt main data
             const encrypted = await encryptData(data, cryptoKey);
-            
+
             // Restore Timestamps
-            const payload = { 
-                ...encrypted, 
+            const payload = {
+                ...encrypted,
                 createdAt: _createdAt ? new Date(_createdAt) : new Date(),
-                updatedAt: new Date() 
+                updatedAt: new Date()
             };
 
             // Set Main Document
@@ -168,7 +169,7 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
                 for (const entry of subEntries) {
                     const { _id: entryId, timestamp, endTimestamp, ...entryData } = entry;
                     const entryEncrypted = await encryptData(entryData, cryptoKey);
-                    
+
                     const entryPayload = {
                         ...entryEncrypted,
                         timestamp: timestamp ? new Date(timestamp) : null,
@@ -218,7 +219,7 @@ export const wipeAllUserData = async (userId) => {
             if (colName === 'counters') {
                 await deleteCollection(collection(d.ref, 'entries')); // FIXED: was 'logs'
             }
-            
+
             // Delete Parent Doc
             batch.delete(d.ref);
             count++;
@@ -229,7 +230,7 @@ export const wipeAllUserData = async (userId) => {
             }
         }
     }
-    
+
     // Delete Settings
     await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'apps'));
     await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config'));
@@ -245,37 +246,37 @@ export const deleteUserAccount = async (user) => {
 
 // --- Finance Settings ---
 export const fetchFinanceSettings = async (userId, cryptoKey) => {
-  try {
-    const docRef = doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const data = await decryptData(snap.data(), cryptoKey);
-      return data ? { ...data, categories: { ...DEFAULT_CATEGORIES, ...data.categories } } : null;
-    }
-    return { activeCurrencies: ['KRW'], categories: DEFAULT_CATEGORIES };
-  } catch (e) { return null; }
+    try {
+        const docRef = doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config');
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+            const data = await decryptData(snap.data(), cryptoKey);
+            return data ? { ...data, categories: { ...DEFAULT_CATEGORIES, ...data.categories } } : null;
+        }
+        return { activeCurrencies: ['KRW'], categories: DEFAULT_CATEGORIES };
+    } catch (e) { return null; }
 };
 
 export const saveFinanceSettings = async (userId, settings, cryptoKey) => {
-  const encrypted = await encryptData(settings, cryptoKey);
-  await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config'), encrypted);
+    const encrypted = await encryptData(settings, cryptoKey);
+    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config'), encrypted);
 };
 
 // --- Security ---
 export const rotateUserPasskey = async (userId, oldPass, newPass) => {
-  const userDocRef = doc(db, 'users', userId);
-  const userDoc = await getDoc(userDocRef);
-  if (!userDoc.exists()) throw new Error("User data not found.");
-  
-  const { encryptionSalt, encryptedMasterKey } = userDoc.data();
-  const oldWrapperKey = await deriveKeyFromPasskey(oldPass, encryptionSalt);
-  const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, oldWrapperKey);
-  
-  if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
+    const userDocRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) throw new Error("User data not found.");
 
-  const newSalt = generateSalt();
-  const newWrapperKey = await deriveKeyFromPasskey(newPass, newSalt);
-  const newEncryptedMasterKey = await encryptData(unlockedMasterKeyJWK, newWrapperKey);
+    const { encryptionSalt, encryptedMasterKey } = userDoc.data();
+    const oldWrapperKey = await deriveKeyFromPasskey(oldPass, encryptionSalt);
+    const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, oldWrapperKey);
 
-  await updateDoc(userDocRef, { encryptionSalt: newSalt, encryptedMasterKey: newEncryptedMasterKey });
+    if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
+
+    const newSalt = generateSalt();
+    const newWrapperKey = await deriveKeyFromPasskey(newPass, newSalt);
+    const newEncryptedMasterKey = await encryptData(unlockedMasterKeyJWK, newWrapperKey);
+
+    await updateDoc(userDocRef, { encryptionSalt: newSalt, encryptedMasterKey: newEncryptedMasterKey });
 };

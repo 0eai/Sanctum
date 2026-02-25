@@ -1,9 +1,30 @@
 // src/apps/settings/FinanceTab.jsx
 import React, { useState, useEffect } from 'react';
-import { Globe, List, Save, Check } from 'lucide-react';
+import { Globe, List, Save, Check, ChevronDown } from 'lucide-react';
 import { Button } from '../../../components/ui';
 import { fetchFinanceSettings, saveFinanceSettings } from '../../../services/settings';
 import { DEFAULT_CURRENCIES, DEFAULT_CATEGORIES } from '../constants';
+
+const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false }) => {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <button
+                onClick={() => setOpen(!open)}
+                className="w-full p-4 flex items-center gap-2 font-bold text-gray-800 text-sm"
+            >
+                {Icon && <Icon size={18} className="text-[#4285f4]" />}
+                {title}
+                <ChevronDown size={16} className={`ml-auto text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+            </button>
+            <div className={`transition-all duration-200 ease-in-out overflow-hidden ${open ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="border-t border-gray-100">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const FinanceTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     const [settings, setSettings] = useState({
@@ -57,13 +78,9 @@ const FinanceTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     if (initLoading) return <div className="p-4 text-center text-gray-400">Loading settings...</div>;
 
     return (
-        <form onSubmit={handleSave} className="space-y-6">
-            {/* Currencies */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 flex gap-2 items-center">
-                    <Globe size={18} className="text-[#4285f4]" />
-                    <h2 className="font-bold text-gray-800">Currencies</h2>
-                </div>
+        <form onSubmit={handleSave} className="space-y-4">
+            {/* Currencies — collapsed */}
+            <CollapsibleCard title="Currencies" icon={Globe}>
                 <div className="p-4 grid grid-cols-2 gap-2">
                     {DEFAULT_CURRENCIES.map(curr => (
                         <button key={curr.code} type="button" onClick={() => toggleCurrency(curr.code)} className={`p-4 min-h-[48px] rounded-lg border text-sm font-bold flex justify-between items-center ${settings.activeCurrencies.includes(curr.code) ? 'bg-blue-50 border-[#4285f4] text-[#4285f4]' : 'bg-white border-gray-200 text-gray-600'}`}>
@@ -72,14 +89,10 @@ const FinanceTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                         </button>
                     ))}
                 </div>
-            </div>
+            </CollapsibleCard>
 
-            {/* Categories */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 flex gap-2 items-center">
-                    <List size={18} className="text-[#4285f4]" />
-                    <h2 className="font-bold text-gray-800">Categories (Comma separated)</h2>
-                </div>
+            {/* Categories — collapsed */}
+            <CollapsibleCard title="Categories (Comma separated)" icon={List}>
                 <div className="p-4 space-y-4">
                     {Object.keys(DEFAULT_CATEGORIES).map(type => (
                         <div key={type}>
@@ -92,7 +105,8 @@ const FinanceTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                         </div>
                     ))}
                 </div>
-            </div>
+            </CollapsibleCard>
+
             <Button type="submit" className="w-full"><Save size={18} /> Save Settings</Button>
         </form>
     );

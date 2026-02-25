@@ -1,4 +1,4 @@
-# Data Structures — Sanctum v1.0.0
+# Data Structures — Sanctum v1.0.2
 
 This document maps every Firestore collection and document schema, showing both the **encrypted** (as stored) and **decrypted** (application) views.
 
@@ -514,3 +514,37 @@ firestore/
     └── groups/{groupId}/
         └── messages/{msgId}                    # Group encrypted messages
 ```
+
+---
+
+## Import / Export Formats
+
+All import/export is centralized in **Settings → Data Tab**.
+
+| App | Export Formats | Import Formats |
+|-----|---------------|----------------|
+| Notes | JSON | JSON |
+| Tasks | JSON | JSON |
+| Contacts | JSON, CSV (Google format) | JSON, CSV (Google format) |
+| Passwords | JSON | JSON |
+| Bookmarks | JSON | JSON |
+| Finance | JSON | JSON |
+| Banking | JSON | JSON |
+| Checklists | JSON | JSON |
+| Counters | JSON | JSON |
+| **Full Backup** | JSON (all collections) | JSON (all collections) |
+
+### JSON Export Format
+
+Each per-app JSON export uses the Sanctum backup format:
+```json
+{
+  "collection_name": [
+    { "_id": "doc-id", "_createdAt": "ISO-8601", ...decrypted_fields }
+  ]
+}
+```
+
+### CSV Format (Contacts)
+
+Google Contacts CSV format with dynamic column expansion for multi-value fields (phones, emails, addresses, websites, custom fields).

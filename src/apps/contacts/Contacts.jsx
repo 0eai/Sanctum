@@ -1,14 +1,12 @@
 // src/apps/contacts/Contacts.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Search, Plus, X, Star, Settings, User, Users, Tag } from 'lucide-react'; // Added Tag
+import { ChevronLeft, Search, Plus, X, Star, User, Users, Tag } from 'lucide-react';
 
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
-import ImportExportModal from '../../components/ui/ImportExportModal';
 
 import {
-    listenToContacts, saveContact, deleteContact,
-    exportContactsCSV, importContactsCSV, importContacts
+    listenToContacts, saveContact, deleteContact
 } from '../../services/contacts';
 
 import ContactEditor from './components/ContactEditor';
@@ -33,7 +31,7 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     // --- URL-Driven State ---
     const view = route.resource === 'edit' ? 'editor' : route.resource === 'view' ? 'detail' : 'list';
-    const isSettingsOpen = route.query?.modal === 'settings';
+
 
     // 1. Determine active tab (can be 'all', 'favorites', or a dynamically extracted label name)
     let activeTab = 'all';
@@ -157,44 +155,6 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         }
     };
 
-    const handleExport = async () => {
-        setProcessing(true);
-        try {
-            const csvText = await exportContactsCSV(user.uid, cryptoKey);
-            const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `google_contacts_export_${new Date().toISOString().slice(0, 10)}.csv`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) { alert("Export failed."); }
-        setProcessing(false);
-        navigate(currentBasePath);
-    };
-
-    const handleImport = async (file) => {
-        if (!file) return;
-        setProcessing(true);
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const text = event.target.result;
-                let count = 0;
-                if (file.name.toLowerCase().endsWith('.csv')) {
-                    count = await importContactsCSV(user.uid, cryptoKey, text);
-                } else {
-                    const json = JSON.parse(text);
-                    count = await importContacts(user.uid, cryptoKey, json);
-                }
-                alert(`Imported ${count} contacts.`);
-                navigate(currentBasePath);
-            } catch (e) { alert("Import failed."); }
-            setProcessing(false);
-        };
-        reader.readAsText(file);
-    };
-
     if (view === 'detail' && selectedContact) {
         return (
             <>
@@ -238,9 +198,6 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                             <button onClick={onExit} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
                             <h1 className="text-xl font-bold flex items-center gap-2">Contacts</h1>
                         </div>
-                        <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                            <Settings size={20} />
-                        </button>
                     </div>
 
                     <div className="relative">
@@ -365,18 +322,6 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 icon={<Plus size={28} />}
                 maxWidth="max-w-4xl"
                 ariaLabel="Add Contact"
-            />
-
-            <ImportExportModal
-                isOpen={isSettingsOpen}
-                onClose={() => navigate(currentBasePath)}
-                onImport={handleImport}
-                onExport={handleExport}
-                isImporting={processing}
-                title="Manage Contacts"
-                accept=".csv,.json"
-                importLabel="Import Google CSV (or JSON)"
-                exportLabel="Export as Google CSV"
             />
 
             <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Contact">

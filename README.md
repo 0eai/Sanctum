@@ -48,7 +48,14 @@ Notes, Markdown documents, Tasks, and Checklists can be shared via encrypted pub
 - **Devices** — Active device management with per-device sign out
 - **Security** — Auto-lock timer, activity log
 - **Finance** — Default currency, categories
-- **Data** — Export/import vault data
+- **Data** — Centralized import/export for individual apps (JSON, CSV), full vault backup/restore
+
+### 📲 Progressive Web App
+
+Sanctum is installable on phones as a PWA:
+- **Android**: Open in Chrome → three-dot menu → "Install app"
+- **iOS**: Open in Safari → Share → "Add to Home Screen"
+- Offline shell caching for instant launch
 
 ---
 

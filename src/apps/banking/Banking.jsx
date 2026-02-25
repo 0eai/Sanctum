@@ -7,7 +7,6 @@ import {
 
 import { Modal, Button, LoadingSpinner } from '../../components/ui'; 
 import Fab from '../../components/ui/Fab'; 
-import ImportExportModal from '../../components/ui/ImportExportModal'; 
 
 import { 
   listenToBankingItems, saveBankingItem, deleteBankingItem, 
@@ -111,39 +110,6 @@ const BankingApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (editorItem?.id === deleteConfirm.id) navigate(currentBasePath);
   };
 
-  // --- Import / Export ---
-  const handleExport = async () => {
-    setProcessing(true);
-    try {
-      const data = await exportBankingData(user.uid, cryptoKey);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `banking_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) { alert("Export failed."); }
-    setProcessing(false);
-    navigate(currentBasePath);
-  };
-
-  const handleImport = async (file) => {
-    if (!file) return;
-    setProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const json = JSON.parse(event.target.result);
-        const count = await importBankingData(user.uid, cryptoKey, json);
-        alert(`Imported ${count} items.`);
-        navigate(currentBasePath);
-      } catch (e) { alert("Import failed."); }
-      setProcessing(false);
-    };
-    reader.readAsText(file);
-  };
-
   // Swipe Handlers
   const onTouchStart = (e) => { setTouchEnd(null); setTouchStart(e.targetTouches[0].clientX); };
   const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
@@ -244,18 +210,6 @@ const BankingApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         icon={<Plus size={28} />} 
         maxWidth="max-w-4xl" 
         ariaLabel="Add Item"
-      />
-
-      <ImportExportModal 
-        isOpen={isSettingsOpen}
-        onClose={() => navigate(currentBasePath)}
-        onImport={handleImport}
-        onExport={handleExport}
-        isImporting={processing}
-        title="Manage Wallet"
-        accept=".json"
-        importLabel="Import JSON"
-        exportLabel="Export JSON"
       />
 
       <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Item">
