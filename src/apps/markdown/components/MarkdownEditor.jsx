@@ -49,25 +49,13 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
             const scrollContainer = scrollRef.current;
             const scrollPos = scrollContainer ? scrollContainer.scrollTop : 0;
 
-            // 1. Reset height to auto to get the correct scrollHeight for shrinking
             textarea.style.height = "auto";
-
-            // 2. Fix for trailing newline bug:
-            // Browsers don't account for the final '\n' in scrollHeight.
-            // We temporarily add a space char to force the calculation to include the new line.
             let nextHeight = textarea.scrollHeight;
 
-            if (data.content.endsWith('\n')) {
-                const originalValue = textarea.value;
-                const { selectionStart, selectionEnd } = textarea;
-
-                // Add dummy character to force height calculation
-                textarea.value = originalValue + ' ';
-                nextHeight = textarea.scrollHeight;
-
-                // Restore original value and cursor position immediately
-                textarea.value = originalValue;
-                textarea.setSelectionRange(selectionStart, selectionEnd);
+            // Fix for trailing newline: add one line-height instead of mutating textarea.value
+            if (data.content.endsWith('\n') || data.content.endsWith('\n\n')) {
+                const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 28;
+                nextHeight += lineHeight;
             }
 
             textarea.style.height = nextHeight + "px";

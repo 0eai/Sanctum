@@ -1,10 +1,11 @@
-import React, { useRef } from 'react';
-import { Download, Upload, Trash2, AlertTriangle, Database } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Download, Upload, Trash2, AlertTriangle, Database, ChevronDown } from 'lucide-react';
 import { Button } from '../../../components/ui';
 import { exportUserData, importUserData, wipeAllUserData } from '../../../services/settings';
 
 const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     const fileInputRef = useRef(null);
+    const [dangerOpen, setDangerOpen] = useState(false);
 
     const handleExport = async (singleApp = null) => {
         setLoading(true);
@@ -70,7 +71,8 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
+            {/* Backup & Restore — always open */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
                 <div className="flex items-center gap-2 mb-4 text-gray-800 font-bold border-b border-gray-100 pb-2">
                     <Database size={18} className="text-[#4285f4]" /> Backup & Restore
@@ -86,16 +88,26 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                 </div>
             </div>
 
-            <div className="bg-red-50 rounded-2xl border border-red-100 p-4">
-                <div className="flex items-center gap-2 mb-2 text-red-700 font-bold">
-                    <AlertTriangle size={18} /> Danger Zone
+            {/* Danger Zone — collapsed by default */}
+            <div className="bg-red-50 rounded-2xl border border-red-100 overflow-hidden">
+                <button
+                    onClick={() => setDangerOpen(!dangerOpen)}
+                    className="w-full p-4 flex items-center gap-2 text-red-700 font-bold text-sm"
+                >
+                    <AlertTriangle size={18} className="text-red-500" />
+                    Danger Zone
+                    <ChevronDown size={16} className={`ml-auto text-red-400 transition-transform duration-200 ${dangerOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <div className={`transition-all duration-200 ease-in-out overflow-hidden ${dangerOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className="px-4 pb-4 border-t border-red-100 pt-4">
+                        <p className="text-xs text-red-600 mb-4">
+                            Permanently delete all tasks, notes, passwords, and finance data. Your account key will remain.
+                        </p>
+                        <Button onClick={handleWipe} variant="danger" className="w-full">
+                            <Trash2 size={16} /> Delete All Data
+                        </Button>
+                    </div>
                 </div>
-                <p className="text-xs text-red-600 mb-4">
-                    Permanently delete all tasks, notes, passwords, and finance data. Your account key will remain.
-                </p>
-                <Button onClick={handleWipe} variant="danger" className="w-full">
-                    <Trash2 size={16} /> Delete All Data
-                </Button>
             </div>
         </div>
     );

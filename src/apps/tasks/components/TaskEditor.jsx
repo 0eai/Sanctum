@@ -19,6 +19,15 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
   const repeatRef = useRef(null);
   const deadlineRef = useRef(null);
   const notesRef = useRef(null);
+  const titleRef = useRef(null);
+
+  // Auto-resize title textarea (for mobile initial render)
+  useEffect(() => {
+    if (titleRef.current) {
+      titleRef.current.style.height = "auto";
+      titleRef.current.style.height = titleRef.current.scrollHeight + "px";
+    }
+  }, [data.title]);
 
   // Auto-resize notes textarea
   useEffect(() => {
@@ -125,6 +134,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                 {data.completed ? <CheckSquare size={28} /> : <Square size={28} />}
               </button>
               <textarea
+                ref={titleRef}
                 value={data.title}
                 onChange={(e) => {
                   update({ title: e.target.value });
@@ -224,7 +234,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
 
             <div className="flex flex-col gap-2 pl-2 md:pl-10">
               {data.subtasks && data.subtasks.map((sub, i) => (
-                <div key={sub.id} className="flex items-start gap-2 group">
+                <div key={sub.id} className="flex items-start gap-2 group w-full">
                   <button onClick={() => {
                     const newSubs = [...data.subtasks];
                     newSubs[i].completed = !newSubs[i].completed;
@@ -235,6 +245,12 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                   <textarea
                     rows={1}
                     value={sub.title}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = "auto";
+                        el.style.height = el.scrollHeight + "px";
+                      }
+                    }}
                     onChange={(e) => {
                       const newSubs = [...data.subtasks];
                       newSubs[i].title = e.target.value;
@@ -242,7 +258,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                       e.target.style.height = "auto";
                       e.target.style.height = e.target.scrollHeight + "px";
                     }}
-                    className={`flex-1 min-w-0 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
+                    className={`flex-1 w-full min-w-0 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
                   />
                   <button onClick={() => {
                     const newSubs = data.subtasks.filter((_, idx) => idx !== i);
@@ -253,18 +269,25 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                 </div>
               ))}
 
-              <div className="flex items-center gap-2 text-gray-400 mt-1">
-                <Plus size={18} className="flex-shrink-0" />
-                <input
+              <div className="flex items-start gap-2 text-gray-400 mt-1 relative">
+                <Plus size={18} className="flex-shrink-0 mt-1.5" />
+                <textarea
                   placeholder="Add subtask..."
+                  rows={1}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target.value.trim()) {
-                      const newSub = { id: Date.now().toString(), title: e.target.value, completed: false };
+                    if (e.key === 'Enter' && !e.shiftKey && e.target.value.trim()) {
+                      e.preventDefault();
+                      const newSub = { id: Date.now().toString(), title: e.target.value.trim(), completed: false };
                       update({ subtasks: [...(data.subtasks || []), newSub] });
                       e.target.value = '';
+                      e.target.style.height = "auto";
                     }
                   }}
-                  className="bg-transparent text-sm outline-none w-full"
+                  onChange={(e) => {
+                    e.target.style.height = "auto";
+                    e.target.style.height = e.target.scrollHeight + "px";
+                  }}
+                  className="bg-transparent text-sm outline-none w-full resize-none overflow-hidden break-words whitespace-pre-wrap py-1"
                 />
               </div>
             </div>

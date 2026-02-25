@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     Activity, Clock, Lock, Shield, Eye, FileText, Key,
-    CheckCircle, XCircle, AlertTriangle, Timer, Cpu
+    CheckCircle, XCircle, AlertTriangle, Timer, Cpu, ChevronDown
 } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { listenToActivityLog } from '../../../services/activityLog';
@@ -38,10 +38,35 @@ const formatDuration = (ms) => {
     return `${mins}m`;
 };
 
+const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false, badge }) => {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <button
+                onClick={() => setOpen(!open)}
+                className="w-full p-4 flex items-center gap-2 font-bold text-gray-800 text-sm"
+            >
+                {Icon && <Icon size={18} className="text-[#4285f4]" />}
+                {title}
+                {badge && <span className="ml-1 text-xs font-normal text-gray-400">{badge}</span>}
+                <ChevronDown size={16} className={`ml-auto text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+            </button>
+            <div className={`transition-all duration-200 ease-in-out overflow-hidden ${open ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="border-t border-gray-100">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const SecurityTab = ({ user, setMessage }) => {
     const [autoLock, setAutoLock] = useState(() => {
         const saved = localStorage.getItem('sanctum_autolock');
         return saved ? parseInt(saved) : 60;
+    });
+    const [lockOnHidden, setLockOnHidden] = useState(() => {
+        return localStorage.getItem('sanctum_lock_on_hidden') === 'true';
     });
     const [sessionDuration, setSessionDuration] = useState(0);
     const [activityLog, setActivityLog] = useState([]);
@@ -72,6 +97,13 @@ const SecurityTab = ({ user, setMessage }) => {
         setMessage?.({ type: 'success', text: `Auto-lock set to ${label}.` });
     };
 
+    const handleLockOnHiddenChange = () => {
+        const newValue = !lockOnHidden;
+        setLockOnHidden(newValue);
+        localStorage.setItem('sanctum_lock_on_hidden', newValue.toString());
+        setMessage?.({ type: 'success', text: `Lock when hidden is now ${newValue ? 'enabled' : 'disabled'}.` });
+    };
+
     const dotColor = (type) => {
         switch (type) {
             case 'success': return 'bg-green-500';
@@ -91,9 +123,9 @@ const SecurityTab = ({ user, setMessage }) => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
 
-            {/* Session Info Card */}
+            {/* Session Info Card — always visible */}
             <div className="bg-gradient-to-br from-[#4285f4] to-indigo-600 rounded-2xl p-5 text-white shadow-lg">
                 <div className="flex items-center gap-2 text-blue-100 text-xs font-medium mb-3">
                     <Shield size={14} /> CURRENT SESSION
@@ -113,7 +145,7 @@ const SecurityTab = ({ user, setMessage }) => {
                 </div>
             </div>
 
-            {/* Auto-Lock Timer */}
+            {/* Auto-Lock Timer — always visible */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-4 border-b border-gray-100 flex items-center gap-2 font-bold text-gray-800">
                     <Timer size={18} className="text-[#4285f4]" />
@@ -141,14 +173,23 @@ const SecurityTab = ({ user, setMessage }) => {
                 </div>
             </div>
 
-            {/* Activity Log */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 flex items-center gap-2 font-bold text-gray-800">
-                    <Activity size={18} className="text-[#4285f4]" />
-                    Recent Activity
-                    <span className="ml-auto text-xs font-normal text-gray-400">{activityLog.length} events</span>
+            {/* Lock when Tab Hidden — collapsed by default */}
+            <CollapsibleCard title="Lock when Tab Hidden" icon={Eye}>
+                <div className="p-4 flex items-center justify-between">
+                    <p className="text-xs text-gray-500 flex-1 mr-4">
+                        Instantly locks the vault if you switch tabs, minimize the browser, or open an extension popup.
+                    </p>
+                    <button
+                        onClick={handleLockOnHiddenChange}
+                        className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${lockOnHidden ? 'bg-green-500' : 'bg-gray-300'}`}
+                    >
+                        <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${lockOnHidden ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
                 </div>
+            </CollapsibleCard>
 
+            {/* Activity Log — collapsed by default */}
+            <CollapsibleCard title="Recent Activity" icon={Activity} badge={`${activityLog.length} events`}>
                 {activityLog.length === 0 ? (
                     <div className="p-8 text-center text-gray-400 text-sm">
                         <Activity size={32} className="mx-auto mb-2 text-gray-200" />
@@ -194,7 +235,7 @@ const SecurityTab = ({ user, setMessage }) => {
                         })}
                     </div>
                 )}
-            </div>
+            </CollapsibleCard>
 
         </div>
     );

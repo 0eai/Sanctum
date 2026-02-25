@@ -39,21 +39,14 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
             const scrollPos = scrollContainer ? scrollContainer.scrollTop : 0;
 
             textarea.style.height = "auto";
-
-            // Fix for trailing newline bug:
-            // Browsers don't account for the final '\n' in scrollHeight.
-            // We temporarily add a space char to force the calculation to include the new line.
             let nextHeight = textarea.scrollHeight;
 
-            if (data.content.endsWith('\n')) {
-                const originalValue = textarea.value;
-                const { selectionStart, selectionEnd } = textarea;
-
-                textarea.value = originalValue + ' ';
-                nextHeight = textarea.scrollHeight;
-
-                textarea.value = originalValue;
-                textarea.setSelectionRange(selectionStart, selectionEnd);
+            // Fix for trailing newline: browsers don't account for the final '\n' in scrollHeight.
+            // Instead of mutating textarea.value (which breaks React controlled input),
+            // just add one line-height worth of space.
+            if (data.content.endsWith('\n') || data.content.endsWith('\n\n')) {
+                const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 28;
+                nextHeight += lineHeight;
             }
 
             textarea.style.height = nextHeight + "px";

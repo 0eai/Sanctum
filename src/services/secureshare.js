@@ -12,7 +12,13 @@ import {
     encryptData,
     decryptData,
     encryptRSA,
-    decryptRSA
+    decryptRSA,
+    generateECDHKeyPair,
+    exportECDHPublicKey,
+    exportECDHPrivateKey,
+    importECDHPrivateKey,
+    importECDHPublicKey,
+    deriveECDHSharedSecret
 } from '../lib/crypto';
 
 // =============================================
@@ -38,23 +44,45 @@ export const initRSAKeys = async (user, cryptoKey) => {
     const privKeySnap = await getDoc(privKeyRef);
 
     if (pubKeySnap.exists() && privKeySnap.exists()) {
-        return; // Already initialized
+        const pubData = pubKeySnap.data();
+        if (pubData.ecdhPublicKey) return; // Fully initialized
+
+        // Migration: Add ECDH keys to existing RSA keys
+        const ecdhKeyPair = await generateECDHKeyPair();
+        const ecdhPubBase64 = await exportECDHPublicKey(ecdhKeyPair.publicKey);
+        const ecdhPrivBase64 = await exportECDHPrivateKey(ecdhKeyPair.privateKey);
+
+        const privData = await decryptData(privKeySnap.data(), cryptoKey);
+        const encryptedPrivKey = await encryptData({
+            key: privData.key,
+            ecdhKey: ecdhPrivBase64
+        }, cryptoKey);
+
+        await setDoc(privKeyRef, encryptedPrivKey);
+        await setDoc(pubKeyRef, { ecdhPublicKey: ecdhPubBase64 }, { merge: true });
+        return;
     }
 
     const keyPair = await generateRSAKeyPair();
     const pubBase64 = await exportRSAPublicKey(keyPair.publicKey);
     const privBase64 = await exportRSAPrivateKey(keyPair.privateKey);
 
-    // Write private key first — if this fails, we don't want a dangling public key
-    const encryptedPrivKey = await encryptData({ key: privBase64 }, cryptoKey);
+    const ecdhKeyPair = await generateECDHKeyPair();
+    const ecdhPubBase64 = await exportECDHPublicKey(ecdhKeyPair.publicKey);
+    const ecdhPrivBase64 = await exportECDHPrivateKey(ecdhKeyPair.privateKey);
+
+    const encryptedPrivKey = await encryptData({
+        key: privBase64,
+        ecdhKey: ecdhPrivBase64
+    }, cryptoKey);
     await setDoc(privKeyRef, encryptedPrivKey);
 
-    // Only publish the public key after private key is safely stored
     await setDoc(pubKeyRef, {
         uid: user.uid,
         email: user.email || '',
         displayName: user.displayName || user.email?.split('@')[0] || 'Unknown User',
         publicKey: pubBase64,
+        ecdhPublicKey: ecdhPubBase64,
         updatedAt: serverTimestamp()
     });
 };
@@ -67,7 +95,10 @@ export const getMyPrivateKey = async (uid, cryptoKey) => {
     const decrypted = await decryptData(snap.data(), cryptoKey);
     if (!decrypted || !decrypted.key) return null;
 
-    return await importRSAPrivateKey(decrypted.key);
+    return {
+        rsa: await importRSAPrivateKey(decrypted.key),
+        ecdh: decrypted.ecdhKey ? await importECDHPrivateKey(decrypted.ecdhKey) : null
+    };
 };
 
 export const getRecipientPublicKey = async (recipientUid) => {
@@ -75,7 +106,12 @@ export const getRecipientPublicKey = async (recipientUid) => {
     const snap = await getDoc(pubKeyRef);
     if (!snap.exists() || !snap.data().publicKey) return null;
 
-    return await importRSAPublicKey(snap.data().publicKey);
+    const data = snap.data();
+    return {
+        uid: recipientUid,
+        rsa: await importRSAPublicKey(data.publicKey),
+        ecdh: data.ecdhPublicKey ? await importECDHPublicKey(data.ecdhPublicKey) : null
+    };
 };
 
 export const listenToContacts = (currentUid, callback) => {
@@ -138,7 +174,6 @@ export const listenToMessages = (chatId, currentUid, privateKey, cryptoKey, call
             const raw = d.data();
 
             if (raw.expiresAt && new Date() > raw.expiresAt.toDate()) {
-                // Delete expired message to save DB space
                 deleteDoc(doc(db, 'artifacts', appId, 'chats', chatId, 'messages', d.id)).catch(() => { });
                 continue;
             }
@@ -148,9 +183,28 @@ export const listenToMessages = (chatId, currentUid, privateKey, cryptoKey, call
             let artifact = null;
 
             try {
-                const encryptedSessionKeyBase64 = raw.keys?.[currentUid];
-                if (encryptedSessionKeyBase64) {
-                    const sessionKeyJsonText = await decryptRSA(encryptedSessionKeyBase64, privateKey);
+                const keyData = raw.keys?.[currentUid];
+                if (keyData) {
+                    let sessionKeyJsonText = null;
+
+                    if (raw.encryptionType === 'ecdh' && privateKey.ecdh && keyData.ephemeralPublicKey) {
+                        try {
+                            const ephemeralPub = await importECDHPublicKey(keyData.ephemeralPublicKey);
+                            const sharedSecret = await deriveECDHSharedSecret(privateKey.ecdh, ephemeralPub);
+                            const decryptedKeyPayload = await decryptData(keyData.encryptedKey, sharedSecret);
+                            if (decryptedKeyPayload && decryptedKeyPayload.key) {
+                                sessionKeyJsonText = decryptedKeyPayload.key;
+                            }
+                        } catch (e) {
+                            console.warn("ECDH decryption failed, falling back if possible", e);
+                        }
+                    }
+
+                    if (!sessionKeyJsonText && privateKey.rsa && typeof keyData === 'string') {
+                        // Legacy RSA decryption
+                        sessionKeyJsonText = await decryptRSA(keyData, privateKey.rsa);
+                    }
+
                     if (sessionKeyJsonText) {
                         const sessionKey = await crypto.subtle.importKey(
                             "raw",
@@ -171,7 +225,6 @@ export const listenToMessages = (chatId, currentUid, privateKey, cryptoKey, call
                 console.warn("Failed to decrypt message", e);
             }
 
-            // Track unread messages from others
             if (raw.senderId !== currentUid && !raw.readBy?.[currentUid]) {
                 unreadIds.push(d.id);
             }
@@ -209,13 +262,9 @@ export const sendMessage = async (chatId, senderUid, recipientUid, myPublicKey, 
     const sessionKeyArray = Array.from(new Uint8Array(exportedSessionKey));
     const sessionKeyJson = JSON.stringify(sessionKeyArray);
 
-    const keys = {};
-    keys[recipientUid] = await encryptRSA(sessionKeyJson, recipientPublicKey);
-    keys[senderUid] = await encryptRSA(sessionKeyJson, myPublicKey);
-
     const messageDoc = {
         senderId: senderUid,
-        keys: keys,
+        keys: {},
         encryptedPayload: encryptedPayload,
         createdAt: serverTimestamp(),
         type: artifact ? 'shared_artifact' : 'text',
@@ -225,6 +274,32 @@ export const sendMessage = async (chatId, senderUid, recipientUid, myPublicKey, 
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + expireMinutes);
         messageDoc.expiresAt = expiresAt;
+    }
+
+    // Forward Secrecy: ECDH Ephemeral Key Exchange
+    if (myPublicKey.ecdh && recipientPublicKey.ecdh) {
+        messageDoc.encryptionType = 'ecdh';
+
+        // Recipient key wrapper (derive shared secret: ephemeral priv + recipient pub)
+        const recipEphemeral = await generateECDHKeyPair();
+        const recipShared = await deriveECDHSharedSecret(recipEphemeral.privateKey, recipientPublicKey.ecdh);
+        messageDoc.keys[recipientUid] = {
+            ephemeralPublicKey: await exportECDHPublicKey(recipEphemeral.publicKey),
+            encryptedKey: await encryptData({ key: sessionKeyJson }, recipShared)
+        };
+
+        // Sender key wrapper (derive shared secret: ephemeral priv + sender pub)
+        const senderEphemeral = await generateECDHKeyPair();
+        const senderShared = await deriveECDHSharedSecret(senderEphemeral.privateKey, myPublicKey.ecdh);
+        messageDoc.keys[senderUid] = {
+            ephemeralPublicKey: await exportECDHPublicKey(senderEphemeral.publicKey),
+            encryptedKey: await encryptData({ key: sessionKeyJson }, senderShared)
+        };
+    } else {
+        // Legacy RSA Fallback
+        messageDoc.encryptionType = 'rsa';
+        messageDoc.keys[recipientUid] = await encryptRSA(sessionKeyJson, recipientPublicKey.rsa);
+        messageDoc.keys[senderUid] = await encryptRSA(sessionKeyJson, myPublicKey.rsa);
     }
 
     await addDoc(collection(db, 'artifacts', appId, 'chats', chatId, 'messages'), messageDoc);

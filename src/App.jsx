@@ -82,6 +82,23 @@ export default function App() {
     };
   }, [cryptoKey, user]);
 
+  // --- Lock when Tab Hidden (Extension Defense) ---
+  useEffect(() => {
+    if (!cryptoKey || !user) return;
+
+    const handleVisibilityChange = () => {
+      const isLockOnHiddenEnabled = localStorage.getItem('sanctum_lock_on_hidden') === 'true';
+      if (isLockOnHiddenEnabled && document.visibilityState === 'hidden') {
+        logActivity(user.uid, 'Vault Auto-Locked (Hidden)', 'info', 'Lock');
+        setLockMessage('Locked for your security because the tab was hidden.');
+        setCryptoKey(null);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [cryptoKey, user]);
+
   // --- Periodic device activity update (every 5 min while vault open) ---
   useEffect(() => {
     if (!cryptoKey || !user) return;

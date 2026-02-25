@@ -1,5 +1,5 @@
 // crypto.js
-
+import { argon2id } from 'hash-wasm';
 // Configuration
 const DEFAULT_ITERATIONS = 600000; // OWASP 2024 recommendation for SHA-256
 const ALGO_NAME = "AES-GCM";
@@ -81,6 +81,23 @@ export const deriveKeyFromPasskey = async (passkey, saltString, iterations = DEF
     { name: ALGO_NAME, length: 256 },
     false,
     ["encrypt", "decrypt"]
+  );
+};
+
+export const deriveKeyArgon2id = async (passkey, saltString) => {
+  const salt = new TextEncoder().encode(saltString);
+  const hash = await argon2id({
+    password: passkey,
+    salt: salt,
+    iterations: 3,
+    memorySize: 65536, // 64 MB
+    parallelism: 1,
+    hashLength: 32,    // 256-bit key
+    outputType: 'binary',
+  });
+
+  return window.crypto.subtle.importKey(
+    "raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]
   );
 };
 
@@ -234,4 +251,62 @@ export const decryptRSA = async (base64EncryptedData, privateKey) => {
     console.error("RSA Decryption failed", e);
     return null;
   }
+};
+
+// --- ECDH (Elliptic Curve Diffie-Hellman) for Forward Secrecy ---
+
+export const generateECDHKeyPair = async () => {
+  return window.crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveKey", "deriveBits"]
+  );
+};
+
+export const exportECDHPublicKey = async (publicKey) => {
+  const exported = await window.crypto.subtle.exportKey("spki", publicKey);
+  return bufferToBase64(exported);
+};
+
+export const exportECDHPrivateKey = async (privateKey) => {
+  const exported = await window.crypto.subtle.exportKey("pkcs8", privateKey);
+  return bufferToBase64(exported);
+};
+
+export const importECDHPublicKey = async (base64) => {
+  const buffer = base64ToBuffer(base64);
+  return window.crypto.subtle.importKey(
+    "spki",
+    buffer,
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    []
+  );
+};
+
+export const importECDHPrivateKey = async (base64) => {
+  const buffer = base64ToBuffer(base64);
+  return window.crypto.subtle.importKey(
+    "pkcs8",
+    buffer,
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveKey", "deriveBits"]
+  );
+};
+
+export const deriveECDHSharedSecret = async (privateKey, publicKey) => {
+  return window.crypto.subtle.deriveKey(
+    {
+      name: "ECDH",
+      public: publicKey
+    },
+    privateKey,
+    {
+      name: "AES-GCM",
+      length: 256
+    },
+    false,
+    ["encrypt", "decrypt"]
+  );
 };

@@ -32,14 +32,17 @@ export const resetUserVault = async (userId) => {
 };
 
 // Initialize User Keys (Helper for LockScreen)
-export const initializeUserKeys = async (userId, salt, encryptedMasterKey, encryptedValidator, iterations = 600000) => {
+export const initializeUserKeys = async (userId, salt, encryptedMasterKey, encryptedValidator, kdf = "argon2id", iterations = null) => {
   const userDocRef = doc(db, 'users', userId);
-  await setDoc(userDocRef, {
+  const data = {
     encryptionSalt: salt,
     encryptedMasterKey: encryptedMasterKey,
     encryptedValidator: encryptedValidator,
-    iterations: iterations
-  }, { merge: true });
+    kdf: kdf
+  };
+  if (iterations) data.iterations = iterations;
+
+  await setDoc(userDocRef, data, { merge: true });
 };
 
 // Listener for App Stats (Launcher)

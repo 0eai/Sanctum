@@ -4,7 +4,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Lock, RotateCcw, ShieldCheck, ShieldAlert, Shield } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import {
-  deriveKeyFromPasskey, generateSalt, encryptData, decryptData,
+  deriveKeyFromPasskey, deriveKeyArgon2id, generateSalt, encryptData, decryptData,
   generateMasterKey, exportKey, importMasterKey, getDefaultIterations
 } from '../../lib/crypto';
 import { resetUserVault, initializeUserKeys } from '../../services/firestoredb';
@@ -141,15 +141,14 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
       if (!salt || !encryptedMasterKeyBlob) {
         setStatus("Initializing Keys...");
         salt = generateSalt();
-        const iterations = getDefaultIterations();
         const masterKey = await generateMasterKey();
-        const wrapperKey = await deriveKeyFromPasskey(keyInput, salt, iterations);
+        const wrapperKey = await deriveKeyArgon2id(keyInput, salt);
         const masterKeyJWK = await exportKey(masterKey);
 
         const encryptedMasterKey = await encryptData(masterKeyJWK, wrapperKey);
         const validationPayload = await encryptData({ check: "VALID" }, masterKey);
 
-        await initializeUserKeys(user.uid, salt, encryptedMasterKey, validationPayload, iterations);
+        await initializeUserKeys(user.uid, salt, encryptedMasterKey, validationPayload, "argon2id");
         setFailCount(0);
         onUnlock(masterKey);
       }
@@ -157,10 +156,21 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
       else {
         setStatus("Unlocking...");
 
-        // Use stored iterations or fallback to legacy 100k
-        const storedIterations = userData.iterations || 100000;
-        const wrapperKey = await deriveKeyFromPasskey(keyInput, salt, storedIterations);
+        const kdf = userData.kdf || "pbkdf2";
+        let wrapperKey;
+
+        if (kdf === "argon2id") {
+          wrapperKey = await deriveKeyArgon2id(keyInput, salt);
+        } else {
+          const storedIterations = userData.iterations || 100000;
+          console.log("Using stored iterations:", storedIterations, "salt:", salt);
+          wrapperKey = await deriveKeyFromPasskey(keyInput, salt, storedIterations);
+          console.log("Wrapper key generated:", wrapperKey);
+        }
+
+        console.log("Attempting decryption with Blob:", encryptedMasterKeyBlob ? "exists" : "MISSING");
         const masterKeyJWK = await decryptData(encryptedMasterKeyBlob, wrapperKey);
+        console.log("Decrypted JWK:", masterKeyJWK ? "SUCCESS" : "NULL");
 
         if (!masterKeyJWK) throw new Error("WRONG_PASSWORD");
 
@@ -171,17 +181,16 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           if (!check || check.check !== "VALID") throw new Error("INTEGRITY_FAIL");
         }
 
-        // --- Migration: upgrade iterations if below current default ---
-        const defaultIterations = getDefaultIterations();
-        if (storedIterations < defaultIterations) {
-          setStatus("Upgrading security...");
-          const newWrapperKey = await deriveKeyFromPasskey(keyInput, salt, defaultIterations);
+        // --- Migration: upgrade KDF to Argon2id if legacy PBKDF2 ---
+        if (kdf !== "argon2id") {
+          setStatus("Upgrading cryptography to Argon2id...");
+          const newWrapperKey = await deriveKeyArgon2id(keyInput, salt);
           const newEncryptedMasterKey = await encryptData(masterKeyJWK, newWrapperKey);
           await setDoc(userDocRef, {
             encryptedMasterKey: newEncryptedMasterKey,
-            iterations: defaultIterations,
+            kdf: "argon2id"
           }, { merge: true });
-          console.log(`Migrated PBKDF2: ${storedIterations} → ${defaultIterations}`);
+          console.log(`Migrated PBKDF2 → Argon2id`);
         }
 
         setFailCount(0);
