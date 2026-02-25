@@ -32,25 +32,7 @@
 
     Lucide Icon: Cpu or Activity
 
-    Key Feature: A simple status page showing if your StreamPi or Cloud Drive services are online. Since you're interested in IoT/CAN bus security, you could eventually add a "Security Log" that alerts you to unusual SSH login attempts on your lab.
-
-5. 2FA Authenticator (Security Utility)
-    Since you are already handling cryptoKey and passwords, adding a TOTP (Time-based One-Time Password) authenticator makes your suite a true replacement for tools like Google Authenticator or Authy.
-
-    The Hook: One less app to install on the phone; everything is in your Vault.
-
-    Lucide Icon: ShieldCheck or Fingerprint
-
-    Key Feature: A 30-second countdown timer that generates the 6-digit codes for other services.   
-
-6. "Secure Share" (End-to-End Encrypted Messaging)
-    Since you already have the crypto logic, you can build a simple, private messaging app that works between your devices (or with a friend).
-
-    The Hook: A WhatsApp/Signal replacement that uses your own server and your own encryption keys.
-
-    Lucide Icon: MessageCircle or Lock
-
-    Key Feature: End-to-end encrypted 1-to-1 chat. You can send text, and later, encrypted images. Since it's built on your platform, you can add "Self-destruct" timers to messages.
+    Key Feature: A simple status page showing if your StreamPi or Cloud Drive services are online. Add a "Security Log" that alerts you to unusual SSH login attempts on your lab.
 
 
 

@@ -128,7 +128,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove }) => {
                 }}
                 placeholder="Task Name"
                 rows={1}
-                className={`text-3xl font-bold bg-transparent outline-none w-full resize-none overflow-hidden break-words whitespace-pre-wrap ${data.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
+                className={`text-3xl font-bold bg-transparent outline-none w-full min-w-0 resize-none overflow-hidden break-words whitespace-pre-wrap ${data.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
               />
             </div>
 
@@ -237,7 +237,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove }) => {
                       e.target.style.height = "auto";
                       e.target.style.height = e.target.scrollHeight + "px";
                     }}
-                    className={`flex-1 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
+                    className={`flex-1 min-w-0 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
                   />
                   <button onClick={() => {
                     const newSubs = data.subtasks.filter((_, idx) => idx !== i);

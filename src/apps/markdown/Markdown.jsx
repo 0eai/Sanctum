@@ -280,9 +280,11 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
               <h1 className="text-xl font-bold">Markdown</h1>
             </div>
-            <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-              <Settings size={20} />
-            </button>
+            <div className="flex gap-1">
+              <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                <Settings size={20} />
+              </button>
+            </div>
           </div>
 
           <div className="relative">

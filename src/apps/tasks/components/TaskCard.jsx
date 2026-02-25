@@ -25,9 +25,9 @@ const TaskCard = ({ task, index, totalActiveCount, onToggle, onOpen, setDeleteCo
       {task.completed ? <CheckSquare size={20} /> : <Square size={20} />}
     </button>
 
-    <div className="flex-1 min-w-0">
-      <div className="flex items-start gap-2">
-        <span className={`font-medium text-gray-800 break-words whitespace-pre-wrap ${task.completed ? 'line-through text-gray-400' : ''}`}>
+    <div className="flex-1 min-w-0 overflow-hidden">
+      <div className="flex items-start gap-1.5 min-w-0">
+        <span className={`font-medium text-gray-800 break-all whitespace-pre-wrap flex-1 min-w-0 ${task.completed ? 'line-through text-gray-400' : ''}`}>
           {task.title}
         </span>
         <div className="flex items-center gap-1 mt-0.5 flex-shrink-0">

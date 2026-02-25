@@ -8,6 +8,7 @@ import { Grid, LogIn } from 'lucide-react';
 import { auth } from './lib/firebase';
 import { Button, LoadingSpinner } from './components/ui';
 import { fetchAppPreferences } from './services/settings';
+import { syncUserProfile } from './services/profile';
 
 import { useHashRoute } from './hooks/useHashRoute';
 
@@ -31,6 +32,8 @@ import MarkdownApp from './apps/markdown/Markdown';
 import RemindersApp from './apps/reminders/Reminders';
 import ContactsApp from './apps/contacts/Contacts';
 import TransferApp from './apps/transfer/Transfer';
+import AuthenticatorApp from './apps/authenticator/Authenticator';
+import SecureShareApp from './apps/secureshare/SecureShare';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -63,6 +66,7 @@ export default function App() {
       setUser(u);
       setLoading(false);
       if (u) {
+        syncUserProfile(u); // Fire-and-forget profile sync
         const prefs = await fetchAppPreferences(u.uid);
         setEnabledApps(prefs);
       } else {
@@ -131,6 +135,8 @@ export default function App() {
     case 'notes': return <NotesApp {...props} />;
     case 'markdown': return <MarkdownApp {...props} />;
     case 'contacts': return <ContactsApp {...props} />;
+    case 'authenticator': return <AuthenticatorApp {...props} />;
+    case 'secureshare': return <SecureShareApp {...props} />;
     case 'settings': return <SettingsApp {...props} />;
     default: return <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />;
   }

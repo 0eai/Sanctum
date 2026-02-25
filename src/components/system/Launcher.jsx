@@ -4,7 +4,7 @@ import {
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, Cloud, Cast, Bookmark,
   FileText, ClipboardList, CreditCard, PieChart, Globe, FileCode,
   Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout,
-  Users, BellRing, Share2
+  Users, BellRing, Share2, ShieldCheck, MessageCircle
 } from 'lucide-react';
 import { listenToAppStats } from '../../services/firestoredb';
 
@@ -17,13 +17,15 @@ const getIconElement = (iconName) => {
     case 'Music': return <Music {...props} />;
     case 'Video': return <Video {...props} />;
     case 'MessageSquare': return <MessageSquare {...props} />;
+    case 'MessageCircle': return <MessageCircle {...props} />;
     case 'ShoppingBag': return <ShoppingBag {...props} />;
     case 'Briefcase': return <Briefcase {...props} />;
     case 'Layout': return <Layout {...props} />;
     case 'FileCode': return <FileCode {...props} />;
     case 'Users': return <Users {...props} />;
     case 'BellRing': return <BellRing {...props} />;
-    case 'transfer': return <TransferApp {...props} />;
+    case 'ShieldCheck': return <ShieldCheck {...props} />;
+    case 'transfer': return <Share2 {...props} />;
     case 'Globe':
     default: return <Globe {...props} />;
   }
@@ -31,7 +33,7 @@ const getIconElement = (iconName) => {
 
 const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
   const [stats, setStats] = useState({
-    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0, reminders: 0
+    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0, reminders: 0, authenticator: 0
   });
 
   useEffect(() => {
@@ -53,6 +55,8 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
     { id: 'markdown', icon: <FileCode size={24} />, label: 'Markdown' },
     { id: 'contacts', icon: <Users size={24} />, label: 'Contacts' },
     { id: 'passwords', icon: <Key size={24} />, label: 'Passwords', count: stats.passwords },
+    { id: 'authenticator', icon: <ShieldCheck size={24} />, label: 'Authenticator', count: stats.authenticator },
+    { id: 'secureshare', icon: <MessageCircle size={24} />, label: 'Chat' },
     { id: 'banking', icon: <CreditCard size={24} />, label: 'Wallet', count: stats.banking },
     { id: 'finance', icon: <PieChart size={24} />, label: 'Finance', count: stats.finance },
     { id: 'bookmarks', icon: <Bookmark size={24} />, label: 'Bookmarks' },
@@ -130,7 +134,7 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
       <main className="flex-1 overflow-y-auto flex flex-col items-center">
         <div className="max-w-3xl p-6 flex flex-wrap justify-center content-start gap-4 sm:gap-5 lg:gap-6 mb-8 w-full">
           {finalApps.map(app => {
-            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer'].includes(app.id);
+            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer', 'secureshare', 'authenticator'].includes(app.id);
 
             return (
               <button

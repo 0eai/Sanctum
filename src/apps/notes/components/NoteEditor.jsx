@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     ChevronLeft, Bell, Share2, Star, X, Tag, Paperclip, FileText,
-    Clock, RotateCcw, Calendar, PlayCircle, Music, File
+    Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
@@ -33,12 +33,30 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
 
     // Auto-Resize Textarea
     useEffect(() => {
-        if (textAreaRef.current) {
+        const textarea = textAreaRef.current;
+        if (textarea) {
             const scrollContainer = scrollRef.current;
             const scrollPos = scrollContainer ? scrollContainer.scrollTop : 0;
 
-            textAreaRef.current.style.height = "auto";
-            textAreaRef.current.style.height = textAreaRef.current.scrollHeight + "px";
+            textarea.style.height = "auto";
+
+            // Fix for trailing newline bug:
+            // Browsers don't account for the final '\n' in scrollHeight.
+            // We temporarily add a space char to force the calculation to include the new line.
+            let nextHeight = textarea.scrollHeight;
+
+            if (data.content.endsWith('\n')) {
+                const originalValue = textarea.value;
+                const { selectionStart, selectionEnd } = textarea;
+
+                textarea.value = originalValue + ' ';
+                nextHeight = textarea.scrollHeight;
+
+                textarea.value = originalValue;
+                textarea.setSelectionRange(selectionStart, selectionEnd);
+            }
+
+            textarea.style.height = nextHeight + "px";
 
             if (scrollContainer) {
                 scrollContainer.scrollTop = scrollPos;
@@ -83,12 +101,15 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                 <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
 
                     {/* Toolbar - Now fixed because parent is h-full/overflow-hidden */}
-                    <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
+                    <div className="no-print sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
                         <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
                         <div className="flex gap-2 items-center">
                             <span className="text-xs text-gray-400 mr-2 uppercase tracking-wider font-medium">
                                 {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'error' ? 'Error' : 'Saved'}
                             </span>
+                            <button onClick={() => window.print()} className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors" title="Print note">
+                                <Printer size={20} />
+                            </button>
                             <button onClick={(e) => onShare(e, data)} className={`p-2 transition-colors rounded-full ${data.sharedId ? 'text-green-500 bg-green-50' : 'text-gray-400 hover:text-[#4285f4]'}`}>
                                 <Share2 size={20} />
                             </button>
@@ -103,11 +124,16 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                         <div className="p-6 md:p-8 flex flex-col gap-4 min-h-full">
 
                             {/* Title */}
-                            <input
+                            <textarea
                                 value={data.title}
-                                onChange={e => setData(s => ({ ...s, title: e.target.value }))}
+                                onChange={e => {
+                                    setData(s => ({ ...s, title: e.target.value }));
+                                    e.target.style.height = 'auto';
+                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                }}
                                 placeholder="Untitled Note"
-                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800"
+                                rows={1}
+                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800 w-full resize-none overflow-hidden break-words"
                             />
 
                             {/* Meta Bar: Alerts, Tags, Attachments */}

@@ -7,7 +7,7 @@ import { db, appId } from '../lib/firebase';
 export const resetUserVault = async (userId) => {
   const appCollections = [
     'notes', 'bookmarks', 'checklists', 'counters',
-    'tasks', 'passwords', 'banking', 'finance'
+    'tasks', 'passwords', 'banking', 'finance', 'reminders', 'authenticator'
   ];
 
   // 1. Delete all documents in sub-collections
@@ -43,7 +43,7 @@ export const initializeUserKeys = async (userId, salt, encryptedMasterKey, encry
 
 // Listener for App Stats (Launcher)
 export const listenToAppStats = (userId, callback) => {
-  const cols = ['counters', 'checklists', 'tasks', 'passwords', 'banking', 'finance', 'reminders'];
+  const cols = ['counters', 'checklists', 'tasks', 'passwords', 'banking', 'finance', 'reminders', 'authenticator'];
   const unsubs = cols.map(col =>
     onSnapshot(query(collection(db, 'artifacts', appId, 'users', userId, col)),
       snap => callback(col, snap.size))

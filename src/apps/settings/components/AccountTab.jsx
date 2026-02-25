@@ -1,7 +1,7 @@
 // src/apps/settings/AccountTab.jsx
 import React, { useState } from 'react';
 import { signOut } from 'firebase/auth';
-import { LogOut, Trash2 } from 'lucide-react';
+import { LogOut, Trash2, User } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { Button, Input } from '../../../components/ui';
 import { rotateUserPasskey, deleteUserAccount } from '../../../services/settings';
@@ -38,7 +38,6 @@ const AccountTab = ({ user, setLoading, setMessage }) => {
     setLoading(true);
     try {
       await deleteUserAccount(user);
-      // Auth listener in App.jsx will handle redirect
     } catch (e) {
       console.error(e);
       setMessage({ type: 'error', text: "Delete failed. You may need to re-login first." });
@@ -48,6 +47,31 @@ const AccountTab = ({ user, setLoading, setMessage }) => {
 
   return (
     <div className="space-y-6">
+
+      {/* Profile Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <h2 className="font-bold text-gray-800 mb-4">Profile</h2>
+        <div className="flex items-center gap-4">
+          {user.photoURL ? (
+            <img
+              src={user.photoURL}
+              alt="Profile"
+              className="w-16 h-16 rounded-full object-cover border-2 border-gray-100"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+              <User size={28} />
+            </div>
+          )}
+          <div>
+            <p className="font-semibold text-gray-900 text-lg">
+              {user.displayName || 'Anonymous'}
+            </p>
+            <p className="text-sm text-gray-500">{user.email}</p>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <h2 className="font-bold text-gray-800 mb-4">Update Passkey</h2>
         <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
@@ -61,7 +85,6 @@ const AccountTab = ({ user, setLoading, setMessage }) => {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <h2 className="font-bold text-gray-800 mb-4">Session</h2>
         <div className="flex flex-col gap-3">
-          <div className="text-sm text-gray-500 mb-2">Logged in as: <br /><span className="font-mono text-gray-800">{user.email}</span></div>
           <Button variant="secondary" onClick={() => window.confirm("Sign out?") && signOut(auth)} className="w-full">
             <LogOut size={18} /> Sign Out
           </Button>

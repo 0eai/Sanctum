@@ -1,3 +1,4 @@
+// src/components/ui/FileViewer.jsx
 import React from 'react';
 import { X, Download, FileText, Music, Video, File } from 'lucide-react';
 

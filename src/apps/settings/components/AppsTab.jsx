@@ -4,7 +4,7 @@ import {
     ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink,
     Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
     FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
-    Users, BellRing, Share2
+    Users, BellRing, Share2, ShieldCheck, MessageCircle
 } from 'lucide-react';
 
 // Make sure your constants.js exports an array that looks like this:
@@ -12,12 +12,14 @@ const AVAILABLE_APPS = [
     { id: 'alerts', name: 'DayPulse', icon: 'Bell' },
     { id: 'tasks', name: 'Tasks', icon: 'ListChecks' },
     { id: 'checklist', name: 'Checklists', icon: 'CheckSquare' },
-    { id: 'reminders', name: 'Reminders', icon: 'BellRing' }, 
+    { id: 'reminders', name: 'Reminders', icon: 'BellRing' },
     { id: 'counter', name: 'Counters', icon: 'PlusSquare' },
     { id: 'notes', name: 'Notes', icon: 'FileText' },
     { id: 'markdown', name: 'Markdown', icon: 'FileCode' },
-    { id: 'contacts', name: 'Contacts', icon: 'Users' }, 
+    { id: 'contacts', name: 'Contacts', icon: 'Users' },
     { id: 'passwords', name: 'Passwords', icon: 'Key' },
+    { id: 'authenticator', name: 'Authenticator', icon: 'ShieldCheck' },
+    { id: 'secureshare', name: 'Chat', icon: 'MessageCircle' },
     { id: 'banking', name: 'Wallet', icon: 'CreditCard' },
     { id: 'finance', name: 'Finance', icon: 'PieChart' },
     { id: 'bookmarks', name: 'Bookmarks', icon: 'Bookmark' },
@@ -50,6 +52,7 @@ const getIconComponent = (iconName) => {
     // 1. Check Standard App Icons
     switch (iconName) {
         case 'Shield': return Shield;
+        case 'ShieldCheck': return ShieldCheck;
         case 'FileText': return FileText;
         case 'CheckSquare': return CheckSquare;
         case 'PieChart': return PieChart;
@@ -59,10 +62,11 @@ const getIconComponent = (iconName) => {
         case 'PlusSquare': return PlusSquare;
         case 'FileCode': return FileCode;
         case 'Settings': return Settings;
-        case 'Users': return Users;       
-        case 'BellRing': return BellRing; 
-        case 'Bell': return Bell; 
+        case 'Users': return Users;
+        case 'BellRing': return BellRing;
+        case 'Bell': return Bell;
         case 'Share2': return Share2;
+        case 'MessageCircle': return MessageCircle;
         default: break;
     }
 
@@ -184,12 +188,16 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                         const IconComponent = getIconComponent(app.icon);
 
                         return (
-                            <div key={app.id} className="p-3 flex items-center justify-between hover:bg-gray-50 transition-colors group">
+                            <div
+                                key={app.id}
+                                onClick={() => !isSystem && toggleApp(app.id)}
+                                className={`p-3 flex items-center justify-between hover:bg-gray-50 transition-colors group ${!isSystem ? 'cursor-pointer' : ''}`}
+                            >
                                 <div className="flex items-center gap-3">
                                     {/* Reorder Buttons */}
                                     <div className="flex flex-col gap-1 text-gray-300">
-                                        <button onClick={() => moveApp(index, -1)} disabled={index === 0} className="hover:text-blue-500 disabled:opacity-30 p-0.5"><MoveUp size={12} /></button>
-                                        <button onClick={() => moveApp(index, 1)} disabled={index === appList.length - 1} className="hover:text-blue-500 disabled:opacity-30 p-0.5"><MoveDown size={12} /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); moveApp(index, -1); }} disabled={index === 0} className="hover:text-blue-500 disabled:opacity-30 p-0.5"><MoveUp size={12} /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); moveApp(index, 1); }} disabled={index === appList.length - 1} className="hover:text-blue-500 disabled:opacity-30 p-0.5"><MoveDown size={12} /></button>
                                     </div>
 
                                     <div className={`p-2 rounded-lg ${isEnabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
@@ -210,13 +218,13 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
 
                                 <div className="flex items-center gap-3">
                                     {app.isExternal && (
-                                        <button onClick={() => handleDeleteExternal(app.id)} className="text-gray-300 hover:text-red-500 p-2">
+                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteExternal(app.id); }} className="text-gray-300 hover:text-red-500 p-2">
                                             <Trash2 size={16} />
                                         </button>
                                     )}
 
                                     {!isSystem && (
-                                        <button onClick={() => toggleApp(app.id)} className={`transition-colors ${isEnabled ? 'text-[#4285f4]' : 'text-gray-300'}`}>
+                                        <button onClick={(e) => { e.stopPropagation(); toggleApp(app.id); }} className={`transition-colors ${isEnabled ? 'text-[#4285f4]' : 'text-gray-300'}`}>
                                             {isEnabled ? <ToggleRight size={28} fill="currentColor" /> : <ToggleLeft size={28} />}
                                         </button>
                                     )}

@@ -1,7 +1,7 @@
 // crypto.js
 
 // Configuration
-const ITERATIONS = 100000; 
+const ITERATIONS = 100000;
 const ALGO_NAME = "AES-GCM";
 const HASH_NAME = "SHA-256";
 
@@ -10,7 +10,7 @@ const bufferToBase64 = (buffer) => {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   const len = bytes.byteLength;
-  const chunkSize = 32768; 
+  const chunkSize = 32768;
   for (let i = 0; i < len; i += chunkSize) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
@@ -38,7 +38,7 @@ export const generateSalt = () => {
 export const generateMasterKey = async () => {
   return window.crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
-    true, 
+    true,
     ["encrypt", "decrypt"]
   );
 };
@@ -102,10 +102,10 @@ export const encryptData = async (data, key) => {
 export const decryptData = async (encryptedObj, key) => {
   try {
     if (!encryptedObj || !encryptedObj.iv || !encryptedObj.data) return null;
-    
+
     const iv = base64ToBuffer(encryptedObj.iv);
     const data = base64ToBuffer(encryptedObj.data);
-    
+
     const decrypted = await window.crypto.subtle.decrypt(
       { name: ALGO_NAME, iv: iv },
       key,
@@ -133,14 +133,14 @@ export const keyFromUrlString = async (base64) => {
   // Add padding back if needed
   let str = base64.replace(/-/g, '+').replace(/_/g, '/');
   while (str.length % 4) str += '=';
-  
+
   const binary_string = window.atob(str);
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
     bytes[i] = binary_string.charCodeAt(i);
   }
-  
+
   return window.crypto.subtle.importKey(
     "raw",
     bytes.buffer,
@@ -148,4 +148,88 @@ export const keyFromUrlString = async (base64) => {
     true,
     ["encrypt", "decrypt"]
   );
+};
+
+// --- RSA Key Management for E2EE ---
+
+export const generateRSAKeyPair = async () => {
+  return window.crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt", "decrypt"]
+  );
+};
+
+export const exportRSAPublicKey = async (publicKey) => {
+  const exported = await window.crypto.subtle.exportKey("spki", publicKey);
+  return bufferToBase64(exported);
+};
+
+export const exportRSAPrivateKey = async (privateKey) => {
+  const exported = await window.crypto.subtle.exportKey("pkcs8", privateKey);
+  return bufferToBase64(exported);
+};
+
+export const importRSAPublicKey = async (base64) => {
+  const buffer = base64ToBuffer(base64);
+  return window.crypto.subtle.importKey(
+    "spki",
+    buffer,
+    {
+      name: "RSA-OAEP",
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt"]
+  );
+};
+
+export const importRSAPrivateKey = async (base64) => {
+  const buffer = base64ToBuffer(base64);
+  return window.crypto.subtle.importKey(
+    "pkcs8",
+    buffer,
+    {
+      name: "RSA-OAEP",
+      hash: "SHA-256",
+    },
+    true,
+    ["decrypt"]
+  );
+};
+
+// --- RSA Encryption / Decryption ---
+
+export const encryptRSA = async (dataString, publicKey) => {
+  const encoded = new TextEncoder().encode(dataString);
+  const encrypted = await window.crypto.subtle.encrypt(
+    {
+      name: "RSA-OAEP"
+    },
+    publicKey,
+    encoded
+  );
+  return bufferToBase64(encrypted);
+};
+
+export const decryptRSA = async (base64EncryptedData, privateKey) => {
+  try {
+    const buffer = base64ToBuffer(base64EncryptedData);
+    const decrypted = await window.crypto.subtle.decrypt(
+      {
+        name: "RSA-OAEP"
+      },
+      privateKey,
+      buffer
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch (e) {
+    console.error("RSA Decryption failed", e);
+    return null;
+  }
 };

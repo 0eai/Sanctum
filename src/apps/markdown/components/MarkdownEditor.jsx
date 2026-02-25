@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     ChevronLeft, Star, Eye, Edit2, Download, Bell, Clock, RotateCcw, X, Tag, Paperclip,
-    PlayCircle, Music, FileText
+    PlayCircle, Music, FileText, Printer
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
@@ -116,8 +116,7 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
             <div ref={scrollRef} className="fixed inset-0 z-50 bg-gray-50 overflow-y-auto">
                 <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
 
-                    {/* Toolbar */}
-                    <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
+                    <div className="no-print sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
                         <div className="flex items-center gap-3 overflow-hidden">
                             <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 flex-shrink-0"><ChevronLeft /></button>
                             {/* Display current title in toolbar since main input is gone */}
@@ -144,6 +143,9 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
                                 {isPreviewMode ? <><Edit2 size={14} /> Edit</> : <><Eye size={14} /> Preview</>}
                             </button>
 
+                            <button onClick={() => window.print()} className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100" title="Print document">
+                                <Printer size={20} />
+                            </button>
                             <button onClick={() => onExport(data)} className="p-2 text-gray-400 hover:text-blue-500 rounded-full hover:bg-gray-100">
                                 <Download size={20} />
                             </button>

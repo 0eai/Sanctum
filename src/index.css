@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+/* === Print Styles === */
+@media print {
+  /* Hide app chrome: header bars, sidebars, FABs, and action buttons */
+  header,
+  nav,
+  [data-no-print],
+  .no-print {
+    display: none !important;
+  }
+
+  /* Make content fill the full page */
+  body, #root {
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+}
+
