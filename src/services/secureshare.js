@@ -362,7 +362,7 @@ export const listenToAllUnreadMessages = (currentUid, callback) => {
             const mapId = `dm_${contact.id}`;
             if (!unsubs.has(mapId)) {
                 const chatId = getChatId(currentUid, contact.id);
-                const unsub = listenToChatUnreadCount(['chats', chatId, 'messages'], currentUid, (count) => {
+                const unsub = listenToChatUnreadCount(['artifacts', appId, 'chats', chatId, 'messages'], currentUid, (count) => {
                     countsMap.set(mapId, count);
                     updateCallback();
                 });
@@ -389,7 +389,7 @@ export const listenToAllUnreadMessages = (currentUid, callback) => {
         for (const group of groups) {
             const mapId = `group_${group.id}`;
             if (!unsubs.has(mapId)) {
-                const unsub = listenToChatUnreadCount(['groups', group.id, 'messages'], currentUid, (count) => {
+                const unsub = listenToChatUnreadCount(['artifacts', appId, 'groups', group.id, 'messages'], currentUid, (count) => {
                     countsMap.set(mapId, count);
                     updateCallback();
                 });
