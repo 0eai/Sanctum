@@ -1,4 +1,4 @@
-# Security Review — Sanctum v1.0.2
+# Security Review — Sanctum v1.0.4
 
 **Date:** February 26, 2026  
 **Scope:** Full client-side security audit of encryption, authentication, data storage, sharing, and Firestore rules.
