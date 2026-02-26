@@ -112,8 +112,8 @@ Passkey (user-memorized, min 8 chars, strength meter enforced)
 | Brute-force protection | ✅ Good | Client-side rate limiting: 3 fails → 2s, 5 → 5s, 8 → 15s, 10 → 60s delay |
 
 ### Recommendations
-- Consider storing a **failed attempt counter** server-side (Firestore) to persist across page refreshes
-- Consider requiring **passkey confirmation** (enter twice) during initial setup to prevent typos
+- ✅ Implemented **failed attempt counter** server-side (Firestore) to persist across page refreshes
+- ✅ Implemented **passkey confirmation** (enter twice) during initial setup to prevent typos
 
 ---
 
