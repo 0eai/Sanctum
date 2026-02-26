@@ -7,6 +7,7 @@ import {
   Users, BellRing, Share2, ShieldCheck, MessageCircle
 } from 'lucide-react';
 import { listenToAppStats } from '../../services/firestoredb';
+import { listenToAllUnreadMessages } from '../../services/secureshare';
 
 // --- Icon Mapping Helper ---
 const getIconElement = (iconName) => {
@@ -33,15 +34,23 @@ const getIconElement = (iconName) => {
 
 const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
   const [stats, setStats] = useState({
-    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0, reminders: 0, authenticator: 0
+    counters: 0, checklists: 0, tasks: 0, passwords: 0, banking: 0, finance: 0, reminders: 0, authenticator: 0, unreadChats: 0
   });
 
   useEffect(() => {
     if (!user) return;
-    const unsubscribe = listenToAppStats(user.uid, (colName, size) => {
+    const unsubscribeStats = listenToAppStats(user.uid, (colName, size) => {
       setStats(prev => ({ ...prev, [colName]: size }));
     });
-    return () => unsubscribe();
+
+    const unsubscribeUnread = listenToAllUnreadMessages(user.uid, (count) => {
+      setStats(prev => ({ ...prev, unreadChats: count }));
+    });
+
+    return () => {
+      unsubscribeStats();
+      unsubscribeUnread();
+    };
   }, [user]);
 
   // 1. Define Standard System Apps
@@ -56,7 +65,7 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
     { id: 'contacts', icon: <Users size={24} />, label: 'Contacts' },
     { id: 'passwords', icon: <Key size={24} />, label: 'Passwords', count: stats.passwords },
     { id: 'authenticator', icon: <ShieldCheck size={24} />, label: 'Authenticator', count: stats.authenticator },
-    { id: 'secureshare', icon: <MessageCircle size={24} />, label: 'Chat' },
+    { id: 'secureshare', icon: <MessageCircle size={24} />, label: 'Chat', count: stats.unreadChats },
     { id: 'banking', icon: <CreditCard size={24} />, label: 'Wallet', count: stats.banking },
     { id: 'finance', icon: <PieChart size={24} />, label: 'Finance', count: stats.finance },
     { id: 'bookmarks', icon: <Bookmark size={24} />, label: 'Bookmarks' },

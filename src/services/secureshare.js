@@ -329,6 +329,86 @@ export const listenToChatUnreadCount = (collectionPath, currentUid, callback) =>
 };
 
 /**
+ * Listen to ALL unread messages across all 1:1 chats and groups.
+ * Orchestrates dynamic listeners and returns a single unified count.
+ */
+export const listenToAllUnreadMessages = (currentUid, callback) => {
+    if (!currentUid) return () => { };
+
+    let totalCount = 0;
+    const countsMap = new Map(); // chat/group ID -> unread count
+    const unsubs = new Map(); // chat/group ID -> unsubscribe function
+
+    const updateCallback = () => {
+        totalCount = Array.from(countsMap.values()).reduce((a, b) => a + b, 0);
+        callback(totalCount);
+    };
+
+    // 1. Listen to 1:1 Contacts
+    const contactsUnsub = listenToContacts(currentUid, (contacts) => {
+        const currentContactIds = new Set(contacts.map(c => c.id));
+
+        // Remove old listeners
+        for (const [id, unsub] of unsubs.entries()) {
+            if (id.startsWith('dm_') && !currentContactIds.has(id.replace('dm_', ''))) {
+                unsub();
+                unsubs.delete(id);
+                countsMap.delete(id);
+            }
+        }
+
+        // Add new listeners
+        for (const contact of contacts) {
+            const mapId = `dm_${contact.id}`;
+            if (!unsubs.has(mapId)) {
+                const chatId = getChatId(currentUid, contact.id);
+                const unsub = listenToChatUnreadCount(['chats', chatId, 'messages'], currentUid, (count) => {
+                    countsMap.set(mapId, count);
+                    updateCallback();
+                });
+                unsubs.set(mapId, unsub);
+            }
+        }
+        updateCallback();
+    });
+
+    // 2. Listen to Groups
+    const groupsUnsub = listenToGroups(currentUid, (groups) => {
+        const currentGroupIds = new Set(groups.map(g => g.id));
+
+        // Remove old listeners
+        for (const [id, unsub] of unsubs.entries()) {
+            if (id.startsWith('group_') && !currentGroupIds.has(id.replace('group_', ''))) {
+                unsub();
+                unsubs.delete(id);
+                countsMap.delete(id);
+            }
+        }
+
+        // Add new listeners
+        for (const group of groups) {
+            const mapId = `group_${group.id}`;
+            if (!unsubs.has(mapId)) {
+                const unsub = listenToChatUnreadCount(['groups', group.id, 'messages'], currentUid, (count) => {
+                    countsMap.set(mapId, count);
+                    updateCallback();
+                });
+                unsubs.set(mapId, unsub);
+            }
+        }
+        updateCallback();
+    });
+
+    return () => {
+        contactsUnsub();
+        groupsUnsub();
+        for (const unsub of unsubs.values()) {
+            unsub();
+        }
+    };
+};
+
+/**
  * Mark all unread messages as read in a chat/group.
  * Called when user opens a chat.
  */
