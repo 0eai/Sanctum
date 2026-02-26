@@ -11,13 +11,19 @@ import { encryptData, generateMasterKey, keyToUrlString } from '../lib/crypto';
  * @param {object} payload - The data to encrypt and share (type-specific)
  * @returns {{ sharedId: string, shareUrlKey: string }}
  */
-export const shareItem = async (payload) => {
+export const shareItem = async (payload, expireMinutes = null) => {
     const shareKey = await generateMasterKey();
     const encryptedBlob = await encryptData(payload, shareKey);
+    let expiresAt = null;
+    if (expireMinutes) {
+        expiresAt = new Date();
+        expiresAt.setMinutes(expiresAt.getMinutes() + expireMinutes);
+    }
     const docRef = await addDoc(collection(db, 'shared_notes'), {
         data: encryptedBlob,
         createdBy: auth.currentUser?.uid || null,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        expiresAt: expiresAt
     });
     const keyString = await keyToUrlString(shareKey);
     return { sharedId: docRef.id, shareUrlKey: keyString };

@@ -170,7 +170,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         attachments: item.attachments || [],
         date: new Date().toISOString()
       };
-      const { sharedId, shareUrlKey } = await shareItem(payload);
+      const { sharedId, shareUrlKey } = await shareItem(payload, shareTTL);
       // Save sharedId back to the doc
       await saveMarkdownDoc(user.uid, cryptoKey, { ...item, sharedId, shareUrlKey }, currentFolderId);
       const url = buildShareUrl(sharedId, shareUrlKey);

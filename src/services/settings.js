@@ -238,6 +238,33 @@ export const wipeAllUserData = async (userId) => {
     if (count > 0) await batch.commit();
 };
 
+// Delete data for a single app/collection
+export const wipeAppData = async (userId, collectionName) => {
+    const batchSize = 400;
+    let batch = writeBatch(db);
+    let count = 0;
+
+    const mainColRef = collection(db, 'artifacts', appId, 'users', userId, collectionName);
+    const mainSnap = await getDocs(mainColRef);
+
+    for (const d of mainSnap.docs) {
+        // Delete sub-collections first
+        if (collectionName === 'checklists') {
+            const subSnap = await getDocs(collection(d.ref, 'items'));
+            for (const s of subSnap.docs) { batch.delete(s.ref); count++; if (count >= batchSize) { await batch.commit(); batch = writeBatch(db); count = 0; } }
+        }
+        if (collectionName === 'counters') {
+            const subSnap = await getDocs(collection(d.ref, 'entries'));
+            for (const s of subSnap.docs) { batch.delete(s.ref); count++; if (count >= batchSize) { await batch.commit(); batch = writeBatch(db); count = 0; } }
+        }
+
+        batch.delete(d.ref);
+        count++;
+        if (count >= batchSize) { await batch.commit(); batch = writeBatch(db); count = 0; }
+    }
+    if (count > 0) await batch.commit();
+};
+
 export const deleteUserAccount = async (user) => {
     await wipeAllUserData(user.uid);
     await deleteDoc(doc(db, 'users', user.uid));
@@ -279,4 +306,20 @@ export const rotateUserPasskey = async (userId, oldPass, newPass) => {
     const newEncryptedMasterKey = await encryptData(unlockedMasterKeyJWK, newWrapperKey);
 
     await updateDoc(userDocRef, { encryptionSalt: newSalt, encryptedMasterKey: newEncryptedMasterKey });
+};
+
+export const exportRecoveryKey = async (userId, passkey) => {
+    const userDocRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) throw new Error("User data not found.");
+
+    const { encryptionSalt, encryptedMasterKey } = userDoc.data();
+    const wrapperKey = await deriveKeyFromPasskey(passkey, encryptionSalt);
+    const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, wrapperKey);
+
+    if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
+
+    // The JWK format contains the raw key material. We can serialize and encode it.
+    // For a succinct backup string, we can just base64-encode the stringified JWK.
+    return btoa(JSON.stringify(unlockedMasterKeyJWK));
 };

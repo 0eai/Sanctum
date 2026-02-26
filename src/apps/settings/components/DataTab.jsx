@@ -1,16 +1,18 @@
 import React, { useState, useRef } from 'react';
 import { Download, Upload, Trash2, AlertTriangle, Database, ChevronDown, FileText } from 'lucide-react';
 import { Button } from '../../../components/ui';
-import { exportUserData, importUserData, wipeAllUserData } from '../../../services/settings';
-import { exportContactsCSV, importContactsCSV, importContacts } from '../../../services/contacts';
+import { exportUserData, importUserData, wipeAllUserData, wipeAppData } from '../../../services/settings';
+import { exportContactsCSV, importContactsCSV, importContacts, exportContactsVCF, importContactsVCF } from '../../../services/contacts';
+import { exportPasswordsCSV, importPasswordsCSV } from '../../../services/passwords';
+import { exportBookmarksHtml, importBookmarksFromHtml } from '../../../services/bookmarks';
 
 // Per-app config: collection name, label, supported export/import formats
 const APP_DATA_CONFIG = [
     { id: 'notes', label: 'Notes', collection: 'notes', formats: { export: ['json'], import: ['.json'] } },
     { id: 'tasks', label: 'Tasks', collection: 'tasks', formats: { export: ['json'], import: ['.json'] } },
-    { id: 'contacts', label: 'Contacts', collection: 'contacts', formats: { export: ['json', 'csv'], import: ['.json', '.csv'] } },
-    { id: 'passwords', label: 'Passwords', collection: 'passwords', formats: { export: ['json'], import: ['.json'] } },
-    { id: 'bookmarks', label: 'Bookmarks', collection: 'bookmarks', formats: { export: ['json'], import: ['.json'] } },
+    { id: 'contacts', label: 'Contacts', collection: 'contacts', formats: { export: ['json', 'csv', 'vcf'], import: ['.json', '.csv', '.vcf'] } },
+    { id: 'passwords', label: 'Passwords', collection: 'passwords', formats: { export: ['json', 'csv'], import: ['.json', '.csv'] } },
+    { id: 'bookmarks', label: 'Bookmarks', collection: 'bookmarks', formats: { export: ['json', 'html'], import: ['.json', '.html'] } },
     { id: 'finance', label: 'Finance', collection: 'finance', formats: { export: ['json'], import: ['.json'] } },
     { id: 'banking', label: 'Banking', collection: 'banking', formats: { export: ['json'], import: ['.json'] } },
     { id: 'checklists', label: 'Checklists', collection: 'checklists', formats: { export: ['json'], import: ['.json'] } },
@@ -39,6 +41,18 @@ const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false, var
     );
 };
 
+const downloadBlob = (content, filename, type) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
 const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     const fileInputRef = useRef(null);
     const appFileInputRef = useRef(null);
@@ -51,14 +65,8 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
         try {
             const collections = singleApp ? [singleApp] : undefined;
             const data = await exportUserData(user.uid, cryptoKey, collections);
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `sanctum_backup_${singleApp || 'full'}_${new Date().toISOString().slice(0, 10)}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            const date = new Date().toISOString().slice(0, 10);
+            downloadBlob(JSON.stringify(data, null, 2), `sanctum_backup_${singleApp || 'full'}_${date}.json`, 'application/json');
             setMessage({ type: 'success', text: "Export successful." });
         } catch (e) {
             console.error(e);
@@ -92,21 +100,31 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     // --- Per-App Export ---
     const handleAppExport = async (format) => {
         setAppProcessing(true);
+        const date = new Date().toISOString().slice(0, 10);
         try {
             if (selectedApp === 'contacts' && format === 'csv') {
                 const csvText = await exportContactsCSV(user.uid, cryptoKey);
-                const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `contacts_export_${new Date().toISOString().slice(0, 10)}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
+                downloadBlob(csvText, `contacts_${date}.csv`, 'text/csv;charset=utf-8;');
+            } else if (selectedApp === 'contacts' && format === 'vcf') {
+                const vcfText = await exportContactsVCF(user.uid, cryptoKey);
+                downloadBlob(vcfText, `contacts_${date}.vcf`, 'text/vcard');
+            } else if (selectedApp === 'passwords' && format === 'csv') {
+                // Need to get passwords data first via full export
+                const data = await exportUserData(user.uid, cryptoKey, ['passwords']);
+                const passwords = data.passwords || [];
+                const csvText = exportPasswordsCSV(passwords);
+                downloadBlob(csvText, `passwords_${date}.csv`, 'text/csv;charset=utf-8;');
+            } else if (selectedApp === 'bookmarks' && format === 'html') {
+                const data = await exportUserData(user.uid, cryptoKey, ['bookmarks']);
+                const bookmarks = data.bookmarks || [];
+                const htmlText = exportBookmarksHtml(bookmarks);
+                downloadBlob(htmlText, `bookmarks_${date}.html`, 'text/html');
             } else {
                 await handleExport(selectedApp);
             }
-            setMessage({ type: 'success', text: `Exported ${selectedApp} successfully.` });
+            setMessage({ type: 'success', text: `Exported ${selectedApp} as ${format.toUpperCase()}.` });
         } catch (e) {
+            console.error(e);
             setMessage({ type: 'error', text: `Export failed.` });
         } finally {
             setAppProcessing(false);
@@ -122,27 +140,40 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
         reader.onload = async (event) => {
             try {
                 const text = event.target.result;
-                const appConfig = APP_DATA_CONFIG.find(a => a.id === selectedApp);
+                const ext = file.name.toLowerCase().split('.').pop();
 
-                if (selectedApp === 'contacts' && file.name.toLowerCase().endsWith('.csv')) {
+                if (selectedApp === 'contacts' && ext === 'csv') {
                     const count = await importContactsCSV(user.uid, cryptoKey, text);
                     setMessage({ type: 'success', text: `Imported ${count} contacts from CSV.` });
-                } else if (selectedApp === 'contacts' && file.name.toLowerCase().endsWith('.json')) {
+                } else if (selectedApp === 'contacts' && ext === 'vcf') {
+                    const count = await importContactsVCF(user.uid, cryptoKey, text);
+                    setMessage({ type: 'success', text: `Imported ${count} contacts from vCard.` });
+                } else if (selectedApp === 'contacts' && ext === 'json') {
                     const json = JSON.parse(text);
-                    // If it's a flat array of contacts, use importContacts
                     if (Array.isArray(json)) {
                         const count = await importContacts(user.uid, cryptoKey, json);
                         setMessage({ type: 'success', text: `Imported ${count} contacts.` });
                     } else {
-                        // Standard Sanctum backup format
                         await importUserData(user.uid, cryptoKey, json);
-                        setMessage({ type: 'success', text: `Imported contacts successfully.` });
+                        setMessage({ type: 'success', text: `Imported contacts.` });
+                    }
+                } else if (selectedApp === 'passwords' && ext === 'csv') {
+                    const count = await importPasswordsCSV(user.uid, cryptoKey, text);
+                    setMessage({ type: 'success', text: `Imported ${count} passwords from CSV.` });
+                } else if (selectedApp === 'bookmarks' && ext === 'html') {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(text, 'text/html');
+                    const dl = doc.querySelector('dl');
+                    if (dl) {
+                        await importBookmarksFromHtml(user.uid, cryptoKey, dl, null);
+                        setMessage({ type: 'success', text: `Bookmarks imported from HTML.` });
+                    } else {
+                        setMessage({ type: 'error', text: 'No bookmarks found in file.' });
                     }
                 } else {
-                    // Generic JSON import for all other apps
                     const json = JSON.parse(text);
                     await importUserData(user.uid, cryptoKey, json);
-                    setMessage({ type: 'success', text: `Imported ${appConfig?.label || selectedApp} data.` });
+                    setMessage({ type: 'success', text: `Imported data successfully.` });
                 }
             } catch (e) {
                 console.error(e);
@@ -155,6 +186,26 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
         reader.readAsText(file);
     };
 
+    // --- Per-App Delete ---
+    const handleAppDelete = async () => {
+        const appConfig = APP_DATA_CONFIG.find(a => a.id === selectedApp);
+        const confirmStr = appConfig.label.toUpperCase();
+        const input = prompt(`This will permanently delete ALL ${appConfig.label} data.\nTo confirm, type "${confirmStr}":`);
+        if (input !== confirmStr) return;
+
+        setLoading(true);
+        try {
+            await wipeAppData(user.uid, appConfig.collection);
+            setMessage({ type: 'success', text: `All ${appConfig.label} data deleted.` });
+        } catch (e) {
+            console.error(e);
+            setMessage({ type: 'error', text: `Delete failed.` });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // --- Full Wipe ---
     const handleWipe = async () => {
         const confirmStr = "DELETE EVERYTHING";
         const input = prompt(`WARNING: This will permanently delete ALL your data.\nTo confirm, type "${confirmStr}":`);
@@ -172,6 +223,11 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     };
 
     const currentAppConfig = APP_DATA_CONFIG.find(a => a.id === selectedApp);
+    const formatHints = {
+        contacts: 'JSON (Sanctum), CSV (Google), VCF (vCard)',
+        passwords: 'JSON (Sanctum), CSV (Google Passwords)',
+        bookmarks: 'JSON (Sanctum), HTML (Chrome/Firefox/Brave)',
+    };
 
     return (
         <div className="space-y-4">
@@ -194,8 +250,6 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
             {/* Per-App Import/Export */}
             <CollapsibleCard title="App Import / Export" icon={FileText}>
                 <div className="space-y-4">
-                    <p className="text-xs text-gray-500">Export or import data for individual apps. Contacts support CSV format.</p>
-
                     {/* App Selector */}
                     <select
                         value={selectedApp}
@@ -210,7 +264,7 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                     {/* Export Buttons */}
                     <div className="flex flex-col gap-2">
                         <label className="text-xs font-bold text-gray-500 uppercase">Export</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className={`grid gap-2 ${currentAppConfig.formats.export.length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                             {currentAppConfig?.formats.export.map(fmt => (
                                 <Button
                                     key={fmt}
@@ -237,7 +291,7 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                             <Upload size={16} /> Import {currentAppConfig?.label}
                         </Button>
                         <p className="text-[11px] text-gray-400 text-center">
-                            Accepted: {currentAppConfig?.formats.import.join(', ')}
+                            {formatHints[selectedApp] || currentAppConfig?.formats.import.join(', ')}
                         </p>
                         <input
                             type="file"
@@ -246,6 +300,18 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                             accept={currentAppConfig?.formats.import.join(',')}
                             className="hidden"
                         />
+                    </div>
+
+                    {/* Per-App Delete */}
+                    <div className="pt-3 border-t border-gray-100">
+                        <Button
+                            onClick={handleAppDelete}
+                            variant="danger"
+                            disabled={appProcessing}
+                            className="w-full flex items-center justify-center gap-2 py-3"
+                        >
+                            <Trash2 size={16} /> Delete All {currentAppConfig?.label} Data
+                        </Button>
                     </div>
                 </div>
             </CollapsibleCard>

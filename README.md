@@ -1,6 +1,6 @@
 # Sanctum
 
-A privacy-first, end-to-end encrypted personal vault built with React and Firebase. All sensitive data is encrypted client-side with AES-GCM before touching the server — not even the server operator can read your data.
+A privacy-first, end-to-end encrypted personal vault built with React and Firebase. All sensitive data is encrypted client-side with AES-256-GCM before touching the server — not even the server operator can read your data.
 
 **Live:** [sanctum.aks-hub.web.app](https://aks-hub.web.app)
 
@@ -10,12 +10,17 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 
 ### 🔐 Security Model
 
-- **Client-side AES-GCM encryption** — all data encrypted/decrypted in the browser using the Web Crypto API
-- **Passkey-derived keys** — your master key is derived from a passkey (not stored anywhere)
+- **Argon2id key derivation** — memory-hard (64 MB), GPU/ASIC resistant, via WebAssembly
+- **AES-256-GCM encryption** — all data encrypted/decrypted in the browser using the Web Crypto API
 - **Zero-knowledge architecture** — Firebase only stores encrypted blobs
+- **Passkey strength enforcement** — min 8 characters with visual strength meter
+- **Client-side rate limiting** — progressive delays on failed attempts (2s → 5s → 15s → 60s)
 - **Auto-lock timer** — configurable inactivity timeout (5 min / 15 min / 1 hour / Never)
+- **Lock on tab hidden** — instant vault lock when switching tabs or minimizing
 - **Device tracking** — see all active sessions, sign out other devices
 - **Activity log** — real-time audit trail of vault events
+- **Firebase App Check** — ReCAPTCHA v3 prevents unauthorized API access
+- **Content Security Policy** — full CSP, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy
 
 ### 📱 Apps
 
@@ -27,14 +32,14 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 | **Checklists** | Reorderable checklists with items, due dates, repeat cycles, and reset |
 | **Passwords** | Password vault with generator, strength meter, and copy-to-clipboard |
 | **Authenticator** | TOTP 2FA code generator (Google Authenticator compatible) with QR import |
-| **Contacts** | Encrypted address book |
-| **Bookmarks** | Bookmark manager with folders |
-| **Finance** | Expense tracker with categories and currency support |
+| **Contacts** | Encrypted address book with photo upload, labels, and multi-field support |
+| **Bookmarks** | Bookmark manager with folders and browser-compatible HTML import/export |
+| **Finance** | Expense tracker with categories and multi-currency support |
 | **Banking** | Wallet / banking interface with transaction history |
 | **Reminders** | Date/time reminders with recurring schedules |
 | **Alerts** | Alert/notification manager |
 | **SecureShare** | End-to-end encrypted messaging (1:1 and group chats) with RSA+AES hybrid encryption |
-| **Counter** | Tally counter with multiple counters |
+| **Counter** | Tally counter with multiple counters and history |
 | **Transfer** | Encrypted file transfer |
 
 ### 🔗 Sharing
@@ -43,16 +48,30 @@ Notes, Markdown documents, Tasks, and Checklists can be shared via encrypted pub
 
 ### ⚙️ Settings
 
-- **Account** — Profile, sign out, delete account
-- **Apps** — Enable/disable apps, reorder launcher
+- **Account** — Profile, update passkey, sign out, delete account
+- **Apps** — Enable/disable apps, reorder launcher layout
 - **Devices** — Active device management with per-device sign out
-- **Security** — Auto-lock timer, activity log
-- **Finance** — Default currency, categories
-- **Data** — Centralized import/export for individual apps (JSON, CSV), full vault backup/restore
+- **Security** — Auto-lock timer, lock-on-hidden toggle, activity log
+- **Finance** — Default currency, expense categories
+- **Data** — Centralized import/export, per-app data management, full vault backup/restore
+
+### 📥 Import / Export
+
+All import/export is centralized in **Settings → Data**:
+
+| App | Export Formats | Import Formats |
+|-----|---------------|----------------|
+| Contacts | JSON, CSV (Google), VCF (vCard 3.0) | JSON, CSV (Google), VCF (vCard 3.0) |
+| Passwords | JSON, CSV (Google Passwords) | JSON, CSV (Google Passwords) |
+| Bookmarks | JSON, HTML (Chrome/Firefox/Brave) | JSON, HTML (Chrome/Firefox/Brave) |
+| All other apps | JSON | JSON |
+| **Full Backup** | JSON (all collections) | JSON (all collections) |
+
+Per-app data deletion is also available with confirmation prompt.
 
 ### 📲 Progressive Web App
 
-Sanctum is installable on phones as a PWA:
+Sanctum is installable as a PWA:
 - **Android**: Open in Chrome → three-dot menu → "Install app"
 - **iOS**: Open in Safari → Share → "Add to Home Screen"
 - Offline shell caching for instant launch
@@ -66,8 +85,8 @@ Sanctum is installable on phones as a PWA:
 | **Framework** | React 19 |
 | **Build** | Vite 7 |
 | **Styling** | Tailwind CSS 4 |
-| **Backend** | Firebase (Auth, Firestore, Hosting) |
-| **Encryption** | Web Crypto API (AES-GCM, RSA-OAEP, PBKDF2) |
+| **Backend** | Firebase (Auth, Firestore, Hosting, App Check) |
+| **Encryption** | Web Crypto API (AES-GCM, RSA-OAEP, ECDH P-256) + Argon2id (hash-wasm) |
 | **Markdown** | react-markdown + remark-gfm + rehype-katex + react-syntax-highlighter |
 | **Icons** | Lucide React |
 | **2FA** | OTPAuth |
@@ -143,7 +162,7 @@ service cloud.firestore {
     match /shared_notes/{noteId} {
       allow create: if request.auth != null;
       allow read: if true;
-      allow delete: if request.auth != null;
+      allow delete: if request.auth != null && resource.data.createdBy == request.auth.uid;
     }
     match /artifacts/{appId}/public_keys/{userId} {
       allow read: if request.auth != null;
@@ -159,8 +178,13 @@ service cloud.firestore {
         && request.auth.uid in resource.data.memberUids;
       allow delete: if request.auth != null
         && resource.data.createdBy == request.auth.uid;
-      match /{document=**} {
-        allow read, write: if request.auth != null;
+      match /messages/{msgId} {
+        allow read, write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/groups/$(groupId)).data.memberUids;
+      }
+      match /group_members/{memberId} {
+        allow read, write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/groups/$(groupId)).data.memberUids;
       }
     }
   }
@@ -185,6 +209,9 @@ src/
 │   ├── bookmarks/           # Bookmarks
 │   ├── finance/             # Expense tracker
 │   ├── banking/             # Wallet
+│   ├── reminders/           # Reminders
+│   ├── counter/             # Tally counter
+│   ├── transfer/            # File transfer
 │   ├── secureshare/         # E2E encrypted chat
 │   ├── settings/            # Settings (6 tabs)
 │   └── SharedNote.jsx       # Public shared content viewer
@@ -193,8 +220,8 @@ src/
 │   └── ui/                  # Modal, Button, Input, MarkdownViewer, etc.
 ├── services/                # Firestore CRUD + encryption for each app
 ├── lib/
-│   ├── crypto.js            # AES-GCM, RSA-OAEP, PBKDF2, key management
-│   ├── firebase.js          # Firebase config
+│   ├── crypto.js            # AES-GCM, RSA-OAEP, ECDH, Argon2id, PBKDF2
+│   ├── firebase.js          # Firebase config + App Check
 │   └── dateUtils.js         # Date formatting helpers
 └── hooks/                   # useDebounce, useHashRoute, etc.
 ```

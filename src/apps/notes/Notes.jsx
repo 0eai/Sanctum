@@ -37,6 +37,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const [shareModal, setShareModal] = useState(null);
+  const [shareTTL, setShareTTL] = useState(0);
   const [processing, setProcessing] = useState(false);
   // Helper to get the current base path for opening/closing modals without losing folder context
   const currentBasePath = route.resourceId ? `#notes/${route.resource}/${route.resourceId}` : `#notes`;
@@ -181,7 +182,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleShare = async (note) => {
     try {
-      const { sharedId, shareUrlKey } = await shareNote(user.uid, cryptoKey, note);
+      const { sharedId, shareUrlKey } = await shareNote(user.uid, cryptoKey, note, shareTTL);
       const url = `${window.location.origin}/#view?id=${sharedId}&k=${shareUrlKey}`;
       if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId, shareUrlKey }));
       setShareModal({ isOpen: true, note: { ...note, sharedId, shareUrlKey }, link: url });
@@ -335,16 +336,26 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Note" zIndex={100}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            {shareModal?.link && <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>}
             <div className="text-xs text-gray-500 break-all">{shareModal?.link || "Link not generated yet."}</div>
           </div>
           <div className="flex flex-col gap-2">
+            {!shareModal?.link && (
+              <select value={shareTTL} onChange={(e) => setShareTTL(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 mb-2">
+                <option value={0}>Never expire</option>
+                <option value={60}>Expire in 1 Hour</option>
+                <option value={1440}>Expire in 1 Day</option>
+                <option value={10080}>Expire in 7 Days</option>
+              </select>
+            )}
             {shareModal?.link ? (
               <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert("Copied!"); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
             ) : (
               <Button onClick={() => handleShare(shareModal.note)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate New Link</Button>
             )}
-            <Button variant="danger" onClick={() => handleStopShare(shareModal.note)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+            {shareModal?.link && (
+              <Button variant="danger" onClick={() => handleStopShare(shareModal.note)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+            )}
           </div>
         </div>
       </Modal>

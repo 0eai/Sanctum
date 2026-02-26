@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { listenToActivityLog } from '../../../services/activityLog';
+import { exportRecoveryKey } from '../../../services/settings';
+import { Button } from '../../../components/ui/Button';
 
 const AUTO_LOCK_OPTIONS = [
     { value: 5, label: '5 min' },
@@ -71,6 +73,11 @@ const SecurityTab = ({ user, setMessage }) => {
     const [sessionDuration, setSessionDuration] = useState(0);
     const [activityLog, setActivityLog] = useState([]);
 
+    // Recovery Key State
+    const [recoveryPasskey, setRecoveryPasskey] = useState('');
+    const [recoveryKeyString, setRecoveryKeyString] = useState(null);
+    const [isExporting, setIsExporting] = useState(false);
+
     // Session duration timer
     useEffect(() => {
         const lastSignIn = auth.currentUser?.metadata?.lastSignInTime;
@@ -119,6 +126,28 @@ const SecurityTab = ({ user, setMessage }) => {
             case 'danger': return 'bg-red-50 text-red-600';
             case 'info': return 'bg-blue-50 text-blue-600';
             default: return 'bg-gray-50 text-gray-500';
+        }
+    };
+
+    const handleExportRecoveryKey = async (e) => {
+        e.preventDefault();
+        setIsExporting(true);
+        try {
+            const keyStr = await exportRecoveryKey(user.uid, recoveryPasskey);
+            setRecoveryKeyString(keyStr);
+            setRecoveryPasskey('');
+            setMessage?.({ type: 'success', text: 'Recovery key generated successfully. Keep it safe!' });
+        } catch (error) {
+            setMessage?.({ type: 'danger', text: error.message || 'Incorrect passkey.' });
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const copyRecoveryKey = () => {
+        if (recoveryKeyString) {
+            navigator.clipboard.writeText(recoveryKeyString);
+            setMessage?.({ type: 'success', text: 'Recovery key copied to clipboard.' });
         }
     };
 
@@ -185,6 +214,52 @@ const SecurityTab = ({ user, setMessage }) => {
                     >
                         <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${lockOnHidden ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
+                </div>
+            </CollapsibleCard>
+
+            {/* Export Recovery Key */}
+            <CollapsibleCard title="Export Recovery Key" icon={Key}>
+                <div className="p-4">
+                    <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-xs mb-4 flex gap-2 items-start border border-yellow-200">
+                        <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                        <p>
+                            Your recovery key allows exactly ONE complete bypass of your passkey to restore access to your vault if forgotten. <strong>Store this string securely!</strong> Anyone with this string can read your data.
+                        </p>
+                    </div>
+
+                    {!recoveryKeyString ? (
+                        <form onSubmit={handleExportRecoveryKey} className="flex flex-col gap-3">
+                            <input
+                                type="password"
+                                value={recoveryPasskey}
+                                onChange={(e) => setRecoveryPasskey(e.target.value)}
+                                placeholder="Enter current passkey to decrypt..."
+                                className="w-full p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#4285f4] focus:border-transparent transition-all"
+                                required
+                            />
+                            <Button type="submit" disabled={isExporting} className="w-full">
+                                {isExporting ? 'Decrypting...' : 'Generate Recovery Key'}
+                            </Button>
+                        </form>
+                    ) : (
+                        <div className="flex flex-col gap-3">
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Your Master Recovery Key</label>
+                            <textarea
+                                readOnly
+                                value={recoveryKeyString}
+                                className="w-full h-32 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs font-mono text-gray-700 outline-none resize-none break-all"
+                                onClick={(e) => e.target.select()}
+                            />
+                            <div className="flex gap-2">
+                                <Button onClick={copyRecoveryKey} className="flex-1 flex items-center justify-center gap-2">
+                                    <FileText size={16} /> Copy to Clipboard
+                                </Button>
+                                <Button variant="secondary" onClick={() => setRecoveryKeyString(null)}>
+                                    Done
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </CollapsibleCard>
 

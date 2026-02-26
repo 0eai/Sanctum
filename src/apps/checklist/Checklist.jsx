@@ -43,6 +43,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // State for loading indicator during import/export
   const [processing, setProcessing] = useState(false);
   const [shareModal, setShareModal] = useState(null);
+  const [shareTTL, setShareTTL] = useState(0);
 
   // --- URL-Driven State ---
   const isSettingsOpen = route.query?.modal === 'settings';
@@ -228,7 +229,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         progress: list.itemCount > 0 ? Math.round(((list.completedCount || 0) / list.itemCount) * 100) : 0,
         date: new Date().toISOString()
       };
-      const { sharedId, shareUrlKey } = await shareItem(payload);
+      const { sharedId, shareUrlKey } = await shareItem(payload, shareTTL);
       const url = buildShareUrl(sharedId, shareUrlKey);
       setShareModal({ isOpen: true, list, link: url, sharedId, shareUrlKey });
     } catch (e) {
@@ -461,16 +462,26 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Checklist" zIndex={100}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-            <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>
+            {shareModal?.link && <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>}
             <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
           </div>
           <div className="flex flex-col gap-2">
+            {!shareModal?.link && (
+              <select value={shareTTL} onChange={(e) => setShareTTL(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 mb-2">
+                <option value={0}>Never expire</option>
+                <option value={60}>Expire in 1 Hour</option>
+                <option value={1440}>Expire in 1 Day</option>
+                <option value={10080}>Expire in 7 Days</option>
+              </select>
+            )}
             {shareModal?.link ? (
               <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
             ) : (
               <Button onClick={() => handleShareChecklist(shareModal.list)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
             )}
-            <Button variant="danger" onClick={handleStopShareChecklist} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+            {shareModal?.link && (
+              <Button variant="danger" onClick={handleStopShareChecklist} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
+            )}
           </div>
         </div>
       </Modal>

@@ -115,7 +115,7 @@ export const rescheduleNote = async (userId, cryptoKey, note) => {
 
 // --- Sharing ---
 
-export const shareNote = async (userId, cryptoKey, note) => {
+export const shareNote = async (userId, cryptoKey, note, expireMinutes = null) => {
   const shareKey = await generateMasterKey();
   const payload = {
     title: note.title,
@@ -126,7 +126,13 @@ export const shareNote = async (userId, cryptoKey, note) => {
   };
   const encryptedBlob = await encryptData(payload, shareKey);
 
-  const docRef = await addDoc(collection(db, 'shared_notes'), { data: encryptedBlob, createdBy: userId, createdAt: serverTimestamp() });
+  let expiresAt = null;
+  if (expireMinutes) {
+    expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + expireMinutes);
+  }
+
+  const docRef = await addDoc(collection(db, 'shared_notes'), { data: encryptedBlob, createdBy: userId, createdAt: serverTimestamp(), expiresAt });
   const keyString = await keyToUrlString(shareKey);
 
   const privatePayload = { ...note, sharedId: docRef.id, shareUrlKey: keyString };

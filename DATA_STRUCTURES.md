@@ -25,9 +25,11 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
 
 | Field | Type | Encrypted | Description |
 |-------|------|-----------|-------------|
-| `encryptionSalt` | string | ❌ | 16-byte hex salt for PBKDF2 |
-| `encryptedMasterKey` | `{iv, data}` | ✅ (wrapper key) | AES-256 master key JWK, encrypted with PBKDF2-derived wrapper key |
+| `encryptionSalt` | string | ❌ | 16-byte hex salt for key derivation |
+| `encryptedMasterKey` | `{iv, data}` | ✅ (wrapper key) | AES-256 master key JWK, encrypted with derived wrapper key |
 | `encryptedValidator` | `{iv, data}` | ✅ (master key) | `{ check: "VALID" }` encrypted with master key — used to verify passkey correctness |
+| `kdf` | string | ❌ | Key derivation function: `"argon2id"` (default) or `"pbkdf2"` (legacy) |
+| `iterations` | number | ❌ | PBKDF2 iteration count (legacy users only, default 600000) |
 
 ---
 
@@ -241,11 +243,20 @@ Decrypted:
 Decrypted:
 ```json
 {
-  "name": "John Doe",
-  "phone": "+1234567890",
-  "email": "john@example.com",
-  "address": "123 Main St",
-  "notes": "Met at conference"
+  "firstName": "John",
+  "lastName": "Doe",
+  "company": "Acme Inc",
+  "jobTitle": "Engineer",
+  "birthday": "1990-01-15",
+  "photo": "data:image/jpeg;base64,...",
+  "isFavorite": true,
+  "phones": [{ "id": "...", "label": "Mobile", "value": "+1234567890" }],
+  "emails": [{ "id": "...", "label": "Personal", "value": "john@example.com" }],
+  "addresses": [{ "id": "...", "label": "Home", "value": "123 Main St" }],
+  "websites": [{ "id": "...", "label": "Website", "value": "https://example.com" }],
+  "customFields": [{ "id": "...", "label": "Notes", "value": "Met at conference" }],
+  "labels": ["Work", "VIP"],
+  "notes": "Additional notes"
 }
 ```
 
@@ -312,9 +323,10 @@ Decrypted:
 ```json
 {
   "title": "Doctor appointment",
-  "dueDate": "2026-03-01T10:00:00.000Z",
+  "datetime": "2026-03-01T10:00:00.000Z",
   "repeat": "none",
-  "notes": "Room 204"
+  "notes": "Room 204",
+  "isActive": true
 }
 ```
 
@@ -525,9 +537,9 @@ All import/export is centralized in **Settings → Data Tab**.
 |-----|---------------|----------------|
 | Notes | JSON | JSON |
 | Tasks | JSON | JSON |
-| Contacts | JSON, CSV (Google format) | JSON, CSV (Google format) |
-| Passwords | JSON | JSON |
-| Bookmarks | JSON | JSON |
+| Contacts | JSON, CSV (Google format), VCF (vCard 3.0) | JSON, CSV (Google format), VCF (vCard 3.0) |
+| Passwords | JSON, CSV (Google Passwords) | JSON, CSV (Google Passwords) |
+| Bookmarks | JSON, HTML (Netscape/Chrome/Firefox/Brave) | JSON, HTML (Netscape/Chrome/Firefox/Brave) |
 | Finance | JSON | JSON |
 | Banking | JSON | JSON |
 | Checklists | JSON | JSON |

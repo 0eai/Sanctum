@@ -30,9 +30,15 @@ const SharedNote = () => {
                 const snapshot = await getDoc(docRef);
 
                 if (!snapshot.exists()) throw new Error("Note not found or deleted.");
+                const snapshotData = snapshot.data();
+
+                if (snapshotData.expiresAt && snapshotData.expiresAt.toDate() < new Date()) {
+                    deleteDoc(docRef).catch(() => { });
+                    throw new Error("This shared link has expired.");
+                }
 
                 const shareKey = await keyFromUrlString(keyString);
-                const decrypted = await decryptData(snapshot.data().data, shareKey);
+                const decrypted = await decryptData(snapshotData.data, shareKey);
 
                 if (!decrypted) throw new Error("Decryption failed. Invalid Key.");
 

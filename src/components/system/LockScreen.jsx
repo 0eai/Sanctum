@@ -46,6 +46,7 @@ const MIN_PASSKEY_LENGTH = 8;
 
 const LockScreen = ({ user, onUnlock, initialMessage }) => {
   const [keyInput, setKeyInput] = useState("");
+  const [confirmKeyInput, setConfirmKeyInput] = useState("");
   const [isDeriving, setIsDeriving] = useState(false);
   const [status, setStatus] = useState(initialMessage || "");
   const [errorShake, setErrorShake] = useState(false);
@@ -58,6 +59,10 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
 
   // Is this a new user? (no keys stored yet)
   const [isNewUser, setIsNewUser] = useState(null);
+
+  // Recovery Mode
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState("");
 
   // Check if user has existing keys
   useEffect(() => {
@@ -137,8 +142,24 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
       let salt = userData.encryptionSalt;
       let encryptedMasterKeyBlob = userData.encryptedMasterKey;
 
+      if (userData.lockoutUntil && userData.lockoutUntil > Date.now()) {
+        const remaining = Math.ceil((userData.lockoutUntil - Date.now()) / 1000);
+        setCooldownEnd(userData.lockoutUntil);
+        setStatus(`Too many attempts. Wait ${remaining}s`);
+        setIsDeriving(false);
+        return;
+      }
+
       // Case 1: New User / Reset Vault (Initialize)
       if (!salt || !encryptedMasterKeyBlob) {
+        if (keyInput !== confirmKeyInput) {
+          setStatus("Passkeys do not match");
+          setErrorShake(true);
+          setTimeout(() => setErrorShake(false), 500);
+          setIsDeriving(false);
+          return;
+        }
+
         setStatus("Initializing Keys...");
         salt = generateSalt();
         const masterKey = await generateMasterKey();
@@ -152,7 +173,53 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
         setFailCount(0);
         onUnlock(masterKey);
       }
-      // Case 2: Existing User (Unlock)
+      // Case 2: Recovery Flow
+      else if (isRecovering) {
+        setStatus("Recovering Vault...");
+        if (keyInput !== confirmKeyInput) {
+          setStatus("New passkeys do not match");
+          setErrorShake(true);
+          setTimeout(() => setErrorShake(false), 500);
+          setIsDeriving(false);
+          return;
+        }
+
+        let masterKeyJWK;
+        try {
+          // The recovery key is the base64 encoded original JWK
+          masterKeyJWK = JSON.parse(atob(recoveryInput));
+        } catch (e) {
+          throw new Error("INVALID_RECOVERY_KEY");
+        }
+
+        const masterKey = await importMasterKey(masterKeyJWK);
+
+        // Verify validity of the parsed recovery key
+        if (userData.encryptedValidator) {
+          const check = await decryptData(userData.encryptedValidator, masterKey);
+          if (!check || check.check !== "VALID") throw new Error("INTEGRITY_FAIL");
+        }
+
+        // Vault verified perfectly, now wrap the master key with the NEW passkey
+        setStatus("Securing with new passkey...");
+        const newSalt = generateSalt();
+        const newWrapperKey = await deriveKeyArgon2id(keyInput, newSalt);
+        const newEncryptedMasterKey = await encryptData(masterKeyJWK, newWrapperKey);
+
+        await setDoc(userDocRef, {
+          encryptionSalt: newSalt,
+          encryptedMasterKey: newEncryptedMasterKey,
+          kdf: "argon2id"
+        }, { merge: true });
+
+        if (userData.failedAttempts > 0) {
+          await setDoc(userDocRef, { failedAttempts: 0, lockoutUntil: 0 }, { merge: true });
+        }
+
+        setFailCount(0);
+        onUnlock(masterKey);
+      }
+      // Case 3: Existing User (Unlock normally)
       else {
         setStatus("Unlocking...");
 
@@ -193,20 +260,40 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           console.log(`Migrated PBKDF2 → Argon2id`);
         }
 
+        if (userData.failedAttempts > 0) {
+          await setDoc(userDocRef, { failedAttempts: 0, lockoutUntil: 0 }, { merge: true });
+        }
+
         setFailCount(0);
         onUnlock(masterKey);
       }
     } catch (error) {
       console.error("Auth failed:", error);
-      const newFailCount = failCount + 1;
-      setFailCount(newFailCount);
       setIsDeriving(false);
 
-      const delay = getDelay(newFailCount);
-      if (delay > 0) {
-        setCooldownEnd(Date.now() + delay * 1000);
-        setStatus(`Too many attempts. Wait ${delay}s`);
-      } else {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
+        const currentData = userDoc.exists() ? userDoc.data() : {};
+        const newFailCount = (currentData.failedAttempts || 0) + 1;
+        const delay = getDelay(newFailCount);
+        const newLockoutUntil = delay > 0 ? Date.now() + delay * 1000 : 0;
+
+        await setDoc(userDocRef, {
+          failedAttempts: newFailCount,
+          lockoutUntil: newLockoutUntil
+        }, { merge: true });
+
+        setFailCount(newFailCount);
+
+        if (delay > 0) {
+          setCooldownEnd(newLockoutUntil);
+          setStatus(`Too many attempts. Wait ${delay}s`);
+        } else {
+          setStatus("Incorrect Passkey");
+        }
+      } catch (dbError) {
+        console.error("Failed to update rate limit:", dbError);
         setStatus("Incorrect Passkey");
       }
 
@@ -224,26 +311,47 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
         <div className="mx-auto w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-[0_0_30px_-5px_rgba(37,99,235,0.5)]">
           <Lock size={32} />
         </div>
-        <h2 className="text-2xl font-bold mb-2 text-center tracking-tight">Security Check</h2>
-        <p className={`text-center mb-6 text-sm ${status === "Incorrect Passkey" || status.startsWith("Too many") ? "text-red-400 font-bold" : status === "Wiping data..." ? "text-red-400 animate-pulse" : status.startsWith("Passkey must") ? "text-yellow-400" : "text-gray-400"}`}>
+        <h2 className="text-2xl font-bold mb-2 text-center tracking-tight">{isRecovering ? "Vault Recovery" : "Security Check"}</h2>
+        <p className={`text-center mb-6 text-sm ${status === "Incorrect Passkey" || status === "INVALID_RECOVERY_KEY" || status.startsWith("Too many") ? "text-red-400 font-bold" : status === "Wiping data..." ? "text-red-400 animate-pulse" : status.startsWith("Passkey must") || status.startsWith("New passkey") ? "text-yellow-400" : "text-gray-400"}`}>
           {status || (isNewUser
             ? `Choose a passkey (min ${MIN_PASSKEY_LENGTH} characters)`
-            : "Enter your session passkey to decrypt your data."
+            : isRecovering ? "Paste Recovery Key & set a new passkey" : "Enter your session passkey to decrypt your data."
           )}
         </p>
         <form onSubmit={handleSubmit}>
+          {isRecovering && (
+            <textarea
+              value={recoveryInput}
+              onChange={(e) => { setRecoveryInput(e.target.value); if (status) setStatus(""); }}
+              placeholder="Paste your Base64 recovery key..."
+              className="w-full h-24 p-3 rounded-xl bg-black border border-[#27272a] text-white mb-4 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-mono text-xs resize-none"
+              required
+            />
+          )}
+
           <input
             type="password"
             value={keyInput}
             onChange={(e) => { setKeyInput(e.target.value); if (status && status !== "Wiping data...") setStatus(""); }}
             onKeyDown={handleKeyDown}
-            placeholder={isNewUser ? "Choose a Passkey" : "Enter Passkey"}
+            placeholder={isNewUser ? "Choose a Passkey" : isRecovering ? "New Passkey" : "Enter Passkey"}
             className="w-full p-4 rounded-xl bg-black border border-[#27272a] text-white mb-2 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-medium tracking-wide"
             autoFocus
           />
 
-          {/* Strength Meter (new users only) */}
-          {isNewUser && keyInput.length > 0 && (
+          {(isNewUser || isRecovering) && (
+            <input
+              type="password"
+              value={confirmKeyInput}
+              onChange={(e) => { setConfirmKeyInput(e.target.value); if (status && status !== "Wiping data...") setStatus(""); }}
+              onKeyDown={handleKeyDown}
+              placeholder="Confirm Passkey"
+              className="w-full p-4 rounded-xl bg-black border border-[#27272a] text-white mb-2 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-medium tracking-wide"
+            />
+          )}
+
+          {/* Strength Meter (new users or recovery) */}
+          {(isNewUser || isRecovering) && keyInput.length > 0 && (
             <div className="mb-3">
               <div className="h-1 bg-[#27272a] rounded-full overflow-hidden">
                 <div className={`h-full ${strength.color} rounded-full transition-all duration-300`} style={{ width: strength.width }} />
@@ -256,7 +364,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           )}
 
           {/* Character count for existing users */}
-          {!isNewUser && keyInput.length > 0 && keyInput.length < MIN_PASSKEY_LENGTH && (
+          {!isNewUser && !isRecovering && keyInput.length > 0 && keyInput.length < MIN_PASSKEY_LENGTH && (
             <div className="text-[10px] text-yellow-500/70 mb-2 text-right">{keyInput.length}/{MIN_PASSKEY_LENGTH} min chars</div>
           )}
 
@@ -275,11 +383,16 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
             disabled={isDeriving || cooldownRemaining > 0}
             className="w-full py-4 bg-white text-black hover:bg-gray-200 disabled:opacity-50 disabled:cursor-wait rounded-xl font-bold transition-all active:scale-[0.98]"
           >
-            {isDeriving ? <span className="animate-pulse">Processing...</span> : cooldownRemaining > 0 ? "Locked" : isNewUser ? "Create Vault" : "Unlock Vault"}
+            {isDeriving ? <span className="animate-pulse">Processing...</span> : cooldownRemaining > 0 ? "Locked" : isNewUser ? "Create Vault" : isRecovering ? "Recover & Unlock" : "Unlock Vault"}
           </button>
         </form>
-        <div className="mt-8 text-center">
-          <button onClick={handleHardReset} className="text-[10px] uppercase tracking-widest text-gray-600 hover:text-red-500 flex items-center justify-center gap-2 mx-auto transition-colors font-semibold">
+        <div className="mt-8 flex justify-between items-center">
+          {!isNewUser && (
+            <button onClick={() => { setIsRecovering(!isRecovering); setStatus(''); setKeyInput(''); setConfirmKeyInput(''); }} className="text-[10px] uppercase tracking-widest text-[#4285f4] hover:text-blue-400 flex items-center gap-2 transition-colors font-semibold">
+              <Key size={12} /> {isRecovering ? "Cancel Recovery" : "Forgot Passkey?"}
+            </button>
+          )}
+          <button onClick={handleHardReset} className="text-[10px] uppercase tracking-widest text-gray-600 hover:text-red-500 flex items-center gap-2 transition-colors font-semibold ml-auto">
             <RotateCcw size={12} /> Reset Vault
           </button>
         </div>
