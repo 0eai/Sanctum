@@ -131,12 +131,53 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
         count = 0;
     };
 
+    // Helper: Build a deterministic fingerprint for an item based on its core fields
+    const getFingerprint = (colName, data) => {
+        switch (colName) {
+            case 'notes': return `${data.title || ''}|${data.content || ''}`;
+            case 'tasks': return `${data.title || ''}|${data.notes || ''}`;
+            case 'passwords': return `${data.service || ''}|${data.username || ''}|${data.url || ''}`;
+            case 'bookmarks': return `${data.url || ''}|${data.title || ''}`;
+            case 'contacts': return `${data.firstName || ''}|${data.lastName || ''}|${data.phones?.[0]?.value || ''}`;
+            case 'banking': return `${data.bankName || ''}|${data.accountNumber || ''}`;
+            case 'finance': return `${data.type || ''}|${data.amount || ''}|${data.date || ''}`;
+            case 'checklists': return `${data.title || ''}`;
+            case 'counters': return `${data.title || ''}`;
+            default: return JSON.stringify(data); // Fallback
+        }
+    };
+
     for (const [colName, items] of Object.entries(jsonData)) {
         if (!TARGET_COLLECTIONS.includes(colName)) continue;
+
+        // Fetch existing items for deduplication
+        const existingColRef = collection(db, 'artifacts', appId, 'users', userId, colName);
+        const existingSnap = await getDocs(existingColRef);
+        const existingFingerprints = new Set();
+
+        for (const d of existingSnap.docs) {
+            try {
+                const decrypted = await decryptData(d.data(), cryptoKey);
+                if (decrypted) {
+                    existingFingerprints.add(getFingerprint(colName, decrypted));
+                }
+            } catch (e) {
+                // Ignore decryption errors for deduplication footprint building
+            }
+        }
 
         for (const item of items) {
             // Extract special fields (added 'entries')
             const { _id, _createdAt, _updatedAt, _decryptionFailed, _error, items: subItems, entries: subEntries, ...data } = item;
+
+            // DEDUPLICATION CHECK
+            const fingerprint = getFingerprint(colName, data);
+            if (existingFingerprints.has(fingerprint)) {
+                continue; // Skip! Identical item already exists.
+            }
+
+            // Optional: If we are importing it, add to the set to prevent dupes IN the backup file itself
+            existingFingerprints.add(fingerprint);
 
             // Re-encrypt main data
             const encrypted = await encryptData(data, cryptoKey);

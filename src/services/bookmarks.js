@@ -76,6 +76,23 @@ export const importBookmarksFromHtml = async (userId, cryptoKey, rootElement, cu
   let currentBatch = writeBatch(db);
   let opCount = 0;
 
+  // Fetch existing bookmarks for deduplication
+  const existingColRef = collection(db, 'artifacts', appId, 'users', userId, 'bookmarks');
+  const existingSnap = await getDocs(existingColRef);
+  const existingFingerprints = new Set();
+
+  for (const d of existingSnap.docs) {
+    try {
+      const decrypted = await decryptData(d.data(), cryptoKey);
+      if (decrypted) {
+        const fingerprint = `${decrypted.url || ''}|${decrypted.title || ''}`;
+        existingFingerprints.add(fingerprint);
+      }
+    } catch (e) {
+      // Ignore decryption errors
+    }
+  }
+
   const traverse = async (element, parentId) => {
     const nodes = Array.from(element.children);
 
@@ -100,12 +117,18 @@ export const importBookmarksFromHtml = async (userId, cryptoKey, rootElement, cu
           // Bookmark
           const title = a.textContent;
           const url = a.getAttribute('href');
-          const encrypted = await encryptData({ title, url: normalizeUrl(url), parentId, type: 'bookmark' }, cryptoKey);
-          const ref = doc(collection(db, 'artifacts', appId, 'users', userId, 'bookmarks'));
-          currentBatch.set(ref, { ...encrypted, type: 'bookmark', parentId, createdAt: serverTimestamp() });
 
-          opCount++;
-          if (opCount >= batchSize) { await currentBatch.commit(); currentBatch = writeBatch(db); opCount = 0; }
+          const fingerprint = `${normalizeUrl(url) || ''}|${title || ''}`;
+          if (!existingFingerprints.has(fingerprint)) {
+            existingFingerprints.add(fingerprint);
+
+            const encrypted = await encryptData({ title, url: normalizeUrl(url), parentId, type: 'bookmark' }, cryptoKey);
+            const ref = doc(collection(db, 'artifacts', appId, 'users', userId, 'bookmarks'));
+            currentBatch.set(ref, { ...encrypted, type: 'bookmark', parentId, createdAt: serverTimestamp() });
+
+            opCount++;
+            if (opCount >= batchSize) { await currentBatch.commit(); currentBatch = writeBatch(db); opCount = 0; }
+          }
         }
       }
     }

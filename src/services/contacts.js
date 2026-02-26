@@ -157,6 +157,23 @@ export const importContactsCSV = async (uid, cryptoKey, csvText) => {
     const headers = lines[0].map(h => h.trim());
     let count = 0;
 
+    // Fetch existing contacts for deduplication
+    const existingColRef = collection(db, 'artifacts', appId, 'users', uid, 'contacts');
+    const existingSnap = await getDocs(existingColRef);
+    const existingFingerprints = new Set();
+
+    for (const d of existingSnap.docs) {
+        try {
+            const decrypted = await decryptData(d.data(), cryptoKey);
+            if (decrypted) {
+                const fingerprint = `${decrypted.firstName || ''}|${decrypted.lastName || ''}|${decrypted.phones?.[0]?.value || ''}`;
+                existingFingerprints.add(fingerprint);
+            }
+        } catch (e) {
+            // Ignore decryption errors
+        }
+    }
+
     for (let i = 1; i < lines.length; i++) {
         const row = lines[i];
         if (row.length === 0 || (row.length === 1 && !row[0])) continue;
@@ -204,8 +221,12 @@ export const importContactsCSV = async (uid, cryptoKey, csvText) => {
 
         // Only save if it has valid data
         if (contact.firstName || contact.lastName || contact.company || contact.phones.length || contact.emails.length) {
-            await saveContact(uid, cryptoKey, contact);
-            count++;
+            const fingerprint = `${contact.firstName || ''}|${contact.lastName || ''}|${contact.phones?.[0]?.value || ''}`;
+            if (!existingFingerprints.has(fingerprint)) {
+                existingFingerprints.add(fingerprint);
+                await saveContact(uid, cryptoKey, contact);
+                count++;
+            }
         }
     }
     return count;
@@ -239,6 +260,23 @@ export const exportContactsVCF = async (uid, cryptoKey) => {
 export const importContactsVCF = async (uid, cryptoKey, vcfText) => {
     const vcards = vcfText.split('END:VCARD').filter(v => v.includes('BEGIN:VCARD'));
     let count = 0;
+
+    // Fetch existing contacts for deduplication
+    const existingColRef = collection(db, 'artifacts', appId, 'users', uid, 'contacts');
+    const existingSnap = await getDocs(existingColRef);
+    const existingFingerprints = new Set();
+
+    for (const d of existingSnap.docs) {
+        try {
+            const decrypted = await decryptData(d.data(), cryptoKey);
+            if (decrypted) {
+                const fingerprint = `${decrypted.firstName || ''}|${decrypted.lastName || ''}|${decrypted.phones?.[0]?.value || ''}`;
+                existingFingerprints.add(fingerprint);
+            }
+        } catch (e) {
+            // Ignore decryption errors
+        }
+    }
 
     for (const raw of vcards) {
         const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
@@ -282,8 +320,12 @@ export const importContactsVCF = async (uid, cryptoKey, vcfText) => {
         }
 
         if (contact.firstName || contact.lastName || contact.company || contact.phones.length || contact.emails.length) {
-            await saveContact(uid, cryptoKey, contact);
-            count++;
+            const fingerprint = `${contact.firstName || ''}|${contact.lastName || ''}|${contact.phones?.[0]?.value || ''}`;
+            if (!existingFingerprints.has(fingerprint)) {
+                existingFingerprints.add(fingerprint);
+                await saveContact(uid, cryptoKey, contact);
+                count++;
+            }
         }
     }
     return count;

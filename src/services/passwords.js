@@ -132,6 +132,23 @@ export const importPasswordsCSV = async (userId, cryptoKey, csvText) => {
   const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
   let count = 0;
 
+  // Fetch existing items for deduplication
+  const existingColRef = collection(db, 'artifacts', appId, 'users', userId, 'passwords');
+  const existingSnap = await getDocs(existingColRef);
+  const existingFingerprints = new Set();
+
+  for (const d of existingSnap.docs) {
+    try {
+      const decrypted = await decryptData(d.data(), cryptoKey);
+      if (decrypted && decrypted.type === 'password') {
+        const fingerprint = `${decrypted.service || ''}|${decrypted.username || ''}|${decrypted.url || ''}`;
+        existingFingerprints.add(fingerprint);
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
   for (let i = 1; i < lines.length; i++) {
     // Simple CSV parse (handles basic quoting)
     const values = [];
@@ -156,6 +173,11 @@ export const importPasswordsCSV = async (userId, cryptoKey, csvText) => {
     const notes = get('note') || get('notes');
 
     if (service || username || password) {
+      const fingerprint = `${service || ''}|${username || ''}|${url || ''}`;
+      if (existingFingerprints.has(fingerprint)) continue;
+
+      existingFingerprints.add(fingerprint);
+
       const itemData = {
         type: 'password',
         service,
