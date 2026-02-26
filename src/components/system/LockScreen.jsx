@@ -1,7 +1,7 @@
 // src/components/system/LockScreen.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { Lock, RotateCcw, ShieldCheck, ShieldAlert, Shield } from 'lucide-react';
+import { Lock, RotateCcw, ShieldCheck, ShieldAlert, Shield, Key } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import {
   deriveKeyFromPasskey, deriveKeyArgon2id, generateSalt, encryptData, decryptData,
