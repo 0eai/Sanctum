@@ -4,7 +4,7 @@ import {
 import { deleteUser } from 'firebase/auth';
 import { db, appId } from '../lib/firebase';
 import {
-    encryptData, decryptData, deriveKeyFromPasskey, generateSalt
+    encryptData, decryptData, deriveKeyFromPasskey, deriveKeyArgon2id, generateSalt
 } from '../lib/crypto';
 import { DEFAULT_CATEGORIES } from '../apps/settings/constants';
 
@@ -295,17 +295,30 @@ export const rotateUserPasskey = async (userId, oldPass, newPass) => {
     const userDoc = await getDoc(userDocRef);
     if (!userDoc.exists()) throw new Error("User data not found.");
 
-    const { encryptionSalt, encryptedMasterKey } = userDoc.data();
-    const oldWrapperKey = await deriveKeyFromPasskey(oldPass, encryptionSalt);
+    const userData = userDoc.data();
+    const { encryptionSalt, encryptedMasterKey, kdf, iterations } = userData;
+
+    let oldWrapperKey;
+    if (kdf === "argon2id") {
+        oldWrapperKey = await deriveKeyArgon2id(oldPass, encryptionSalt);
+    } else {
+        const storedIterations = iterations || 100000;
+        oldWrapperKey = await deriveKeyFromPasskey(oldPass, encryptionSalt, storedIterations);
+    }
+
     const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, oldWrapperKey);
 
     if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
 
     const newSalt = generateSalt();
-    const newWrapperKey = await deriveKeyFromPasskey(newPass, newSalt);
+    const newWrapperKey = await deriveKeyArgon2id(newPass, newSalt); // Always rotate into argon2id
     const newEncryptedMasterKey = await encryptData(unlockedMasterKeyJWK, newWrapperKey);
 
-    await updateDoc(userDocRef, { encryptionSalt: newSalt, encryptedMasterKey: newEncryptedMasterKey });
+    await updateDoc(userDocRef, {
+        encryptionSalt: newSalt,
+        encryptedMasterKey: newEncryptedMasterKey,
+        kdf: "argon2id"
+    });
 };
 
 export const exportRecoveryKey = async (userId, passkey) => {
@@ -313,8 +326,17 @@ export const exportRecoveryKey = async (userId, passkey) => {
     const userDoc = await getDoc(userDocRef);
     if (!userDoc.exists()) throw new Error("User data not found.");
 
-    const { encryptionSalt, encryptedMasterKey } = userDoc.data();
-    const wrapperKey = await deriveKeyFromPasskey(passkey, encryptionSalt);
+    const userData = userDoc.data();
+    const { encryptionSalt, encryptedMasterKey, kdf, iterations } = userData;
+
+    let wrapperKey;
+    if (kdf === "argon2id") {
+        wrapperKey = await deriveKeyArgon2id(passkey, encryptionSalt);
+    } else {
+        const storedIterations = iterations || 100000;
+        wrapperKey = await deriveKeyFromPasskey(passkey, encryptionSalt, storedIterations);
+    }
+
     const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, wrapperKey);
 
     if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
