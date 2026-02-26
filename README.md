@@ -17,6 +17,7 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 - **Client-side rate limiting** — progressive delays on failed attempts (2s → 5s → 15s → 60s)
 - **Auto-lock timer** — configurable inactivity timeout (5 min / 15 min / 1 hour / Never)
 - **Lock on tab hidden** — instant vault lock when switching tabs or minimizing
+- **Master Key Recovery** — offline recovery method exporting the raw master key
 - **Device tracking** — see all active sessions, sign out other devices
 - **Activity log** — real-time audit trail of vault events
 - **Firebase App Check** — ReCAPTCHA v3 prevents unauthorized API access

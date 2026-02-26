@@ -1,4 +1,4 @@
-# Data Structures — Sanctum v1.0.2
+# Data Structures — Sanctum v1.0.4
 
 This document maps every Firestore collection and document schema, showing both the **encrypted** (as stored) and **decrypted** (application) views.
 

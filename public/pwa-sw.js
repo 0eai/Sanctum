@@ -1,5 +1,5 @@
 // Sanctum PWA Service Worker — App Shell Cache
-const CACHE_NAME = 'sanctum-shell-v2';
+const CACHE_NAME = 'sanctum-shell-v3';
 
 // Cache the app shell on install
 self.addEventListener('install', (event) => {
