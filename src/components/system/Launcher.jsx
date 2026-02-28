@@ -4,7 +4,7 @@ import {
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, Cloud, Cast, Bookmark,
   FileText, ClipboardList, CreditCard, PieChart, Globe, FileCode,
   Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout,
-  Users, BellRing, Share2, ShieldCheck, MessageCircle
+  Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap
 } from 'lucide-react';
 import { listenToAppStats } from '../../services/firestoredb';
 import { listenToAllUnreadMessages } from '../../services/secureshare';
@@ -27,6 +27,7 @@ const getIconElement = (iconName) => {
     case 'BellRing': return <BellRing {...props} />;
     case 'ShieldCheck': return <ShieldCheck {...props} />;
     case 'transfer': return <Share2 {...props} />;
+    case 'GraduationCap': return <GraduationCap {...props} />;
     case 'Globe':
     default: return <Globe {...props} />;
   }
@@ -68,6 +69,7 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
     { id: 'secureshare', icon: <MessageCircle size={24} />, label: 'Chat', count: stats.unreadChats },
     { id: 'banking', icon: <CreditCard size={24} />, label: 'Wallet', count: stats.banking },
     { id: 'finance', icon: <PieChart size={24} />, label: 'Finance', count: stats.finance },
+    { id: 'research', icon: <GraduationCap size={24} />, label: 'Research' },
     { id: 'bookmarks', icon: <Bookmark size={24} />, label: 'Bookmarks' },
     { id: 'transfer', icon: <Share2 size={24} />, label: 'Drop' },
     { id: 'streampi', icon: <Cast size={24} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
@@ -143,7 +145,7 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
       <main className="flex-1 overflow-y-auto flex flex-col items-center">
         <div className="max-w-3xl p-6 flex flex-wrap justify-center content-start gap-4 sm:gap-5 lg:gap-6 mb-8 w-full">
           {finalApps.map(app => {
-            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer', 'secureshare', 'authenticator'].includes(app.id);
+            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer', 'secureshare', 'authenticator', 'research'].includes(app.id);
 
             return (
               <button

@@ -36,6 +36,7 @@ import ContactsApp from './apps/contacts/Contacts';
 import TransferApp from './apps/transfer/Transfer';
 import AuthenticatorApp from './apps/authenticator/Authenticator';
 import SecureShareApp from './apps/secureshare/SecureShare';
+import ResearchApp from './apps/research/ResearchApp';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -145,7 +146,15 @@ export default function App() {
   };
 
   const handleLogin = async () => {
-    try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        sessionStorage.setItem('googleDriveAccessToken', credential.accessToken);
+      }
+    }
     catch (e) { console.error(e); alert("Login failed"); }
   };
 
@@ -191,6 +200,7 @@ export default function App() {
     case 'contacts': return <ContactsApp {...props} />;
     case 'authenticator': return <AuthenticatorApp {...props} />;
     case 'secureshare': return <SecureShareApp {...props} />;
+    case 'research': return <ResearchApp {...props} onOpenApp={(appId) => navigate(`#${appId}`)} />;
     case 'settings': return <SettingsApp {...props} />;
     default: return <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />;
   }

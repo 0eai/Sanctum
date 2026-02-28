@@ -1,24 +1,33 @@
 // src/apps/settings/Settings.jsx
 import React, { useState } from 'react';
-import { ChevronLeft, Shield, Grid, Monitor, Activity, Wallet, Database, CheckCircle, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Shield, Grid, Monitor, Activity, Wallet, Database, CheckCircle, AlertCircle, Network } from 'lucide-react';
 import AccountTab from './components/AccountTab';
 import FinanceTab from './components/FinanceTab';
 import AppsTab from './components/AppsTab';
 import DataTab from './components/DataTab';
 import DevicesTab from './components/DevicesTab';
 import SecurityTab from './components/SecurityTab';
+import IntegrationsTab from './components/IntegrationsTab';
 
 const TABS = [
   { id: 'account', label: 'Account', icon: Shield },
   { id: 'apps', label: 'Apps', icon: Grid },
+  { id: 'integrations', label: 'Integrations', icon: Network },
   { id: 'devices', label: 'Devices', icon: Monitor },
   { id: 'security', label: 'Security', icon: Activity },
   { id: 'finance', label: 'Finance', icon: Wallet },
   { id: 'data', label: 'Data', icon: Database },
 ];
 
-const SettingsApp = ({ user, cryptoKey, onExit }) => {
-  const [activeTab, setActiveTab] = useState('account');
+const SettingsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
+  const validTabIds = TABS.map(t => t.id);
+  const initialTab = (route?.resource && validTabIds.includes(route.resource)) ? route.resource : 'account';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    if (navigate) navigate(`#settings/${tabId}`);
+  };
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
 
@@ -68,7 +77,7 @@ const SettingsApp = ({ user, cryptoKey, onExit }) => {
             {TABS.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap flex-1 justify-center min-h-[44px] ${activeTab === tab.id
                   ? 'bg-gray-50 text-[#4285f4]'
                   : 'text-blue-100 hover:bg-white/10'
@@ -105,6 +114,9 @@ const SettingsApp = ({ user, cryptoKey, onExit }) => {
             )}
             {activeTab === 'apps' && (
               <AppsTab user={user} setLoading={setLoading} setMessage={setMessage} />
+            )}
+            {activeTab === 'integrations' && (
+              <IntegrationsTab user={user} cryptoKey={cryptoKey} />
             )}
             {activeTab === 'devices' && (
               <DevicesTab user={user} setMessage={setMessage} />

@@ -8,13 +8,17 @@ import {
 } from '../../services/secureshare';
 import { listenToContacts as listenToMyContacts } from '../../services/contacts';
 import { appId } from '../../lib/firebase';
-import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft } from 'lucide-react';
+import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Paperclip } from 'lucide-react';
 import MessageBubble from './components/MessageBubble';
 import CreateGroupModal from './components/CreateGroupModal';
 import GroupInfoPanel from './components/GroupInfoPanel';
 import ShareMenu from './components/ShareMenu';
+import { uploadEncryptedFile } from '../../services/driveStorage';
+import { useDriveGuard } from '../../hooks/useDriveGuard';
+import DriveGuardDialog from '../../components/ui/DriveGuardDialog';
 
 const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
+    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [isInitializing, setIsInitializing] = useState(true);
     const [groups, setGroups] = useState([]);
     const [messages, setMessages] = useState([]);
@@ -541,6 +545,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                                 key={msg.id}
                                                 message={msg}
                                                 isMe={msg.senderId === user.uid}
+                                                cryptoKey={cryptoKey}
                                                 onImportArtifact={alreadySaved ? null : handleImportArtifact}
                                                 senderName={selectedChat.isGroup ? contacts.find(c => c.id === msg.senderId)?.displayName || (msg.senderId === user.uid ? 'You' : 'Unknown') : null}
                                             />
@@ -561,11 +566,53 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                 </div>
                             )}
                             <form onSubmit={handleSend} className="flex items-end gap-2 max-w-2xl mx-auto">
-                                {/* Share "+" button */}
+                                {/* File Share / Attachment button */}
+                                <label
+                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors flex-shrink-0 cursor-pointer"
+                                    title="Attach File"
+                                >
+                                    <Paperclip size={20} />
+                                    <input type="file" className="hidden" onChange={async (e) => {
+                                        const file = e.target.files[0];
+                                        if (!file) return;
+
+                                        if (!requireDrive()) {
+                                            e.target.value = null;
+                                            return;
+                                        }
+
+                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                        if (!accessToken) {
+                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
+                                            return;
+                                        }
+
+                                        try {
+                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'secureshare');
+                                            const artifact = {
+                                                appType: 'drive_file',
+                                                data: driveFileId,
+                                                sharedTitle: file.name,
+                                                sharedPreview: `${(file.size / 1024).toFixed(0)} KB`,
+                                                fileType: file.type
+                                            };
+                                            // Make the background send call
+                                            await handleSend(null, artifact);
+                                        } catch (e) {
+                                            console.error("SecureShare Upload to Drive failed", e);
+                                            alert(e.message);
+                                        }
+
+                                        // Reset input
+                                        e.target.value = null;
+                                    }} />
+                                </label>
+
+                                {/* App Share "+" button */}
                                 <button
                                     type="button"
                                     onClick={() => setShowShareMenu(true)}
-                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors flex-shrink-0"
+                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 transition-colors flex-shrink-0"
                                     title="Share from apps"
                                 >
                                     <Plus size={20} />
@@ -641,6 +688,8 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onShare={handleShareArtifact}
                 />
             )}
+
+            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </div>
     );
 };

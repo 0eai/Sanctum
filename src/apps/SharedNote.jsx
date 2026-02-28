@@ -1,3 +1,4 @@
+// src/apps/SharedNote.jsx
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import {

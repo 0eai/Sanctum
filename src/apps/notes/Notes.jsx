@@ -148,6 +148,8 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       if (!noteData.id) {
         setEditorState(prev => ({ ...prev, id }));
         window.history.replaceState(null, '', `#notes/doc/${id}/edit`);
+        // Dispatch event so useHashRoute catches the new ID and stops treating it as 'new'
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
       }
 
       setSaveStatus('saved');
@@ -237,11 +239,14 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       {editorState ? (
         <NoteEditor
           note={editorState}
+          cryptoKey={cryptoKey}
           onSave={handleSaveNote}
           onBack={handleBack}
           onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned)}
           onShare={(e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
           saveStatus={saveStatus}
+          user={user}
+          navigate={navigate}
         />
       ) : (
         <>

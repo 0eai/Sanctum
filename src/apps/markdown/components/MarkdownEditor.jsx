@@ -8,8 +8,12 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import MarkdownViewer from '../../../components/ui/MarkdownViewer';
 import FileViewer from '../../../components/ui/FileViewer';
+import { uploadEncryptedFile, downloadEncryptedFile } from '../../../services/driveStorage';
+import { useDriveGuard } from '../../../hooks/useDriveGuard';
+import DriveGuardDialog from '../../../components/ui/DriveGuardDialog';
 
-const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }) => {
+const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus, navigate, user }) => {
+    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...item
@@ -24,23 +28,63 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
 
     const [isTagInputVisible, setIsTagInputVisible] = useState(false);
     const [viewingAttachment, setViewingAttachment] = useState(null);
+    const [lastSavedHash, setLastSavedHash] = useState(null);
+
+    useEffect(() => {
+        if (item) {
+            setLastSavedHash(JSON.stringify({
+                title: item.title || '', content: item.content || '', tags: item.tags || [],
+                attachments: (item.attachments || []).map(a => { const { url, ...rest } = a; return rest; }),
+                isPinned: item.isPinned || false, dueDate: item.dueDate || null, repeat: item.repeat || 'none'
+            }));
+        }
+    }, [item.id]);
 
     const textAreaRef = useRef(null);
     const scrollRef = useRef(null);
+    const isCreatingRef = useRef(false);
 
     useEffect(() => {
         if (item.id && item.id !== data.id) {
             setData(prev => ({ ...prev, id: item.id }));
+            isCreatingRef.current = false;
         }
     }, [item.id]);
     // Auto-Save
     const debouncedData = useDebounce(data, 1000);
 
     useEffect(() => {
-        if (debouncedData) {
-            onSave(debouncedData);
+        if (debouncedData && lastSavedHash !== null) {
+            const cleanAttachments = debouncedData.attachments.map(att => {
+                const { url, ...cleanAtt } = att;
+                return cleanAtt;
+            });
+            const currentPayloadObj = {
+                title: debouncedData.title, content: debouncedData.content, tags: debouncedData.tags,
+                attachments: cleanAttachments, isPinned: debouncedData.isPinned,
+                dueDate: debouncedData.dueDate, repeat: debouncedData.repeat
+            };
+            const currentHash = JSON.stringify(currentPayloadObj);
+
+            if (currentHash !== lastSavedHash) {
+                const activeId = data.id || debouncedData.id || item?.id;
+                // Prevent duplicate creations while waiting for the first ID to be returned
+                if (!activeId && isCreatingRef.current) return;
+
+                if (!activeId) {
+                    isCreatingRef.current = true;
+                }
+
+                const savePayload = { ...debouncedData, id: activeId, attachments: cleanAttachments };
+                Promise.resolve(onSave(savePayload)).then(() => {
+                    setLastSavedHash(currentHash);
+                }).catch(e => {
+                    console.error("Auto-save failed", e);
+                    if (!data.id) isCreatingRef.current = false;
+                });
+            }
         }
-    }, [debouncedData]);
+    }, [debouncedData, lastSavedHash, onSave]);
 
     // Auto-Resize Textarea
     useEffect(() => {
@@ -194,9 +238,37 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
                                     <Paperclip size={12} /> Attach
                                     <input type="file" className="hidden" onChange={async (e) => {
                                         const file = e.target.files[0];
-                                        if (!file || file.size > 5000000) return alert("File too large (Max 5MB)");
-                                        const base64 = await toBase64(file);
-                                        setData(prev => ({ ...prev, attachments: [...prev.attachments, { name: file.name, type: file.type, data: base64 }] }));
+                                        if (!file) return;
+
+                                        if (!requireDrive()) {
+                                            e.target.value = null;
+                                            return;
+                                        }
+
+                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                        if (!accessToken) {
+                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
+                                            return;
+                                        }
+
+                                        try {
+                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'markdown');
+                                            setData(prev => ({
+                                                ...prev,
+                                                attachments: [...prev.attachments, {
+                                                    name: file.name,
+                                                    type: file.type,
+                                                    driveFileId,
+                                                    size: file.size
+                                                }]
+                                            }));
+                                        } catch (e) {
+                                            console.error("Upload to Drive failed", e);
+                                            alert(e.message);
+                                        }
+
+                                        // Reset input
+                                        e.target.value = null;
                                     }} />
                                 </label>
                             </div>
@@ -205,8 +277,24 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
                             {data.attachments.length > 0 && (
                                 <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
                                     {data.attachments.map((att, i) => (
-                                        <div key={i} onClick={() => setViewingAttachment(att)} className="group relative flex-shrink-0 w-16 h-16 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all">
-                                            {att.type.startsWith('image/') ? <img src={att.data} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt={att.name} /> : getThumbnailIcon(att.type)}
+                                        <div key={i} onClick={async () => {
+                                            if (att.data) {
+                                                setViewingAttachment(att); // Legacy Base64
+                                            } else if (att.driveFileId) {
+                                                const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                                if (!accessToken) {
+                                                    alert("Not signed into Google Drive.");
+                                                    return;
+                                                }
+                                                try {
+                                                    const url = await downloadEncryptedFile(att.driveFileId, cryptoKey, accessToken);
+                                                    setViewingAttachment({ ...att, data: url });
+                                                } catch (e) {
+                                                    alert("Failed to decrypt file from Google Drive");
+                                                }
+                                            }
+                                        }} className="group relative flex-shrink-0 w-16 h-16 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all">
+                                            {att.data && att.type.startsWith('image/') ? <img src={att.data} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt={att.name} /> : getThumbnailIcon(att.type)}
                                             <button onClick={(e) => { e.stopPropagation(); setData(s => ({ ...s, attachments: s.attachments.filter((_, idx) => idx !== i) })) }} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-lg p-1 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10"><X size={10} /></button>
                                         </div>
                                     ))}
@@ -236,6 +324,8 @@ const MarkdownEditor = ({ item, onSave, onBack, onExport, saveStatus, navigate }
             </div >
 
             <FileViewer file={viewingAttachment} onClose={() => setViewingAttachment(null)} />
+
+            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </>
     );
 };

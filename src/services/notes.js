@@ -56,9 +56,14 @@ export const saveNote = async (userId, cryptoKey, noteData, parentId) => {
   const meta = {
     updatedAt: serverTimestamp(),
     isPinned: noteData.isPinned || false,
-    type: 'note',
-    parentId: noteData.parentId || parentId
+    type: 'note'
   };
+
+  if (noteData.parentId !== undefined) {
+    meta.parentId = noteData.parentId;
+  } else if (parentId !== undefined) {
+    meta.parentId = parentId;
+  }
 
   if (noteData.id) {
     await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', noteData.id), { ...encrypted, ...meta });

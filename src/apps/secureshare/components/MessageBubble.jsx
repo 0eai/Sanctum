@@ -26,6 +26,7 @@ const ARTIFACT_META = {
     banking: { icon: CreditCard, color: 'text-purple-500', bg: 'bg-purple-50', label: 'Wallet' },
     passwords: { icon: Key, color: 'text-red-500', bg: 'bg-red-50', label: 'Password' },
     contacts: { icon: Users, color: 'text-indigo-500', bg: 'bg-indigo-50', label: 'Contact' },
+    drive_file: { icon: FileText, color: 'text-gray-500', bg: 'bg-gray-100', label: 'Drive File' }
 };
 
 const VIEWER_MAP = {
@@ -40,9 +41,12 @@ const VIEWER_MAP = {
     contacts: ContactViewer,
 };
 
-const MessageBubble = ({ message, isMe, onImportArtifact, senderName }) => {
+import { downloadEncryptedFile } from '../../../services/driveStorage';
+
+const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey }) => {
     const [displayedText, setDisplayedText] = useState("Decrypting...");
     const [viewerOpen, setViewerOpen] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     useEffect(() => {
         if (message.isDecrypted) {
@@ -96,8 +100,34 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName }) => {
             <>
                 <div className={`flex flex-col w-full mb-4 ${isMe ? 'items-end' : 'items-start'}`}>
                     <div
-                        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'} border ${isMe ? 'border-blue-200' : 'border-gray-200'}`}
-                        onClick={() => setViewerOpen(true)}
+                        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'} border ${isMe ? 'border-blue-200' : 'border-gray-200'} ${isDownloading ? 'opacity-50' : ''}`}
+                        onClick={async () => {
+                            if (message.artifact.appType === 'drive_file') {
+                                if (isDownloading) return;
+                                setIsDownloading(true);
+                                try {
+                                    const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                    if (!accessToken) throw new Error("Google Drive access token missing.");
+                                    const url = await downloadEncryptedFile(message.artifact.data, cryptoKey, accessToken);
+
+                                    // Trigger immediate download
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = message.artifact.sharedTitle;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    URL.revokeObjectURL(url); // Clean up
+                                } catch (e) {
+                                    console.error("Failed to download file", e);
+                                    alert("Download failed. Make sure you are signed into Google Drive.");
+                                } finally {
+                                    setIsDownloading(false);
+                                }
+                            } else {
+                                setViewerOpen(true);
+                            }
+                        }}
                     >
                         {/* Artifact Card */}
                         <div className={`p-3 ${isMe ? 'bg-blue-50' : 'bg-gray-50'}`}>
@@ -132,7 +162,10 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName }) => {
 
                         {/* Tap hint */}
                         <div className={`text-center py-1.5 text-[10px] font-medium tracking-wide ${isMe ? 'bg-blue-100 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
-                            TAP TO VIEW
+                            {message.artifact.appType === 'drive_file'
+                                ? (isDownloading ? 'DOWNLOADING...' : 'TAP TO DOWNLOAD')
+                                : 'TAP TO VIEW'
+                            }
                         </div>
 
                         {/* Meta */}

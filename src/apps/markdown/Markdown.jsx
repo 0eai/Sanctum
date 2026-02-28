@@ -117,6 +117,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         setEditorDoc(prev => ({ ...prev, id }));
         // Silently update the URL from 'new' to the actual ID so refreshes work safely
         window.history.replaceState(null, '', `#markdown/doc/${id}/edit`);
+        // Dispatch event so useHashRoute hook catches the new ID and stops treating it as 'new'
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
       }
 
       setSaveStatus('saved');
@@ -256,6 +258,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         }}
         saveStatus={saveStatus}
         navigate={navigate}
+        cryptoKey={cryptoKey}
+        user={user}
       />
     );
   }

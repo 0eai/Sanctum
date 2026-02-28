@@ -4,7 +4,7 @@ import {
     ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink, ChevronDown,
     Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
     FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
-    Users, BellRing, Share2, ShieldCheck, MessageCircle
+    Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap
 } from 'lucide-react';
 
 // Make sure your constants.js exports an array that looks like this:
@@ -22,6 +22,7 @@ const AVAILABLE_APPS = [
     { id: 'secureshare', name: 'Chat', icon: 'MessageCircle' },
     { id: 'banking', name: 'Wallet', icon: 'CreditCard' },
     { id: 'finance', name: 'Finance', icon: 'PieChart' },
+    { id: 'research', name: 'Research', icon: 'GraduationCap' },
     { id: 'bookmarks', name: 'Bookmarks', icon: 'Bookmark' },
     { id: 'transfer', name: 'Drop', icon: 'Share2' },
     { id: 'streampi', name: 'StreamPi', icon: 'Cast', isExternal: true, url: 'https://aks-streampi.web.app' },
@@ -67,6 +68,7 @@ const getIconComponent = (iconName) => {
         case 'Bell': return Bell;
         case 'Share2': return Share2;
         case 'MessageCircle': return MessageCircle;
+        case 'GraduationCap': return GraduationCap;
         default: break;
     }
 

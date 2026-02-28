@@ -386,3 +386,32 @@ export const exportRecoveryKey = async (userId, passkey) => {
     // For a succinct backup string, we can just base64-encode the stringified JWK.
     return btoa(JSON.stringify(unlockedMasterKeyJWK));
 };
+
+// --- API Integrations ---
+
+export const fetchApiIntegrations = async (userId, cryptoKey) => {
+    try {
+        const docRef = doc(db, 'artifacts', appId, 'users', userId, 'settings', 'integrations');
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+            const data = await decryptData(snap.data(), cryptoKey);
+            return data || {};
+        }
+        return {};
+    } catch (e) {
+        console.error("Fetch API integrations error", e);
+        return {};
+    }
+};
+
+export const saveApiIntegration = async (userId, keyId, keyValue, cryptoKey) => {
+    // 1. Fetch existing first
+    const existing = await fetchApiIntegrations(userId, cryptoKey);
+
+    // 2. Update with new key
+    const updated = { ...existing, [keyId]: keyValue };
+
+    // 3. Encrypt and save
+    const encrypted = await encryptData(updated, cryptoKey);
+    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'integrations'), encrypted, { merge: true });
+};

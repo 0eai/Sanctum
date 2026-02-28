@@ -4,6 +4,7 @@ import {
   ChevronLeft, Star, Trash2, CheckSquare, Square, Clock, RotateCcw,
   AlertCircle, Plus, X, FileText, Move, Globe
 } from 'lucide-react';
+import { useDebounce } from '../../../hooks/useDebounce';
 
 const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
   const [data, setData] = useState({
@@ -37,23 +38,51 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
     }
   }, [data.notes]);
 
+  const [lastSavedHash, setLastSavedHash] = useState(null);
+
   // Sync state if task prop changes (e.g. from a deep link)
   useEffect(() => {
-    setData({
-      ...task,
-      dueDate: task.dueDate || '',
-      deadline: task.deadline || '',
-      repeat: task.repeat || 'none',
-      subtasks: task.subtasks || [],
-      notes: task.notes || ''
-    });
-  }, [task]);
+    if (task) {
+      setData({
+        ...task,
+        dueDate: task.dueDate || '',
+        deadline: task.deadline || '',
+        repeat: task.repeat || 'none',
+        subtasks: task.subtasks || [],
+        notes: task.notes || ''
+      });
+      setLastSavedHash(JSON.stringify({
+        title: task.title || '', isPinned: task.isPinned || false, completed: task.completed || false,
+        dueDate: task.dueDate || '', deadline: task.deadline || '', repeat: task.repeat || 'none',
+        subtasks: task.subtasks || [], notes: task.notes || ''
+      }));
+    }
+  }, [task.id]);
 
   const update = (patch) => {
     const newData = { ...data, ...patch };
     setData(newData);
-    onSave(newData);
   };
+
+  // Auto-Save Trigger
+  const debouncedData = useDebounce(data, 1000);
+  useEffect(() => {
+    if (debouncedData && lastSavedHash !== null) {
+      const currentPayloadObj = {
+        title: debouncedData.title, isPinned: debouncedData.isPinned, completed: debouncedData.completed,
+        dueDate: debouncedData.dueDate, deadline: debouncedData.deadline, repeat: debouncedData.repeat,
+        subtasks: debouncedData.subtasks, notes: debouncedData.notes
+      };
+      const currentHash = JSON.stringify(currentPayloadObj);
+
+      if (currentHash !== lastSavedHash) {
+        const savePayload = { ...debouncedData };
+        Promise.resolve(onSave(savePayload)).then(() => {
+          setLastSavedHash(currentHash);
+        }).catch(e => console.error("Auto-save failed", e));
+      }
+    }
+  }, [debouncedData, lastSavedHash, onSave]);
 
   const handleClick = (ref) => {
     if (ref.current) {

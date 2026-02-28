@@ -1,4 +1,6 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { getFirestore } = require("firebase-admin/firestore");
 const { initializeApp } = require("firebase-admin/app");
 
@@ -24,4 +26,99 @@ exports.cleanupExpiredMessages = onSchedule("every 24 hours", async (event) => {
     await batch.commit();
 
     console.log(`Deleted ${chatsSnap.size} expired messages`);
+});
+
+const googleClientId = defineSecret("GOOGLE_CLIENT_ID");
+const googleClientSecret = defineSecret("GOOGLE_CLIENT_SECRET");
+
+exports.refreshDriveToken = onCall({
+    secrets: [googleClientId, googleClientSecret]
+}, async (request) => {
+    const { refresh_token } = request.data;
+    if (!refresh_token) {
+        throw new HttpsError("invalid-argument", "The function must be called with a 'refresh_token'.");
+    }
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
+    }
+
+    try {
+        const response = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                client_id: googleClientId.value(),
+                client_secret: googleClientSecret.value(),
+                refresh_token: refresh_token,
+                grant_type: "refresh_token",
+            }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error("Failed to refresh token:", data);
+            throw new HttpsError("internal", data.error_description || "Failed to refresh Google Drive token.");
+        }
+
+        return { access_token: data.access_token };
+    } catch (error) {
+        console.error("Error exchanging refresh token:", error);
+        throw new HttpsError("internal", "An error occurred while refreshing the Google Drive token.");
+    }
+});
+
+exports.getGoogleClientId = onCall({
+    secrets: [googleClientId]
+}, (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
+    }
+    return { clientId: googleClientId.value() };
+});
+
+exports.exchangeDriveAuthCode = onCall({
+    secrets: [googleClientId, googleClientSecret]
+}, async (request) => {
+    const { code } = request.data;
+    if (!code) {
+        throw new HttpsError("invalid-argument", "The function must be called with an authorization 'code'.");
+    }
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
+    }
+
+    try {
+        const response = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                client_id: googleClientId.value(),
+                client_secret: googleClientSecret.value(),
+                code: code,
+                grant_type: "authorization_code",
+                redirect_uri: "postmessage",
+            }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error("Failed to exchange auth code:", data);
+            throw new HttpsError("internal", data.error_description || "Failed to exchange Google Drive auth code.");
+        }
+
+        return {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_in: data.expires_in
+        };
+    } catch (error) {
+        console.error("Error exchanging auth code:", error);
+        throw new HttpsError("internal", "An error occurred while exchanging the Google Drive auth code.");
+    }
 });

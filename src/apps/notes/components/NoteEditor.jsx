@@ -7,8 +7,13 @@ import {
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import FileViewer from '../../../components/ui/FileViewer';
+import { uploadEncryptedFile, downloadEncryptedFile } from '../../../services/driveStorage';
+import { useDriveGuard } from '../../../hooks/useDriveGuard';
+import DriveGuardDialog from '../../../components/ui/DriveGuardDialog';
+import TextareaAutosize from 'react-textarea-autosize';
 
-const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
+const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate }) => {
+    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...note
@@ -16,20 +21,60 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
 
     const [isTagInputVisible, setIsTagInputVisible] = useState(false);
     const [viewingAttachment, setViewingAttachment] = useState(null);
+    const [lastSavedHash, setLastSavedHash] = useState(null);
+
     const textAreaRef = useRef(null);
     const scrollRef = useRef(null);
+    const isCreatingRef = useRef(false);
+
+    useEffect(() => {
+        if (note) {
+            setData(prev => ({ ...prev, id: note.id }));
+            isCreatingRef.current = false;
+
+            setLastSavedHash(JSON.stringify({
+                title: note.title || '', content: note.content || '', tags: note.tags || [],
+                attachments: (note.attachments || []).map(a => { const { url, ...rest } = a; return rest; }),
+                isPinned: note.isPinned || false, dueDate: note.dueDate || null, repeat: note.repeat || 'none'
+            }));
+        }
+    }, [note.id]);
 
     // Auto-Save Trigger
     const debouncedData = useDebounce(data, 1000);
     useEffect(() => {
-        if (debouncedData) onSave(debouncedData);
-    }, [debouncedData]);
+        if (debouncedData && lastSavedHash !== null) {
+            const cleanAttachments = debouncedData.attachments.map(att => {
+                const { url, ...cleanAtt } = att;
+                return cleanAtt;
+            });
+            const currentPayloadObj = {
+                title: debouncedData.title, content: debouncedData.content, tags: debouncedData.tags,
+                attachments: cleanAttachments, isPinned: debouncedData.isPinned,
+                dueDate: debouncedData.dueDate, repeat: debouncedData.repeat
+            };
+            const currentHash = JSON.stringify(currentPayloadObj);
 
-    useEffect(() => {
-        if (note.id && !data.id) {
-            setData(prev => ({ ...prev, id: note.id }));
+            if (currentHash !== lastSavedHash) {
+                const activeId = data.id || debouncedData.id || note?.id;
+                // Prevent duplicate creations while waiting for the first ID to be returned
+                if (!activeId && isCreatingRef.current) return;
+
+                if (!activeId) {
+                    isCreatingRef.current = true;
+                }
+
+                const savePayload = { ...debouncedData, id: activeId, attachments: cleanAttachments };
+                // Call onSave which in NotesApp is an async handleSaveNote function
+                Promise.resolve(onSave(savePayload)).then(() => {
+                    setLastSavedHash(currentHash);
+                }).catch(e => {
+                    console.error("Auto-save failed", e);
+                    if (!data.id) isCreatingRef.current = false;
+                });
+            }
         }
-    }, [note.id, data.id]);
+    }, [debouncedData, lastSavedHash, onSave]);
 
     // Auto-Resize Textarea
     useEffect(() => {
@@ -117,16 +162,11 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                         <div className="p-6 md:p-8 flex flex-col gap-4 min-h-full">
 
                             {/* Title */}
-                            <textarea
+                            <TextareaAutosize
                                 value={data.title}
-                                onChange={e => {
-                                    setData(s => ({ ...s, title: e.target.value }));
-                                    e.target.style.height = 'auto';
-                                    e.target.style.height = e.target.scrollHeight + 'px';
-                                }}
+                                onChange={e => setData(s => ({ ...s, title: e.target.value }))}
                                 placeholder="Untitled Note"
-                                rows={1}
-                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800 w-full resize-none overflow-hidden break-words"
+                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800 w-full resize-none overflow-hidden break-words mb-2 break-all"
                             />
 
                             {/* Meta Bar: Alerts, Tags, Attachments */}
@@ -208,9 +248,37 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                                     <Paperclip size={12} /> Attach
                                     <input type="file" className="hidden" onChange={async (e) => {
                                         const file = e.target.files[0];
-                                        if (!file || file.size > 5000000) return alert("File too large (Max 5MB)");
-                                        const base64 = await toBase64(file);
-                                        setData(prev => ({ ...prev, attachments: [...prev.attachments, { name: file.name, type: file.type, data: base64 }] }));
+                                        if (!file) return;
+
+                                        if (!requireDrive()) {
+                                            e.target.value = null;
+                                            return;
+                                        }
+
+                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                        if (!accessToken) {
+                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
+                                            return;
+                                        }
+
+                                        try {
+                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'notes');
+                                            setData(prev => ({
+                                                ...prev,
+                                                attachments: [...prev.attachments, {
+                                                    name: file.name,
+                                                    type: file.type,
+                                                    driveFileId,
+                                                    size: file.size
+                                                }]
+                                            }));
+                                        } catch (e) {
+                                            console.error("Upload to Drive failed", e);
+                                            alert(e.message);
+                                        }
+
+                                        // Reset input so the same file can be selected again
+                                        e.target.value = null;
                                     }} />
                                 </label>
                             </div>
@@ -221,10 +289,26 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
                                     {data.attachments.map((att, i) => (
                                         <div
                                             key={i}
-                                            onClick={() => setViewingAttachment(att)}
+                                            onClick={async () => {
+                                                if (att.data) {
+                                                    setViewingAttachment(att); // Legacy Base64
+                                                } else if (att.driveFileId) {
+                                                    const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                                    if (!accessToken) {
+                                                        alert("Not signed into Google Drive.");
+                                                        return;
+                                                    }
+                                                    try {
+                                                        const url = await downloadEncryptedFile(att.driveFileId, cryptoKey, accessToken);
+                                                        setViewingAttachment({ ...att, data: url });
+                                                    } catch (e) {
+                                                        alert("Failed to decrypt file from Google Drive");
+                                                    }
+                                                }
+                                            }}
                                             className="group relative flex-shrink-0 w-16 h-16 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all"
                                         >
-                                            {att.type.startsWith('image/') ? (
+                                            {att.data && att.type.startsWith('image/') ? (
                                                 <img src={att.data} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt={att.name} />
                                             ) : (
                                                 getThumbnailIcon(att.type)
@@ -259,6 +343,8 @@ const NoteEditor = ({ note, onSave, onBack, onPin, onShare, saveStatus }) => {
 
             {/* Full Screen File Viewer Overlay */}
             <FileViewer file={viewingAttachment} onClose={() => setViewingAttachment(null)} />
+
+            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </>
     );
 };
