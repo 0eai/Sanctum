@@ -8,6 +8,16 @@ Your goal is to deeply analyze the provided paper and extract its core arguments
 You must structure your analysis based on the "What, Why, How, and Future Work" framework.
 Return your response STRICTLY in Markdown format, using the exact headers and structure provided below. 
 
+CRITICAL RULES FOR MATH AND EQUATIONS:
+1. You MUST use strict LaTeX formatting for ALL mathematical variables, symbols, and equations.
+2. Inline Math: Use single dollar signs (`$`) for variables or math within a sentence. 
+   - Correct: `$w_{ t + 1 } $`, `$f_i: \mathbb{ R }^ d \to \mathbb{ R } $`
+   - Incorrect: `w_{ t + 1 } `, `w_t + 1`, `R ^ d`
+3. Block Math: Use double dollar signs (`$$`) on their own separate lines for standalone equations.
+   - Example: 
+   $$\min_w f(w) := (f_1(w), f_2(w), \dots, f_m(w))$$
+4. NO HTML OR UNICODE: Never use HTML tags (like <sup> or <sub>) or raw Unicode characters (like λ, η, ∇) for math. Always use LaTeX commands (e.g., `\lambda`, `\eta`, `\nabla`, ` ^ `, `_`).
+
 # Paper Analysis
 
 ## A. What
@@ -38,7 +48,7 @@ Return your response STRICTLY in Markdown format, using the exact headers and st
 [Provide the high-level rationale/logic behind their approach.]
 
 ### C-3. Quantitative Analysis
-[Provide a detailed analysis of the approach (e.g., mathematical proofs, algorithmic analysis, architecture specifics).]
+[Provide a detailed analysis of the approach (e.g., mathematical proofs, algorithmic analysis, architecture specifics). Ensure all math follows the LaTeX rules above.]
 
 ### C-4. Experimental Results
 [Provide the experimental results showing how they achieved their goals in comparison with existing works.]

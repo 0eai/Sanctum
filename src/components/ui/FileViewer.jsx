@@ -1,9 +1,40 @@
 // src/components/ui/FileViewer.jsx
-import React from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { X, Download, FileText, Music, Video, File } from 'lucide-react';
 
 const FileViewer = ({ file, onClose }) => {
   if (!file) return null;
+
+  // Convert data URL to blob URL for video/audio (data URLs fail for large files)
+  const mediaBlobUrl = useMemo(() => {
+    if (!file.data) return null;
+    const type = file.type || '';
+    if (!(type.startsWith('video/') || type.startsWith('audio/'))) return null;
+
+    try {
+      const byteString = atob(file.data.split(',')[1]);
+      const mimeType = file.data.match(/data:(.*?);/)?.[1] || type;
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([ab], { type: mimeType });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error("Failed to create blob URL for media", e);
+      return file.data; // fallback to data URL
+    }
+  }, [file.data, file.type]);
+
+  // Clean up blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaBlobUrl && mediaBlobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(mediaBlobUrl);
+      }
+    };
+  }, [mediaBlobUrl]);
 
   const handleDownload = (e) => {
     e.stopPropagation();
@@ -20,20 +51,23 @@ const FileViewer = ({ file, onClose }) => {
 
     if (type.startsWith('image/')) {
       return (
-        <img 
-          src={file.data} 
-          alt={file.name} 
-          className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl" 
+        <img
+          src={file.data}
+          alt={file.name}
+          className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
         />
       );
     }
 
     if (type.startsWith('video/')) {
       return (
-        <video controls className="max-w-full max-h-[80vh] rounded-lg shadow-2xl" autoPlay>
-          <source src={file.data} type={type} />
-          Your browser does not support the video tag.
-        </video>
+        <video
+          controls
+          autoPlay
+          playsInline
+          className="max-w-full max-h-[80vh] rounded-lg shadow-2xl"
+          src={mediaBlobUrl}
+        />
       );
     }
 
@@ -44,34 +78,34 @@ const FileViewer = ({ file, onClose }) => {
             <Music size={32} />
           </div>
           <h3 className="font-medium text-gray-800 text-center break-all">{file.name}</h3>
-          <audio controls src={file.data} className="w-full" />
+          <audio controls src={mediaBlobUrl} className="w-full" />
         </div>
       );
     }
 
     if (type === 'application/pdf') {
       return (
-        <iframe 
-          src={file.data} 
-          className="w-full md:w-[80vw] h-[80vh] bg-white rounded-lg shadow-2xl" 
+        <iframe
+          src={file.data}
+          className="w-full md:w-[80vw] h-[80vh] bg-white rounded-lg shadow-2xl"
           title={file.name}
         />
       );
     }
 
     if (type.startsWith('text/') || type === 'application/json') {
-        // Simple Base64 decode for text preview (handles standard base64)
-        let content = "Preview unavailable";
-        try {
-            content = atob(file.data.split(',')[1]);
-        } catch(e) {}
+      // Simple Base64 decode for text preview (handles standard base64)
+      let content = "Preview unavailable";
+      try {
+        content = atob(file.data.split(',')[1]);
+      } catch (e) { }
 
-        return (
-            <div className="bg-white p-6 rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-                <h3 className="font-bold border-b pb-2 mb-2">{file.name}</h3>
-                <pre className="overflow-auto flex-1 text-xs bg-gray-50 p-2 rounded border">{content}</pre>
-            </div>
-        )
+      return (
+        <div className="bg-white p-6 rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+          <h3 className="font-bold border-b pb-2 mb-2">{file.name}</h3>
+          <pre className="overflow-auto flex-1 text-xs bg-gray-50 p-2 rounded border">{content}</pre>
+        </div>
+      )
     }
 
     // Default Fallback
@@ -87,20 +121,20 @@ const FileViewer = ({ file, onClose }) => {
   };
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200"
       onClick={onClose}
     >
       {/* Header Actions */}
       <div className="absolute top-4 right-4 flex gap-3">
-        <button 
+        <button
           onClick={handleDownload}
           className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors backdrop-blur-md"
           title="Download"
         >
           <Download size={20} />
         </button>
-        <button 
+        <button
           onClick={onClose}
           className="p-3 bg-white/10 hover:bg-red-500/20 text-white hover:text-red-400 rounded-full transition-colors backdrop-blur-md"
         >
@@ -109,8 +143,8 @@ const FileViewer = ({ file, onClose }) => {
       </div>
 
       {/* Content Area */}
-      <div 
-        className="relative max-w-full max-h-full" 
+      <div
+        className="relative max-w-full max-h-full"
         onClick={(e) => e.stopPropagation()} // Prevent closing when clicking content
       >
         {renderContent()}

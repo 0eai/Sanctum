@@ -2,21 +2,21 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Share2, Download, Smartphone, Monitor, Laptop } from 'lucide-react';
 import { Button } from '../../components/ui';
-import { 
-    generateRoomCode, getLocalDeviceId, getDeviceName, registerDevice, 
-    unregisterDevice, listenToActiveDevices, listenToIncomingInvites, 
-    sendTransferInvite, clearIncomingInvite 
+import {
+    generateRoomCode, getLocalDeviceId, getDeviceName, registerDevice,
+    unregisterDevice, listenToActiveDevices, listenToIncomingInvites,
+    sendTransferInvite, clearIncomingInvite
 } from '../../services/transfer';
 
 import TransferRoom from './components/TransferRoom';
 
-const TransferApp = ({ user, onExit, route, navigate }) => {
+const TransferApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [joinCode, setJoinCode] = useState('');
     const [activeDevices, setActiveDevices] = useState([]);
 
     // --- URL-Driven State ---
     const roomId = route.resource === 'room' ? route.resourceId : null;
-    const mode = route.query?.mode; 
+    const mode = route.query?.mode;
 
     // --- Presence System ---
     useEffect(() => {
@@ -28,9 +28,9 @@ const TransferApp = ({ user, onExit, route, navigate }) => {
         // 1. Announce this device to Firestore
         const pingDevice = () => registerDevice(user.uid, deviceId, deviceName);
         pingDevice();
-        
+
         // Ping every 60 seconds to keep it "alive"
-        const interval = setInterval(pingDevice, 60000); 
+        const interval = setInterval(pingDevice, 60000);
 
         // 2. Listen for other devices on the network
         const unsubDevices = listenToActiveDevices(user.uid, deviceId, setActiveDevices);
@@ -72,7 +72,7 @@ const TransferApp = ({ user, onExit, route, navigate }) => {
     };
 
     if (roomId && mode) {
-        return <TransferRoom user={user} roomId={roomId} mode={mode} onLeave={() => navigate(`#transfer`)} />;
+        return <TransferRoom user={user} cryptoKey={cryptoKey} roomId={roomId} mode={mode} onLeave={() => navigate(`#transfer`)} />;
     }
 
     return (
@@ -86,7 +86,7 @@ const TransferApp = ({ user, onExit, route, navigate }) => {
 
             <main className="flex-1 overflow-y-auto p-4 flex flex-col items-center pt-8">
                 <div className="max-w-md w-full bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center gap-6 text-center">
-                    
+
                     <div>
                         <h2 className="text-2xl font-bold text-gray-800">Available Devices</h2>
                         <p className="text-sm text-gray-500 mt-1">Tap a device to connect instantly.</p>
@@ -96,13 +96,13 @@ const TransferApp = ({ user, onExit, route, navigate }) => {
                     <div className="w-full flex flex-col gap-3">
                         {activeDevices.length === 0 ? (
                             <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl p-8 text-gray-400 text-sm">
-                                No other devices found. <br/> Open this app on another device!
+                                No other devices found. <br /> Open this app on another device!
                             </div>
                         ) : (
                             activeDevices.map(device => {
                                 const isMobile = device.deviceName.includes('iPhone') || device.deviceName.includes('Android');
                                 return (
-                                    <button 
+                                    <button
                                         key={device.id}
                                         onClick={() => handleSendToDevice(device.id)}
                                         className="bg-blue-50 border border-blue-100 hover:bg-[#4285f4] hover:text-white text-[#4285f4] transition-colors rounded-2xl p-4 flex items-center gap-4 group text-left"
@@ -132,8 +132,8 @@ const TransferApp = ({ user, onExit, route, navigate }) => {
                             <Share2 size={16} /> Generate Code
                         </Button>
                         <form onSubmit={handleJoinRoom} className="flex gap-2">
-                            <input 
-                                type="text" 
+                            <input
+                                type="text"
                                 value={joinCode}
                                 onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                                 placeholder="000000"

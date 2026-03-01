@@ -1,3 +1,4 @@
+// src/apps/research/components/PaperModals.jsx
 import React from 'react';
 import { Edit2 } from 'lucide-react';
 import { Button, Modal } from '../../../components/ui';
@@ -9,9 +10,10 @@ const PaperModals = ({
     // AI config modal
     isPromptModalOpen, setIsPromptModalOpen,
     aiService, setAiService, aiModel, setAiModel,
+    aiPrompts, selectedPromptId, setSelectedPromptId,
     // Prompt editor
     isEditingPrompt, setIsEditingPrompt,
-    customPrompt, handleSavePrompt,
+    handleSavePrompt,
     isSavingPrompt, isPromptSaved
 }) => (
     <>
@@ -58,12 +60,23 @@ const PaperModals = ({
                     </div>
                 )}
                 <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Review Prompt (SYSTEM_INSTRUCTION)</label>
-                    <Button
-                        onClick={() => setIsEditingPrompt(true)}
-                        className="w-full justify-center bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                    <label className="block text-sm font-semibold text-gray-700">AI Prompt</label>
+                    <select
+                        value={selectedPromptId || ''}
+                        onChange={(e) => setSelectedPromptId(e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm mb-2"
                     >
-                        <Edit2 size={16} className="mr-2" /> Open in Prompt Editor
+                        {aiPrompts.map(p => (
+                            <option value={p.id} key={p.id}>{p.title || 'Untitled Prompt'}</option>
+                        ))}
+                    </select>
+                    <Button
+                        variant="google"
+                        onClick={() => setIsEditingPrompt(true)}
+                        className="w-full justify-center"
+                        disabled={!selectedPromptId}
+                    >
+                        <Edit2 size={16} className="mr-2" /> Edit Selected Prompt
                     </Button>
                     <p className="text-xs text-gray-500 mt-1">This prompt controls what the AI extracts from the PDF document.</p>
                 </div>
@@ -76,11 +89,9 @@ const PaperModals = ({
         {isEditingPrompt && (
             <div className="fixed inset-0 z-[100]">
                 <PromptEditor
-                    prompt={{ title: 'Research Vault AI Prompt', content: customPrompt, tags: ['research', 'ai'] }}
+                    prompt={aiPrompts.find(p => p.id === selectedPromptId) || { title: 'New Prompt', content: '' }}
                     saveStatus={isSavingPrompt ? 'saving' : isPromptSaved ? 'saved' : ''}
-                    onSave={(data) => {
-                        handleSavePrompt(data.content);
-                    }}
+                    onSave={handleSavePrompt}
                     onBack={() => setIsEditingPrompt(false)}
                 />
             </div>

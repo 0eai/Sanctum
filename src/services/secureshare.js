@@ -155,6 +155,19 @@ export const deleteExpiredMessages = async (collectionPath) => {
     }
 };
 
+/**
+ * Delete a single message from a chat or group.
+ * @param {string} chatOrGroupId  The chatId (DM) or groupId (group)
+ * @param {string} messageId      The message document ID
+ * @param {boolean} isGroup       Whether this is a group chat
+ */
+export const deleteMessage = async (chatOrGroupId, messageId, isGroup = false) => {
+    const path = isGroup
+        ? ['artifacts', appId, 'groups', chatOrGroupId, 'messages', messageId]
+        : ['artifacts', appId, 'chats', chatOrGroupId, 'messages', messageId];
+    await deleteDoc(doc(db, ...path));
+};
+
 // =============================================
 // 1:1 MESSAGING
 // =============================================

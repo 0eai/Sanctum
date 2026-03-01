@@ -1,3 +1,4 @@
+// src/apps/settings/components/IntegrationsTab.jsx
 import React, { useState, useEffect } from 'react';
 import { Network, Key, Eye, EyeOff, Save, Check, Loader2, Bot, Edit2, Cloud, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui';
@@ -10,17 +11,11 @@ import { httpsCallable } from 'firebase/functions';
 
 const IntegrationsTab = ({ user, cryptoKey }) => {
     const [geminiKey, setGeminiKey] = useState('');
-    const [geminiPrompt, setGeminiPrompt] = useState('');
     const [showKey, setShowKey] = useState(false);
 
     // Save states for Key
     const [isSavingKey, setIsSavingKey] = useState(false);
     const [isKeySaved, setIsKeySaved] = useState(false);
-
-    // Save states for Prompt
-    const [isSavingPrompt, setIsSavingPrompt] = useState(false);
-    const [isPromptSaved, setIsPromptSaved] = useState(false);
-    const [isEditingPrompt, setIsEditingPrompt] = useState(false);
 
     // Google Drive States
     const [isDriveConnected, setIsDriveConnected] = useState(false);
@@ -35,9 +30,6 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
             const data = await fetchApiIntegrations(user.uid, cryptoKey);
             if (data.gemini) {
                 setGeminiKey(data.gemini);
-            }
-            if (data.geminiPrompt) {
-                setGeminiPrompt(data.geminiPrompt);
             }
 
             const driveStatus = await checkGoogleDriveConnection(user.uid);
@@ -85,18 +77,6 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
             console.error("Failed to save API key", error);
         }
         setIsSavingKey(false);
-    };
-
-    const handleSavePrompt = async (contentToSave = geminiPrompt) => {
-        setIsSavingPrompt(true);
-        try {
-            await saveApiIntegration(user.uid, 'geminiPrompt', contentToSave, cryptoKey);
-            setIsPromptSaved(true);
-            setTimeout(() => setIsPromptSaved(false), 3000);
-        } catch (error) {
-            console.error("Failed to save prompt", error);
-        }
-        setIsSavingPrompt(false);
     };
 
     if (isLoading) {
@@ -226,26 +206,17 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
                     </div>
                 </div>
 
-                {/* GEMINI PROMPT SECTION */}
+                {/* AI PROMPTS DIRECTORY NOTE */}
                 <div className="p-4 sm:p-5 bg-gray-50/50">
                     <div className="space-y-3">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">
-                                Research Vault AI Prompt
+                                Research Vault AI Prompts
                             </label>
                             <p className="text-xs text-gray-500 mt-0.5">
-                                Customize the prompt sent to Gemini when analyzing newly uploaded PDFs.
-                                Note: You must instruct it to return JSON matching the expected structure.
+                                Prompts are now managed securely inside the <span className="font-semibold text-[#4285f4]">AI Prompts</span> folder in your Notes app.
+                                You can create, edit, and organize multiple prompts there and select them when analyzing a PDF.
                             </p>
-                        </div>
-
-                        <div className="pt-2">
-                            <Button
-                                onClick={() => setIsEditingPrompt(true)}
-                                className="w-full justify-center bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 uppercase tracking-wide text-xs font-bold"
-                            >
-                                <Edit2 size={16} className="mr-2" /> Open in Prompt Editor
-                            </Button>
                         </div>
                     </div>
                 </div>
@@ -258,19 +229,6 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
                 </p>
             </div>
 
-            {isEditingPrompt && (
-                <div className="fixed inset-0 z-[100]">
-                    <PromptEditor
-                        prompt={{ title: 'Research Vault AI Prompt', content: geminiPrompt, tags: ['system', 'ai'] }}
-                        saveStatus={isSavingPrompt ? 'saving' : isPromptSaved ? 'saved' : ''}
-                        onSave={(data) => {
-                            setGeminiPrompt(data.content);
-                            handleSavePrompt(data.content);
-                        }}
-                        onBack={() => setIsEditingPrompt(false)}
-                    />
-                </div>
-            )}
         </div>
     );
 };

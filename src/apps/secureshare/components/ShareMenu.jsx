@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     X, FileText, CheckSquare, Bookmark, CreditCard, ChevronRight, Search,
-    ClipboardList, FileCode, BellRing, Key, Users
+    ClipboardList, FileCode, BellRing, Key, Users, Paperclip
 } from 'lucide-react';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db, appId } from '../../../lib/firebase';
@@ -69,7 +69,7 @@ const getItemPreview = (item, appType) => {
     }
 };
 
-const ShareMenu = ({ user, cryptoKey, onClose, onShare }) => {
+const ShareMenu = ({ user, cryptoKey, onClose, onShare, onFileUpload }) => {
     const [selectedApp, setSelectedApp] = useState(null);
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -190,6 +190,22 @@ const ShareMenu = ({ user, cryptoKey, onClose, onShare }) => {
                 {!selectedApp ? (
                     /* App Type Grid */
                     <div className="p-4 grid grid-cols-3 gap-2 overflow-y-auto">
+                        {/* File Upload Option */}
+                        <label
+                            className="flex flex-col items-center gap-2 p-3 rounded-2xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 transition-all active:scale-95 cursor-pointer"
+                        >
+                            <div className="p-2.5 rounded-xl text-gray-500 bg-gray-50">
+                                <Paperclip size={22} />
+                            </div>
+                            <span className="font-medium text-xs text-gray-700">File</span>
+                            <input type="file" className="hidden" onChange={(e) => {
+                                if (e.target.files[0] && onFileUpload) {
+                                    onFileUpload(e.target.files[0]);
+                                    onClose();
+                                }
+                                e.target.value = null;
+                            }} />
+                        </label>
                         {APP_TYPES.map(app => (
                             <button
                                 key={app.id}

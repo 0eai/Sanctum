@@ -8,6 +8,7 @@ import {
   encryptData, decryptData, generateMasterKey, keyToUrlString
 } from '../lib/crypto';
 import { getNextDate } from '../lib/dateUtils';
+import { DEFAULT_SYSTEM_INSTRUCTION } from './gemini';
 
 // --- Listeners ---
 
@@ -36,6 +37,54 @@ export const listenToNotes = (userId, cryptoKey, callback) => {
     }));
     callback(data);
   });
+};
+
+export const getOrCreateAiPromptsFolder = async (userId, cryptoKey) => {
+  const q = query(collection(db, 'artifacts', appId, 'users', userId, 'notes'));
+  const snap = await getDocs(q);
+
+  let folderId = null;
+  const decodedItems = [];
+
+  for (const docSnap of snap.docs) {
+    const raw = docSnap.data();
+    try {
+      const dec = await decryptData(raw, cryptoKey);
+      decodedItems.push({ id: docSnap.id, ...raw, ...dec, type: raw.type || 'note' });
+      if (raw.type === 'folder' && dec?.title === 'AI Prompts') {
+        folderId = docSnap.id;
+      }
+    } catch (e) { }
+  }
+
+  // Create folder if not exists
+  if (!folderId) {
+    const encrypted = await encryptData({ title: 'AI Prompts' }, cryptoKey);
+    const folderRef = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'notes'), {
+      ...encrypted, type: 'folder', parentId: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    folderId = folderRef.id;
+  }
+
+  // Get prompts in folder
+  let prompts = decodedItems.filter(i => i.type !== 'folder' && i.parentId === folderId);
+
+  // If empty, create default prompt
+  if (prompts.length === 0) {
+    const defaultId = await saveNote(userId, cryptoKey, {
+      title: 'Default Research Prompt',
+      content: DEFAULT_SYSTEM_INSTRUCTION,
+      tags: ['system', 'ai']
+    }, folderId);
+    prompts = [{
+      id: defaultId,
+      title: 'Default Research Prompt',
+      content: DEFAULT_SYSTEM_INSTRUCTION,
+      tags: ['system', 'ai']
+    }];
+  }
+
+  return { folderId, prompts };
 };
 
 // --- CRUD Operations ---

@@ -1,24 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, File, CheckCircle2, Loader2, UploadCloud, HardDrive } from 'lucide-react';
-import streamSaver from 'streamsaver';
+import { ChevronLeft, File, CheckCircle2, Loader2, UploadCloud, HardDrive, CloudUpload, CloudDownload } from 'lucide-react';
 import { Button } from '../../../components/ui';
 import { formatBytes } from '../../../lib/fileUtils';
-import {
-    rtcConfiguration, setRoomData, listenToRoom,
-    addIceCandidate, listenToIceCandidates, cleanupRoom
-} from '../../../services/transfer';
+import { setRoomData, listenToRoom, cleanupRoom, setTransferFiles, setTransferComplete, listenToTransferFiles } from '../../../services/transfer';
+import streamSaver from 'streamsaver';
+import { uploadTransferFile, deleteTransferFolder, fetchWithDriveRetry } from '../../../services/driveStorage';
+import { useDriveGuard } from '../../../hooks/useDriveGuard';
 
 streamSaver.mitm = '/mitm.html';
-// 50MB threshold: files larger than this stream to disk instead of RAM
-const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
-// Safari cannot stream to disk — warn if file exceeds safe RAM limit (~1.5GB)
-const SAFARI_RAM_LIMIT = 1.5 * 1024 * 1024 * 1024;
-// Detect Safari (StreamSaver explicitly disables SW streaming on Safari)
-const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || !!window.safari;
-// Check OPFS support (Safari 15.2+, Chrome, Firefox)
-const hasOPFS = 'storage' in navigator && 'getDirectory' in navigator.storage;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-const TransferRoom = ({ user, roomId, mode, onLeave }) => {
+const TransferRoom = ({ user, cryptoKey, roomId, mode, onLeave }) => {
     const [status, setStatus] = useState('Initializing...');
     const [progress, setProgress] = useState(0);
     const [isConnected, setIsConnected] = useState(false);
@@ -29,12 +21,18 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
     const [isSending, setIsSending] = useState(false);
 
     // Receiver States
-    const [incomingMeta, setIncomingMeta] = useState(null);
     const [isReceiving, setIsReceiving] = useState(false);
+    const [receivingFileName, setReceivingFileName] = useState('');
+    const [receivedCount, setReceivedCount] = useState(0);
+    const [totalFiles, setTotalFiles] = useState(0);
 
     // Transfer Log
     const [logs, setLogs] = useState([]);
     const logEndRef = useRef(null);
+    const cleanedUpRef = useRef(false);
+
+    // Drive Guard (ensures token is loaded into sessionStorage)
+    const { isDriveConnected, requireDrive } = useDriveGuard(user.uid);
 
     const addLog = (message, type = 'info') => {
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -42,464 +40,220 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
         setTimeout(() => logEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     };
 
-    // WebRTC & Transfer Refs
-    const pcRef = useRef(null);
-    const channelRef = useRef(null);
-    const receiveBufferRef = useRef([]);
-    const receivedBytesRef = useRef(0);
-    const incomingMetaRef = useRef(null);
-    const wakeLockRef = useRef(null);
-
-    // Large file streaming writer (StreamSaver or File System Access API)
-    const streamWriterRef = useRef(null);
-    // OPFS file handle for Safari large file transfers
-    const opfsFileRef = useRef(null);
-    // Sequential write queue for File System Access API path
-    const writeQueueRef = useRef(Promise.resolve());
-    // ACK flow control: sender waits for ack from receiver every N chunks
-    const ackResolverRef = useRef(null);
-    // Guard to prevent double-calling cleanupRoom
-    const roomCleanedUpRef = useRef(false);
-
-    // Track which streaming method is active: 'fsa' | 'streamsaver' | 'opfs' | 'ram'
-    const streamModeRef = useRef('ram');
-
-    // --- WAKE LOCK LOGIC ---
-    const requestWakeLock = async () => {
-        try {
-            if ('wakeLock' in navigator) {
-                wakeLockRef.current = await navigator.wakeLock.request('screen');
-            }
-        } catch (err) { }
-    };
-
-    const releaseWakeLock = () => {
-        if (wakeLockRef.current) {
-            wakeLockRef.current.release();
-            wakeLockRef.current = null;
-        }
-    };
-
+    // --- Signaling: Host creates room, Peer joins ---
     useEffect(() => {
-        return () => releaseWakeLock();
-    }, []);
+        let unsub = null;
 
-    // --- WebRTC Signaling Flow ---
-    useEffect(() => {
-        let roomUnsub = null;
-        let iceUnsub = null;
+        const setup = async () => {
+            if (mode === 'host') {
+                // Host writes room doc and waits for peer
+                await setRoomData(user.uid, roomId, { host: true, createdAt: Date.now() });
+                setStatus('Waiting for peer to join...');
+                addLog('Room created. Share the code with your other device.', 'info');
 
-        const initializeWebRTC = async () => {
-            try {
-                setStatus('Opening local sockets...');
-                const pc = new RTCPeerConnection(rtcConfiguration);
-                pcRef.current = pc;
-
-                pc.oniceconnectionstatechange = () => {
-                    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                // Listen for peer to join (they write { peer: true })
+                unsub = listenToRoom(user.uid, roomId, (data) => {
+                    if (data?.peer) {
                         setIsConnected(true);
-                        setStatus('Connected securely!');
-                        addLog('Devices connected securely via WebRTC.', 'success');
-                        // Delay cleanup by 5s so the peer finishes processing ICE candidates
-                        if (!roomCleanedUpRef.current) {
-                            roomCleanedUpRef.current = true;
-                            setTimeout(() => cleanupRoom(user.uid, roomId), 5000);
-                        }
-                    } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                        setIsConnected(false);
-                        setIsConnected(false);
-                        setStatus(`Connection lost: ${pc.iceConnectionState}`);
-                        addLog(`Connection lost. ICE State: ${pc.iceConnectionState}`, 'error');
-                        releaseWakeLock();
-                        addLog('Connection lost or peer disconnected.', 'error');
-                        releaseWakeLock();
-                        if (streamWriterRef.current) { try { streamWriterRef.current.abort(); } catch (e) { } streamWriterRef.current = null; } // Cancel stream if dropped
-
-                        // Clean up any partial OPFS file
-                        if (opfsFileRef.current) {
-                            const name = opfsFileRef.current.name;
-                            try {
-                                navigator.storage.getDirectory().then(root => {
-                                    root.removeEntry(name).catch(() => { });
-                                });
-                            } catch (e) { }
-                            opfsFileRef.current = null;
-                        }
+                        setStatus('Connected! Select files to send.');
+                        addLog('Peer connected via Google Drive relay.', 'success');
                     }
-                };
+                });
+            } else if (mode === 'peer') {
+                // Peer writes to room doc to signal presence
+                setStatus('Connecting to host...');
+                await setRoomData(user.uid, roomId, { peer: true });
+                setIsConnected(true);
+                setStatus('Connected! Waiting for files...');
+                addLog('Connected to host. Waiting for files...', 'success');
 
-                if (mode === 'host') {
-                    const dataChannel = pc.createDataChannel('fileTransfer');
-                    dataChannel.binaryType = 'arraybuffer';
-                    setupDataChannel(dataChannel);
-
-                    pc.onicecandidate = (event) => {
-                        if (event.candidate) addIceCandidate(user.uid, roomId, 'callerCandidates', event.candidate);
-                    };
-
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    await setRoomData(user.uid, roomId, { offer: { type: offer.type, sdp: offer.sdp } });
-                    setStatus('Waiting for peer to join...');
-
-                    roomUnsub = listenToRoom(user.uid, roomId, async (data) => {
-                        if (!pc.currentRemoteDescription && data && data.answer) {
-                            const answer = new RTCSessionDescription(data.answer);
-                            await pc.setRemoteDescription(answer);
+                // Listen for file metadata from host
+                unsub = listenToTransferFiles(user.uid, roomId, async ({ files, status: transferStatus }) => {
+                    if (transferStatus === 'complete') {
+                        addLog('All files received!', 'success');
+                        setStatus('All files received!');
+                        // Cleanup (Peer just disconnects, Host does the actual deletion)
+                        if (!cleanedUpRef.current) {
+                            cleanedUpRef.current = true;
                         }
-                    });
+                        setTimeout(() => onLeave(), 2500);
+                        return;
+                    }
 
-                    iceUnsub = listenToIceCandidates(user.uid, roomId, 'calleeCandidates', (candidate) => {
-                        pc.addIceCandidate(new RTCIceCandidate(candidate));
-                    });
+                    if (files.length > 0 && transferStatus === 'ready' && !isReceiving) {
+                        setIsReceiving(true);
+                        setTotalFiles(files.length);
+                        addLog(`${files.length} file(s) ready for download.`, 'info');
 
-                } else if (mode === 'peer') {
-                    pc.ondatachannel = (event) => {
-                        setupDataChannel(event.channel);
-                    };
+                        // Download each file
+                        for (let i = 0; i < files.length; i++) {
+                            const f = files[i];
+                            setReceivingFileName(f.name);
+                            setReceivedCount(i);
+                            setProgress(0);
+                            setStatus(`Downloading: ${f.name} (${i + 1}/${files.length})`);
+                            addLog(`Downloading: ${f.name} (${formatBytes(f.size)})`, 'info');
 
-                    pc.onicecandidate = (event) => {
-                        if (event.candidate) addIceCandidate(user.uid, roomId, 'calleeCandidates', event.candidate);
-                    };
+                            try {
+                                let accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                if (!accessToken) throw new Error("Google Drive not connected.");
 
-                    // Wait for the host's offer to appear (up to 30s) instead of a one-shot read
-                    // This fixes the race where the peer joins before the host finishes writing the offer.
-                    setStatus('Waiting for host offer...');
-                    const offerData = await new Promise((resolve, reject) => {
-                        const timeout = setTimeout(() => {
-                            unsub();
-                            reject(new Error('Timed out waiting for host offer.'));
-                        }, 30000);
+                                // 1. Choose streaming strategy based on browser capabilities
+                                if (isIOS) {
+                                    // iOS Safari/Chrome: JS chunking / OPFS / StreamSaver lead to RAM limits or strict popup blocking.
+                                    // Ping Drive API first to verify/refresh token before Native download.
+                                    await fetchWithDriveRetry(`https://www.googleapis.com/drive/v3/files/${f.fileId}?fields=id`, { method: 'GET' }, cryptoKey, false);
 
-                        const unsub = listenToRoom(user.uid, roomId, (data) => {
-                            if (data?.offer) {
-                                clearTimeout(timeout);
-                                unsub();
-                                resolve(data);
+                                    const refreshedToken = sessionStorage.getItem('googleDriveAccessToken') || accessToken;
+                                    const directUrl = `https://www.googleapis.com/drive/v3/files/${f.fileId}?alt=media&access_token=${refreshedToken}`;
+
+                                    // IFrames bypass the async anchor-click popup blocker on iOS mobile browsers.
+                                    // They reliably trigger the native OS download dialogue.
+                                    setTimeout(() => {
+                                        const iframe = document.createElement('iframe');
+                                        iframe.style.display = 'none';
+                                        iframe.src = directUrl;
+                                        document.body.appendChild(iframe);
+                                        // Cleanup iframe eventually
+                                        setTimeout(() => document.body.removeChild(iframe), 15000);
+                                    }, i * 2000); // 2s stagger to prevent prompts swallowing each other
+
+                                    // Fake progress since native UI handles it
+                                    setProgress(100);
+                                    addLog(`Download started in OS dialog: ${f.name}`, 'success');
+                                    continue; // Skip the JS fetch stream completely
+                                }
+
+                                // Fetch the file from Drive (with auto token refresh if expired)
+                                const response = await fetchWithDriveRetry(`https://www.googleapis.com/drive/v3/files/${f.fileId}?alt=media`, {
+                                    method: 'GET',
+                                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                                }, cryptoKey, false, true);
+
+                                const reader = response.body.getReader();
+                                const totalSize = f.size;
+                                let received = 0;
+
+                                let streamWriter = null;
+
+                                if ('showSaveFilePicker' in window) {
+                                    // Chrome/Edge: File System Access API (Zero SW/RAM)
+                                    try {
+                                        const fileHandle = await window.showSaveFilePicker({ suggestedName: f.name });
+                                        streamWriter = await fileHandle.createWritable();
+                                    } catch (err) {
+                                        // User cancelled or unsupported, fallback to StreamSaver
+                                        const fileStream = streamSaver.createWriteStream(f.name, { size: totalSize });
+                                        streamWriter = fileStream.getWriter();
+                                    }
+                                } else {
+                                    // Firefox / Safari without OPFS: StreamSaver (Service Worker)
+                                    const fileStream = streamSaver.createWriteStream(f.name, { size: totalSize });
+                                    streamWriter = fileStream.getWriter();
+                                }
+
+                                // 2. Stream chunks directly to disk
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+
+                                    await streamWriter.write(value);
+                                    received += value.length;
+                                    setProgress(Math.round((received / totalSize) * 100));
+                                }
+
+                                await streamWriter.close();
+                                addLog(`Saved: ${f.name}`, 'success');
+
+                            } catch (e) {
+                                console.error('Download failed', e);
+                                addLog(`Failed: ${f.name} — ${e.message}`, 'error');
                             }
-                        });
-                    });
+                        }
 
-                    const offer = new RTCSessionDescription(offerData.offer);
-                    await pc.setRemoteDescription(offer);
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    await setRoomData(user.uid, roomId, { answer: { type: answer.type, sdp: answer.sdp } });
-                    setStatus('Connecting to host...');
+                        setReceivedCount(files.length);
+                        setProgress(100);
+                        setStatus('All files downloaded!');
 
-                    iceUnsub = listenToIceCandidates(user.uid, roomId, 'callerCandidates', (candidate) => {
-                        pc.addIceCandidate(new RTCIceCandidate(candidate));
-                    });
-                }
-            } catch (err) {
-                setStatus('Failed to establish connection.');
+                        // Signal completion to host
+                        await setTransferComplete(user.uid, roomId);
+                    }
+                });
             }
         };
 
-        initializeWebRTC();
+        setup();
 
         return () => {
-            if (roomUnsub) roomUnsub();
-            if (iceUnsub) iceUnsub();
-            if (pcRef.current) pcRef.current.close();
-            // Only cleanup if not already done on connect
-            if (!roomCleanedUpRef.current) cleanupRoom(user.uid, roomId);
+            if (unsub) unsub();
+            if (!cleanedUpRef.current) {
+                cleanedUpRef.current = true;
+                if (mode === 'host') {
+                    cleanupRoom(user.uid, roomId);
+                }
+            }
         };
     }, [roomId, mode, user]);
 
-    // --- Data Channel Handlers ---
-    // ACK_EVERY: receiver sends an ack to the sender every N chunks.
-    // Sender pauses until ack received. This is the only reliable cross-platform
-    // backpressure mechanism — it works on Safari/iPad where the data channel
-    // buffer can't be controlled from the receiver side.
-    const ACK_EVERY = 16; // 64KB * 16 = 1MB window
-
-    const setupDataChannel = (channel) => {
-        channelRef.current = channel;
-        channel.binaryType = 'arraybuffer';
-        channel.bufferedAmountLowThreshold = 262144; // 256KB threshold
-
-        let chunksReceived = 0;
-
-        // Keep onmessage SYNCHRONOUS — async handlers don't block WebRTC delivery.
-        // Instead, queue disk writes onto a sequential promise chain.
-        channel.onmessage = (event) => {
-            if (typeof event.data === 'string') {
-                const msg = JSON.parse(event.data);
-
-                if (msg.type === 'meta') {
-                    setIncomingMeta(msg);
-                    incomingMetaRef.current = msg;
-                    setIsReceiving(true);
-                    setProgress(0);
-                    receivedBytesRef.current = 0;
-                    receiveBufferRef.current = [];
-                    chunksReceived = 0;
-                    setStatus(`Receiving: ${msg.name}`);
-                    addLog(`Receiving: ${msg.name} (${formatBytes(msg.size)})`, 'info');
-                    requestWakeLock();
-
-                    if (msg.size > LARGE_FILE_THRESHOLD && 'showSaveFilePicker' in window) {
-                        // Chrome/Edge: File System Access API — true streaming to disk, no SW needed
-                        streamModeRef.current = 'fsa';
-                        writeQueueRef.current = writeQueueRef.current.then(async () => {
-                            try {
-                                const fileHandle = await window.showSaveFilePicker({ suggestedName: msg.name });
-                                streamWriterRef.current = await fileHandle.createWritable();
-                            } catch (err) {
-                                // User cancelled — fall back to StreamSaver
-                                console.warn('showSaveFilePicker cancelled, falling back to StreamSaver.', err);
-                                streamModeRef.current = 'streamsaver';
-                                const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
-                                streamWriterRef.current = fileStream.getWriter();
-                            }
-                        });
-                    } else if (msg.size > LARGE_FILE_THRESHOLD && isSafari && hasOPFS) {
-                        // Safari/iOS: OPFS (Origin Private File System) — write chunks to private storage,
-                        // then share via navigator.share() — zero RAM accumulation during transfer.
-                        streamModeRef.current = 'opfs';
-                        writeQueueRef.current = writeQueueRef.current.then(async () => {
-                            try {
-                                const root = await navigator.storage.getDirectory();
-                                const fileHandle = await root.getFileHandle(msg.name, { create: true });
-                                opfsFileRef.current = fileHandle;
-                                streamWriterRef.current = await fileHandle.createWritable();
-                                addLog(`Writing to device storage via OPFS...`, 'info');
-                            } catch (err) {
-                                console.warn('OPFS failed, falling back to RAM buffer.', err);
-                                streamModeRef.current = 'ram';
-                                streamWriterRef.current = null;
-                                opfsFileRef.current = null;
-                            }
-                        });
-                    } else if (msg.size > LARGE_FILE_THRESHOLD && !isSafari) {
-                        // Firefox (non-Safari): StreamSaver via service worker
-                        streamModeRef.current = 'streamsaver';
-                        writeQueueRef.current = Promise.resolve();
-                        try {
-                            const fileStream = streamSaver.createWriteStream(msg.name, { size: msg.size });
-                            streamWriterRef.current = fileStream.getWriter();
-                        } catch (err) {
-                            console.warn('StreamSaver failed, falling back to RAM buffer.', err);
-                            streamModeRef.current = 'ram';
-                            streamWriterRef.current = null;
-                        }
-                    } else {
-                        // Small files or unsupported: RAM buffer
-                        streamModeRef.current = 'ram';
-                        streamWriterRef.current = null;
-                        writeQueueRef.current = Promise.resolve();
-                        if (isSafari && msg.size > LARGE_FILE_THRESHOLD) {
-                            if (msg.size > SAFARI_RAM_LIMIT) {
-                                addLog(`⚠️ Warning: ${formatBytes(msg.size)} file may crash Safari — use Chrome/Edge to receive large files.`, 'error');
-                            } else {
-                                addLog(`⚠️ Safari detected: file will be buffered in RAM. Use Chrome/Edge for files over 1.5 GB.`, 'info');
-                            }
-                        }
-                    }
-
-                } else if (msg.type === 'ack') {
-                    // Sender is waiting for this — resolve the pause
-                    if (ackResolverRef.current) {
-                        ackResolverRef.current();
-                        ackResolverRef.current = null;
-                    }
-
-                } else if (msg.type === 'eof') {
-                    const meta = incomingMetaRef.current;
-
-                    writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (streamWriterRef.current && streamModeRef.current === 'opfs') {
-                            // OPFS path: close the writable, then share via navigator.share()
-                            await streamWriterRef.current.close();
-                            streamWriterRef.current = null;
-                            try {
-                                const file = await opfsFileRef.current.getFile();
-                                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                                    await navigator.share({ files: [file], title: meta?.name });
-                                    addLog(`Shared: ${meta?.name} via iOS share sheet.`, 'success');
-                                } else {
-                                    // Fallback: read back and download (last resort)
-                                    const url = URL.createObjectURL(file);
-                                    const a = document.createElement('a');
-                                    a.href = url; a.download = meta?.name;
-                                    document.body.appendChild(a); a.click();
-                                    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
-                                    addLog(`Downloaded: ${meta?.name}.`, 'success');
-                                }
-                                // Clean up OPFS file
-                                const root = await navigator.storage.getDirectory();
-                                await root.removeEntry(meta?.name).catch(() => { });
-                            } catch (err) {
-                                console.warn('Share failed:', err);
-                                addLog(`Save failed: ${err.message}`, 'error');
-                            }
-                            opfsFileRef.current = null;
-                        } else if (streamWriterRef.current) {
-                            // FSA or StreamSaver: just close the writer
-                            await streamWriterRef.current.close();
-                            streamWriterRef.current = null;
-                            const label = streamModeRef.current === 'fsa' ? 'via File System API' : 'via StreamSaver';
-                            addLog(`Saved: ${meta?.name} ${label}.`, 'success');
-                        } else {
-                            // RAM buffer — create Blob and trigger download
-                            const blob = new Blob(receiveBufferRef.current, { type: meta?.mimeType || 'application/octet-stream' });
-                            const downloadUrl = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.style.display = 'none';
-                            a.href = downloadUrl;
-                            a.download = meta?.name || 'shared_file';
-                            document.body.appendChild(a);
-                            a.click();
-                            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(downloadUrl); }, 250);
-                            receiveBufferRef.current = [];
-                            addLog(`Downloaded: ${meta?.name}.`, 'success');
-                        }
-                        setProgress(100);
-                        setTimeout(() => { setIsReceiving(false); setProgress(0); }, 1000);
-                    });
-
-                } else if (msg.type === 'done_all') {
-                    writeQueueRef.current = writeQueueRef.current.then(() => {
-                        setIsReceiving(false);
-                        setStatus('All files received! Disconnecting...');
-                        addLog('All files received.', 'success');
-                        releaseWakeLock();
-                        setTimeout(() => onLeave(), 2500);
-                    });
-                }
-            } else {
-                // --- INCOMING FILE CHUNK ---
-                const data = event.data;
-
-                if (streamModeRef.current === 'streamsaver' && streamWriterRef.current) {
-                    // StreamSaver: write synchronously
-                    streamWriterRef.current.write(new Uint8Array(data));
-
-                    receivedBytesRef.current += event.data.byteLength;
-                    chunksReceived++;
-                    if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
-
-                } else if (streamModeRef.current === 'fsa' || streamModeRef.current === 'opfs') {
-                    // Async Disk Write (OPFS/FSA): Send ACK *after* write completes to enforce backpressure
-                    writeQueueRef.current = writeQueueRef.current.then(async () => {
-                        if (streamWriterRef.current) {
-                            await streamWriterRef.current.write(data);
-
-
-                            receivedBytesRef.current += event.data.byteLength;
-                            chunksReceived++;
-                            if (chunksReceived % ACK_EVERY === 0) {
-                                channel.send(JSON.stringify({ type: 'ack' }));
-                                if (chunksReceived % (ACK_EVERY * 10) === 0) console.log(`[Recv] Sent ACK ${chunksReceived}`);
-                            }
-
-                            if (incomingMetaRef.current?.size) {
-                                setProgress(Math.round((receivedBytesRef.current / incomingMetaRef.current.size) * 100));
-                            }
-                        }
-                    });
-                } else {
-                    // RAM buffer
-                    receiveBufferRef.current.push(data);
-
-                    receivedBytesRef.current += event.data.byteLength;
-                    chunksReceived++;
-                    if (chunksReceived % ACK_EVERY === 0) channel.send(JSON.stringify({ type: 'ack' }));
-                }
-
-                // Update progress for sync paths (Ram/StreamSaver) immediately
-                if (streamModeRef.current !== 'fsa' && streamModeRef.current !== 'opfs') {
-                    const meta = incomingMetaRef.current;
-                    if (meta?.size) setProgress(Math.round((receivedBytesRef.current / meta.size) * 100));
-                }
-            }
-        };
-    };
-
     // --- Send Logic ---
     const handleSendFile = async () => {
-        if (filesToSend.length === 0 || !channelRef.current) return;
+        if (filesToSend.length === 0) return;
+        if (!requireDrive()) return;
+
+        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+        if (!accessToken) {
+            addLog('Google Drive not connected. Please sign out and sign back in.', 'error');
+            return;
+        }
 
         setIsSending(true);
-        await requestWakeLock();
-        setIsSending(true);
-        await requestWakeLock();
-        const channel = channelRef.current;
-        const CHUNK_SIZE = 65536; // 64KB chunks (increased from 16KB to reduce FS overhead)
-        const ACK_EVERY_SEND = 16; // Must match receiver's ACK_EVERY
-
-        const readSlice = (file, o) => new Promise((resolve, reject) => {
-            const slice = file.slice(o, o + CHUNK_SIZE);
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = reject;
-            reader.readAsArrayBuffer(slice);
-        });
+        const uploadedFiles = [];
 
         for (let i = 0; i < filesToSend.length; i++) {
             const file = filesToSend[i];
             setCurrentFileIndex(i);
             setProgress(0);
-            setStatus(`Sending file ${i + 1} of ${filesToSend.length}...`);
+            setStatus(`Uploading: ${file.name} (${i + 1}/${filesToSend.length})`);
+            addLog(`Uploading: ${file.name} (${formatBytes(file.size)})`, 'info');
 
-            channel.send(JSON.stringify({ type: 'meta', name: file.name, size: file.size, mimeType: file.type }));
-            addLog(`Sending: ${file.name} (${formatBytes(file.size)})`, 'info');
-
-            let offset = 0;
-            let chunksSent = 0;
-
-            while (offset < file.size) {
-                // 1. Pause if the sender-side buffer is full (standard WebRTC backpressure)
-                if (channel.bufferedAmount > 65535) {
-                    await new Promise(resolve => {
-                        channel.onbufferedamountlow = () => { channel.onbufferedamountlow = null; resolve(); };
-                    });
-                }
-
-                const buffer = await readSlice(file, offset);
-                channel.send(buffer);
-                offset += buffer.byteLength;
-                chunksSent++;
-
-                setProgress(Math.round((offset / file.size) * 100));
-
-                // 2. ACK flow control: pause every ACK_EVERY chunks and wait for receiver ack
-                // This prevents flooding the receiver's memory on slow devices (iPad/Safari)
-                if (chunksSent % ACK_EVERY_SEND === 0) {
-                    // console.log(`[Send] Waiting for ACK after ${chunksSent} chunks...`);
-                    try {
-                        await new Promise((resolve, reject) => {
-                            const timer = setTimeout(() => {
-                                if (ackResolverRef.current) {
-                                    ackResolverRef.current = null;
-                                    reject(new Error('ACK timeout (60s)'));
-                                }
-                            }, 60000); // 60s timeout
-                            ackResolverRef.current = () => { clearTimeout(timer); resolve(); };
-                        });
-                        // console.log('[Send] Resumed.');
-                    } catch (err) {
-                        console.error(err);
-                        addLog(`Transfer aborted: Receiver stopped responding.`, 'error');
-                        setIsSending(false);
-                        return; // Stop sending
-                    }
-                }
+            try {
+                const fileId = await uploadTransferFile(file, cryptoKey, accessToken, roomId, (p) => setProgress(p));
+                uploadedFiles.push({
+                    fileId,
+                    name: file.name,
+                    size: file.size,
+                    type: file.type
+                });
+                addLog(`Uploaded: ${file.name}`, 'success');
+            } catch (e) {
+                console.error('Upload failed', e);
+                addLog(`Upload failed: ${file.name} — ${e.message}`, 'error');
+                setIsSending(false);
+                return;
             }
-
-            channel.send(JSON.stringify({ type: 'eof' }));
-            addLog(`Sent: ${file.name}.`, 'success');
-            await new Promise(res => setTimeout(res, 500));
         }
 
-        channel.send(JSON.stringify({ type: 'done_all' }));
-        setIsSending(false);
-        setStatus('All files sent! Disconnecting...');
-        addLog('All files sent.', 'success');
+        // Write file metadata to Firestore so peer can download
+        await setTransferFiles(user.uid, roomId, uploadedFiles);
+        setProgress(100);
+        setStatus('Files uploaded! Waiting for peer to download...');
+        addLog(`${uploadedFiles.length} file(s) shared. Waiting for peer to download...`, 'info');
 
-        releaseWakeLock();
-        setTimeout(() => onLeave(), 2500);
+        // Listen for peer to finish downloading
+        const unsub = listenToTransferFiles(user.uid, roomId, async ({ status: transferStatus }) => {
+            if (transferStatus === 'complete') {
+                unsub();
+                addLog('Peer downloaded all files!', 'success');
+                setStatus('Transfer complete!');
+                // Cleanup
+                if (!cleanedUpRef.current) {
+                    cleanedUpRef.current = true;
+                    await deleteTransferFolder(roomId, cryptoKey);
+                    await cleanupRoom(user.uid, roomId);
+                }
+                setTimeout(() => onLeave(), 2500);
+            }
+        });
     };
 
     const totalSize = filesToSend.reduce((acc, file) => acc + file.size, 0);
@@ -550,7 +304,7 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                                     <label className="border-2 border-dashed border-gray-300 hover:border-[#4285f4] hover:bg-blue-50 transition-colors rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer group">
                                         <UploadCloud size={32} className="text-gray-400 group-hover:text-[#4285f4]" />
                                         <div className="text-sm font-bold text-gray-700">Select files to send</div>
-                                        <div className="text-xs text-gray-400">Any file type, any size</div>
+                                        <div className="text-xs text-gray-400">Files are relayed via Google Drive</div>
                                         <input
                                             type="file"
                                             multiple
@@ -570,8 +324,8 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                                                     <div className="text-xs text-gray-500">Total size: {formatBytes(totalSize)}</div>
                                                 </div>
                                             </div>
-                                            <Button onClick={handleSendFile} className="w-full">
-                                                Send {filesToSend.length > 1 ? 'All' : 'Now'}
+                                            <Button onClick={handleSendFile} className="w-full flex items-center justify-center gap-2">
+                                                <CloudUpload size={16} /> Send {filesToSend.length > 1 ? 'All' : 'Now'}
                                             </Button>
                                         </div>
                                     )}
@@ -579,7 +333,9 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                             ) : (
                                 <div className="flex flex-col gap-2">
                                     <div className="flex justify-between text-sm font-bold">
-                                        <span className="text-gray-600">File {currentFileIndex + 1} of {filesToSend.length}</span>
+                                        <span className="text-gray-600">
+                                            {progress === 100 ? 'Waiting for peer...' : `Uploading ${currentFileIndex + 1} of ${filesToSend.length}`}
+                                        </span>
                                         <span className="text-[#4285f4]">{progress}%</span>
                                     </div>
                                     <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
@@ -601,10 +357,12 @@ const TransferRoom = ({ user, roomId, mode, onLeave }) => {
                             ) : (
                                 <div className="flex flex-col gap-3 text-left">
                                     <div className="bg-blue-50 p-3 rounded-xl flex items-center gap-3">
-                                        <File size={24} className="text-[#4285f4] flex-shrink-0" />
+                                        <CloudDownload size={24} className="text-[#4285f4] flex-shrink-0" />
                                         <div className="min-w-0 flex-1">
-                                            <div className="text-sm font-bold text-gray-800 truncate">{incomingMeta?.name}</div>
-                                            <div className="text-xs text-blue-600 font-medium">Incoming Transfer...</div>
+                                            <div className="text-sm font-bold text-gray-800 truncate">{receivingFileName}</div>
+                                            <div className="text-xs text-blue-600 font-medium">
+                                                {progress === 100 ? `Downloaded ${receivedCount}/${totalFiles}` : `Downloading ${receivedCount + 1}/${totalFiles}`}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="flex flex-col gap-1 mt-2">

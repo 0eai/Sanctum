@@ -4,7 +4,8 @@ import {
   TrendingUp, CheckSquare, Key, Bell, Sliders, Lock, Cloud, Cast, Bookmark,
   FileText, ClipboardList, CreditCard, PieChart, Globe, FileCode,
   Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout,
-  Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap
+  Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap,
+  HardDrive
 } from 'lucide-react';
 import { listenToAppStats } from '../../services/firestoredb';
 import { listenToAllUnreadMessages } from '../../services/secureshare';
@@ -71,11 +72,11 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
     { id: 'finance', icon: <PieChart size={24} />, label: 'Finance', count: stats.finance },
     { id: 'research', icon: <GraduationCap size={24} />, label: 'Research' },
     { id: 'bookmarks', icon: <Bookmark size={24} />, label: 'Bookmarks' },
+    { id: 'filevault', icon: <HardDrive size={24} />, label: 'File Vault' },
     { id: 'transfer', icon: <Share2 size={24} />, label: 'Drop' },
     { id: 'streampi', icon: <Cast size={24} />, label: 'StreamPi', url: 'https://aks-streampi.web.app' },
     { id: 'drive', icon: <Cloud size={24} />, label: 'Cloud Drive', url: 'https://aks-cloud-drive.web.app' },
     { id: 'settings', icon: <Sliders size={24} />, label: 'Settings' },
-    { id: 'vault', icon: <Lock size={24} className="text-yellow-400" />, label: 'Vault', locked: true },
   ], [stats]);
 
   // 2. Merge & Sort Logic
@@ -89,10 +90,10 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
 
       if (!customAppList) {
         const ids = Array.isArray(enabledApps) ? enabledApps : (selectedApps || []);
-        computedList = systemApps.filter(app => ids.includes(app.id) || ['vault', 'settings'].includes(app.id));
+        computedList = systemApps.filter(app => ids.includes(app.id) || ['settings'].includes(app.id));
       } else {
         computedList = customAppList
-          .filter(savedApp => ['vault', 'settings'].includes(savedApp.id) || selectedApps.includes(savedApp.id))
+          .filter(savedApp => ['settings'].includes(savedApp.id) || selectedApps.includes(savedApp.id))
           .map(savedApp => {
             const systemApp = systemApps.find(a => a.id === savedApp.id);
             if (systemApp) return systemApp;
@@ -145,7 +146,7 @@ const Launcher = ({ user, onLaunch, onLock, enabledApps }) => {
       <main className="flex-1 overflow-y-auto flex flex-col items-center">
         <div className="max-w-3xl p-6 flex flex-wrap justify-center content-start gap-4 sm:gap-5 lg:gap-6 mb-8 w-full">
           {finalApps.map(app => {
-            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer', 'secureshare', 'authenticator', 'research'].includes(app.id);
+            const isPrimary = ['checklist', 'tasks', 'counter', 'passwords', 'alerts', 'streampi', 'drive', 'bookmarks', 'notes', 'markdown', 'contacts', 'reminders', 'settings', 'banking', 'finance', 'transfer', 'secureshare', 'authenticator', 'research', 'filevault'].includes(app.id);
 
             return (
               <button

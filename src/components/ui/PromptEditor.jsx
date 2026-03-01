@@ -1,3 +1,4 @@
+// src/components/ui/PromptEditor.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
     ChevronLeft, Share2, Star, X, Tag, Printer, Copy, Check

@@ -90,30 +90,30 @@ export const clearIncomingInvite = async (uid, myDeviceId) => {
 // --- WebRTC Signaling ---
 
 export const setRoomData = async (uid, roomId, data) => {
-    const roomRef = doc(db, 'artifacts', appId, 'users', uid, 'transfers', roomId);
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
     await setDoc(roomRef, data, { merge: true });
 };
 
 export const getRoomData = async (uid, roomId) => {
-    const roomRef = doc(db, 'artifacts', appId, 'users', uid, 'transfers', roomId);
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
     const snap = await getDoc(roomRef);
     return snap.exists() ? snap.data() : null;
 };
 
 export const listenToRoom = (uid, roomId, callback) => {
-    const roomRef = doc(db, 'artifacts', appId, 'users', uid, 'transfers', roomId);
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
     return onSnapshot(roomRef, (snap) => {
         if (snap.exists()) callback(snap.data());
     });
 };
 
 export const addIceCandidate = async (uid, roomId, collectionName, candidate) => {
-    const candidateRef = collection(db, 'artifacts', appId, 'users', uid, 'transfers', roomId, collectionName);
+    const candidateRef = collection(db, 'artifacts', appId, 'global_transfers', roomId, collectionName);
     await addDoc(candidateRef, candidate.toJSON());
 };
 
 export const listenToIceCandidates = (uid, roomId, collectionName, callback) => {
-    const candidateRef = collection(db, 'artifacts', appId, 'users', uid, 'transfers', roomId, collectionName);
+    const candidateRef = collection(db, 'artifacts', appId, 'global_transfers', roomId, collectionName);
     return onSnapshot(candidateRef, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
             if (change.type === 'added') callback(change.doc.data());
@@ -123,15 +123,48 @@ export const listenToIceCandidates = (uid, roomId, collectionName, callback) => 
 
 export const cleanupRoom = async (uid, roomId) => {
     try {
-        const roomRef = doc(db, 'artifacts', appId, 'users', uid, 'transfers', roomId);
-        const callerQuery = await getDocs(collection(roomRef, 'callerCandidates'));
-        callerQuery.forEach(d => deleteDoc(d.ref));
-
-        const calleeQuery = await getDocs(collection(roomRef, 'calleeCandidates'));
-        calleeQuery.forEach(d => deleteDoc(d.ref));
-
+        const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
         await deleteDoc(roomRef);
     } catch (e) {
         console.error("Cleanup failed:", e);
     }
+};
+
+// --- Drive Transfer Signaling ---
+
+/**
+ * Writes uploaded file metadata to the room doc so the receiver can download.
+ * @param {string} uid
+ * @param {string} roomId
+ * @param {Array<{fileId: string, name: string, size: number, type: string}>} files
+ */
+export const setTransferFiles = async (uid, roomId, files) => {
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
+    await setDoc(roomRef, { transferFiles: files, transferStatus: 'ready' }, { merge: true });
+};
+
+/**
+ * Marks transfer as complete in Firestore.
+ */
+export const setTransferComplete = async (uid, roomId) => {
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
+    await setDoc(roomRef, { transferStatus: 'complete' }, { merge: true });
+};
+
+/**
+ * Listens for transfer file metadata and status changes in the room doc.
+ */
+export const listenToTransferFiles = (uid, roomId, callback) => {
+    const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
+    return onSnapshot(roomRef, (snap) => {
+        if (snap.exists()) {
+            const data = snap.data();
+            if (data.transferFiles || data.transferStatus) {
+                callback({
+                    files: data.transferFiles || [],
+                    status: data.transferStatus || 'waiting'
+                });
+            }
+        }
+    });
 };

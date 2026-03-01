@@ -37,7 +37,7 @@ export const connectGoogleDrive = async (userId, cryptoKey, clientId) => {
         try {
             const client = window.google.accounts.oauth2.initCodeClient({
                 client_id: clientId,
-                scope: 'https://www.googleapis.com/auth/drive.file',
+                scope: 'https://www.googleapis.com/auth/drive',
                 ux_mode: 'popup',
                 callback: async (response) => {
                     if (response.error) {

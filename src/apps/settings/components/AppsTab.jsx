@@ -4,7 +4,7 @@ import {
     ToggleLeft, ToggleRight, Grid, Plus, Trash2, Globe, MoveUp, MoveDown, ExternalLink, ChevronDown,
     Cloud, Cast, Music, Video, MessageSquare, ShoppingBag, Briefcase, Layout, Bell,
     FileCode, FileText, CheckSquare, PieChart, Bookmark, Key, ListChecks, PlusSquare, Shield, Settings,
-    Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap
+    Users, BellRing, Share2, ShieldCheck, MessageCircle, GraduationCap, HardDrive
 } from 'lucide-react';
 
 // Make sure your constants.js exports an array that looks like this:
@@ -27,8 +27,8 @@ const AVAILABLE_APPS = [
     { id: 'transfer', name: 'Drop', icon: 'Share2' },
     { id: 'streampi', name: 'StreamPi', icon: 'Cast', isExternal: true, url: 'https://aks-streampi.web.app' },
     { id: 'drive', name: 'Cloud Drive', icon: 'Cloud', isExternal: true, url: 'https://aks-cloud-drive.web.app' },
+    { id: 'filevault', name: 'File Vault', icon: 'HardDrive' },
     { id: 'settings', name: 'Settings', icon: 'Settings' },
-    { id: 'vault', name: 'Vault', icon: 'Shield' }
 ];
 
 import { fetchAppPreferences, saveAppPreferences } from '../../../services/settings';
@@ -69,6 +69,7 @@ const getIconComponent = (iconName) => {
         case 'Share2': return Share2;
         case 'MessageCircle': return MessageCircle;
         case 'GraduationCap': return GraduationCap;
+        case 'HardDrive': return HardDrive;
         default: break;
     }
 
@@ -129,7 +130,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
     // --- Actions ---
 
     const toggleApp = (id) => {
-        if (id === 'vault' || id === 'settings') return;
+        if (id === 'settings') return;
         setSelectedIds(prev =>
             prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
         );
@@ -204,7 +205,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
                 <div className="divide-y divide-gray-50">
                     {appList.map((app, index) => {
                         const isEnabled = selectedIds.includes(app.id);
-                        const isSystem = ['vault', 'settings'].includes(app.id);
+                        const isSystem = ['settings'].includes(app.id);
                         const IconComponent = getIconComponent(app.icon);
 
                         return (

@@ -37,6 +37,7 @@ import TransferApp from './apps/transfer/Transfer';
 import AuthenticatorApp from './apps/authenticator/Authenticator';
 import SecureShareApp from './apps/secureshare/SecureShare';
 import ResearchApp from './apps/research/ResearchApp';
+import FileVaultApp from './apps/filevault/FileVault';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -148,7 +149,7 @@ export default function App() {
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/drive');
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
@@ -201,6 +202,7 @@ export default function App() {
     case 'authenticator': return <AuthenticatorApp {...props} />;
     case 'secureshare': return <SecureShareApp {...props} />;
     case 'research': return <ResearchApp {...props} onOpenApp={(appId) => navigate(`#${appId}`)} />;
+    case 'filevault': return <FileVaultApp {...props} />;
     case 'settings': return <SettingsApp {...props} />;
     default: return <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />;
   }

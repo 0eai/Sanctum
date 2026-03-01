@@ -1,3 +1,4 @@
+// src/apps/research/components/PaperEditor.jsx
 import React, { useState, useEffect } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import FileViewer from '../../../components/ui/FileViewer';
@@ -5,9 +6,9 @@ import FileViewer from '../../../components/ui/FileViewer';
 import { savePaper, deletePaper, parseBibTeX, formatCitation } from '../../../services/research';
 import { uploadEncryptedFile, downloadEncryptedFile, downloadEncryptedFileBlob, uploadNormalFile, downloadNormalFile, downloadNormalFileBlob } from '../../../services/driveStorage';
 import { analyzePaperWithGemini, DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
-import { fetchApiIntegrations, saveApiIntegration } from '../../../services/settings';
+import { fetchApiIntegrations } from '../../../services/settings';
 import { saveTask } from '../../../services/tasks';
-import { listenToNotes, saveNote } from '../../../services/notes';
+import { listenToNotes, saveNote, getOrCreateAiPromptsFolder } from '../../../services/notes';
 import { saveMarkdownDoc } from '../../../services/markdown';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { useDriveGuard } from '../../../hooks/useDriveGuard';
@@ -90,8 +91,13 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
     const [aiService, setAiService] = useState('gemini');
     const [aiModel, setAiModel] = useState('gemini-2.5-flash');
     const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+
+    // AI Prompts
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
-    const [customPrompt, setCustomPrompt] = useState(DEFAULT_SYSTEM_INSTRUCTION);
+    const [aiPrompts, setAiPrompts] = useState([]);
+    const [selectedPromptId, setSelectedPromptId] = useState(null);
+    const [promptsFolderId, setPromptsFolderId] = useState(null);
+
     const [isEditingPrompt, setIsEditingPrompt] = useState(false);
     const [isSavingPrompt, setIsSavingPrompt] = useState(false);
     const [isPromptSaved, setIsPromptSaved] = useState(false);
@@ -166,10 +172,18 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         if (!user || !cryptoKey) return;
         fetchApiIntegrations(user.uid, cryptoKey).then(data => {
             setIntegrations(data);
-            if (data.geminiPrompt) {
-                setCustomPrompt(data.geminiPrompt);
-            }
         });
+
+        // Fetch AI Prompts
+        getOrCreateAiPromptsFolder(user.uid, cryptoKey).then(({ folderId, prompts }) => {
+            setPromptsFolderId(folderId);
+            setAiPrompts(prompts);
+            if (prompts.length > 0) {
+                // Try to find default, otherwise pick first
+                const defaultPrompt = prompts.find(p => p.title === 'Default Research Prompt') || prompts[0];
+                setSelectedPromptId(defaultPrompt.id);
+            }
+        }).catch(err => console.error("Failed to load AI Prompts", err));
     }, [user, cryptoKey]);
 
     useEffect(() => {
@@ -466,11 +480,13 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 throw new Error("Could not retrieve PDF data for AI analysis.");
             }
 
+            const promptToUse = aiPrompts.find(p => p.id === selectedPromptId)?.content || DEFAULT_SYSTEM_INSTRUCTION;
+
             const result = await analyzePaperWithGemini(
                 geminiKey,
                 blobForAi,
                 'application/pdf',
-                customPrompt
+                promptToUse
             );
 
             setAiSummary(result);
@@ -500,12 +516,17 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         setIsGeneratingAi(false);
     };
 
-    const handleSavePrompt = async (contentToSave = customPrompt) => {
+    const handleSavePrompt = async (promptData) => {
         setIsSavingPrompt(true);
         try {
-            await saveApiIntegration(user.uid, 'geminiPrompt', contentToSave, cryptoKey);
-            setIntegrations(prev => ({ ...prev, geminiPrompt: contentToSave }));
-            setCustomPrompt(contentToSave);
+            await saveNote(user.uid, cryptoKey, {
+                id: selectedPromptId,
+                title: promptData.title,
+                content: promptData.content,
+                tags: promptData.tags || []
+            }, promptsFolderId);
+
+            setAiPrompts(prev => prev.map(p => p.id === selectedPromptId ? { ...p, ...promptData } : p));
             setIsPromptSaved(true);
             setTimeout(() => setIsPromptSaved(false), 3000);
         } catch (e) {
@@ -604,8 +625,9 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 isPromptModalOpen={isPromptModalOpen} setIsPromptModalOpen={setIsPromptModalOpen}
                 aiService={aiService} setAiService={setAiService}
                 aiModel={aiModel} setAiModel={setAiModel}
+                aiPrompts={aiPrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={setSelectedPromptId}
                 isEditingPrompt={isEditingPrompt} setIsEditingPrompt={setIsEditingPrompt}
-                customPrompt={customPrompt} handleSavePrompt={handleSavePrompt}
+                handleSavePrompt={handleSavePrompt}
                 isSavingPrompt={isSavingPrompt} isPromptSaved={isPromptSaved}
             />
 

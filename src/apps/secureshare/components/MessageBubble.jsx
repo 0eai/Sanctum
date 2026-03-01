@@ -1,9 +1,10 @@
 // src/apps/secureshare/components/MessageBubble.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-    Flame, Lock, Check, CheckCheck,
+    Flame, Lock, Check, CheckCheck, MoreVertical, Reply, Trash2,
     FileText, CheckSquare, Bookmark, CreditCard, ClipboardList, FileCode, BellRing, Key, Users
 } from 'lucide-react';
+import FileViewer from '../../../components/ui/FileViewer';
 
 // Viewers
 import NoteViewer from '../../../components/ui/viewers/NoteViewer';
@@ -41,12 +42,60 @@ const VIEWER_MAP = {
     contacts: ContactViewer,
 };
 
-import { downloadEncryptedFile } from '../../../services/driveStorage';
+import { downloadEncryptedFile, downloadEncryptedFileBlob, downloadShareableFileBlob } from '../../../services/driveStorage';
 
-const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey }) => {
+const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey, onReply, onDelete }) => {
     const [displayedText, setDisplayedText] = useState("Decrypting...");
     const [viewerOpen, setViewerOpen] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [viewingFile, setViewingFile] = useState(null);
+    const [showContextMenu, setShowContextMenu] = useState(false);
+    const longPressTimer = useRef(null);
+    const bubbleRef = useRef(null);
+
+    // Close context menu on outside click
+    useEffect(() => {
+        if (!showContextMenu) return;
+        const handler = (e) => {
+            if (bubbleRef.current && !bubbleRef.current.contains(e.target)) {
+                setShowContextMenu(false);
+            }
+        };
+        document.addEventListener('pointerdown', handler);
+        return () => document.removeEventListener('pointerdown', handler);
+    }, [showContextMenu]);
+
+    // Long press handlers for mobile
+    const onTouchStart = useCallback((e) => {
+        longPressTimer.current = setTimeout(() => {
+            setShowContextMenu(true);
+        }, 500);
+    }, []);
+
+    const onTouchEnd = useCallback(() => {
+        clearTimeout(longPressTimer.current);
+    }, []);
+
+    const ContextMenu = () => (
+        <div className={`absolute z-50 ${isMe ? 'right-0' : 'left-0'} top-full mt-1 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-w-[140px] animate-in fade-in zoom-in-95 duration-150`}>
+            {onReply && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); setShowContextMenu(false); onReply(message); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                    <Reply size={15} className="text-blue-500" /> Reply
+                </button>
+            )}
+            {onDelete && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); setShowContextMenu(false); onDelete(message); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                >
+                    <Trash2 size={15} /> Delete
+                </button>
+            )}
+        </div>
+    );
 
     useEffect(() => {
         if (message.isDecrypted) {
@@ -99,92 +148,132 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey 
         return (
             <>
                 <div className={`flex flex-col w-full mb-4 ${isMe ? 'items-end' : 'items-start'}`}>
-                    <div
-                        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'} border ${isMe ? 'border-blue-200' : 'border-gray-200'} ${isDownloading ? 'opacity-50' : ''}`}
-                        onClick={async () => {
-                            if (message.artifact.appType === 'drive_file') {
-                                if (isDownloading) return;
-                                setIsDownloading(true);
-                                try {
-                                    const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                    if (!accessToken) throw new Error("Google Drive access token missing.");
-                                    const url = await downloadEncryptedFile(message.artifact.data, cryptoKey, accessToken);
-
-                                    // Trigger immediate download
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = message.artifact.sharedTitle;
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    document.body.removeChild(a);
-                                    URL.revokeObjectURL(url); // Clean up
-                                } catch (e) {
-                                    console.error("Failed to download file", e);
-                                    alert("Download failed. Make sure you are signed into Google Drive.");
-                                } finally {
-                                    setIsDownloading(false);
+                    <div className="relative group max-w-[85%] sm:max-w-[75%]" ref={bubbleRef}>
+                        {/* Three-dot menu - desktop hover */}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowContextMenu(v => !v); }}
+                            className={`absolute top-1 ${isMe ? '-left-8' : '-right-8'} p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity z-10`}
+                        >
+                            <MoreVertical size={16} />
+                        </button>
+                        {showContextMenu && <ContextMenu />}
+                        <div
+                            className={`rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'} border ${isMe ? 'border-blue-200' : 'border-gray-200'} ${isDownloading ? 'opacity-50' : ''}`}
+                            onTouchStart={onTouchStart}
+                            onTouchEnd={onTouchEnd}
+                            onTouchCancel={onTouchEnd}
+                            onContextMenu={(e) => { e.preventDefault(); setShowContextMenu(true); }}
+                            onClick={async () => {
+                                if (message.artifact.appType === 'drive_file') {
+                                    if (isDownloading) return;
+                                    setIsDownloading(true);
+                                    try {
+                                        let blob;
+                                        if (message.artifact.fileKey) {
+                                            // New per-file key approach (cross-user shareable)
+                                            blob = await downloadShareableFileBlob(message.artifact.data, message.artifact.fileKey, cryptoKey);
+                                        } else {
+                                            // Legacy: encrypted with user's master key
+                                            const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                                            if (!accessToken) throw new Error("Google Drive access token missing.");
+                                            blob = await downloadEncryptedFileBlob(message.artifact.data, cryptoKey, accessToken);
+                                        }
+                                        const fileType = message.artifact.fileType || blob.type || 'application/octet-stream';
+                                        const reader = new FileReader();
+                                        reader.onload = () => {
+                                            setViewingFile({
+                                                data: reader.result,
+                                                name: message.artifact.sharedTitle || 'file',
+                                                type: fileType
+                                            });
+                                        };
+                                        reader.readAsDataURL(blob);
+                                    } catch (e) {
+                                        console.error("Failed to open file", e);
+                                        alert("Failed to open file: " + e.message);
+                                    } finally {
+                                        setIsDownloading(false);
+                                    }
+                                } else {
+                                    setViewerOpen(true);
                                 }
-                            } else {
-                                setViewerOpen(true);
-                            }
-                        }}
-                    >
-                        {/* Artifact Card */}
-                        <div className={`p-3 ${isMe ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                            {/* Sender name for group chats */}
-                            {senderName && !isMe && (
-                                <p className="text-xs font-semibold text-blue-600 mb-1.5">{senderName}</p>
-                            )}
-                            <div className="flex items-start gap-3">
-                                <div className={`p-2 rounded-xl ${artMeta.bg} flex-shrink-0`}>
-                                    <ArtIcon size={20} className={artMeta.color} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{artMeta.label}</p>
-                                    <p className="font-semibold text-gray-900 text-sm mt-0.5 break-words">
-                                        {message.artifact.sharedTitle || 'Shared Item'}
-                                    </p>
-                                    {message.artifact.sharedPreview && (
-                                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                            {message.artifact.sharedPreview}
+                            }}
+                        >
+                            {/* Artifact Card */}
+                            <div className={`p-3 ${isMe ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                                {/* Sender name for group chats */}
+                                {senderName && !isMe && (
+                                    <p className="text-xs font-semibold text-blue-600 mb-1.5">{senderName}</p>
+                                )}
+                                <div className="flex items-start gap-3">
+                                    <div className={`p-2 rounded-xl ${artMeta.bg} flex-shrink-0`}>
+                                        <ArtIcon size={20} className={artMeta.color} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{artMeta.label}</p>
+                                        <p className="font-semibold text-gray-900 text-sm mt-0.5 break-words">
+                                            {message.artifact.sharedTitle || 'Shared Item'}
                                         </p>
-                                    )}
+                                        {message.artifact.sharedPreview && (
+                                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                                {message.artifact.sharedPreview}
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* Caption text if present */}
-                        {displayedText && (
-                            <div className={`px-4 py-2 text-[15px] break-words whitespace-pre-wrap ${isMe ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'}`}>
-                                {displayedText}
-                            </div>
-                        )}
-
-                        {/* Tap hint */}
-                        <div className={`text-center py-1.5 text-[10px] font-medium tracking-wide ${isMe ? 'bg-blue-100 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
-                            {message.artifact.appType === 'drive_file'
-                                ? (isDownloading ? 'DOWNLOADING...' : 'TAP TO DOWNLOAD')
-                                : 'TAP TO VIEW'
-                            }
-                        </div>
-
-                        {/* Meta */}
-                        <div className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] ${isMe ? 'bg-blue-500 text-blue-100' : 'bg-gray-50 text-gray-400'} border-t ${isMe ? 'border-blue-400' : 'border-gray-100'}`}>
-                            <Lock size={10} />
-                            <span>{timeString}</span>
-                            {message.expiresAt && (
-                                <div className="flex items-center gap-0.5 ml-2 bg-black/10 px-1.5 py-0.5 rounded-full">
-                                    <Flame size={10} className={isMe ? 'text-orange-200' : 'text-orange-500'} />
-                                    <span className="font-mono">{timeLeft}</span>
+                            {/* Caption text if present */}
+                            {displayedText && (
+                                <div className={`px-4 py-2 text-[15px] break-words whitespace-pre-wrap ${isMe ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'}`}>
+                                    {displayedText.startsWith('> ') ? (() => {
+                                        const lines = displayedText.split('\n');
+                                        const quoteLines = [];
+                                        const restLines = [];
+                                        let quoteDone = false;
+                                        for (const line of lines) {
+                                            if (!quoteDone && line.startsWith('> ')) {
+                                                quoteLines.push(line.slice(2));
+                                            } else {
+                                                quoteDone = true;
+                                                restLines.push(line);
+                                            }
+                                        }
+                                        return (
+                                            <>
+                                                <div className={`border-l-2 ${isMe ? 'border-white/50 bg-white/15' : 'border-blue-400 bg-blue-50'} rounded-r-lg px-2.5 py-1 mb-1.5 text-[13px] ${isMe ? 'text-blue-100' : 'text-gray-500'}`}>
+                                                    {quoteLines.join('\n')}
+                                                </div>
+                                                {restLines.join('\n').trim()}
+                                            </>
+                                        );
+                                    })() : displayedText}
                                 </div>
                             )}
-                            {isMe && (
-                                <span className="ml-auto">
-                                    {Object.keys(message.readBy || {}).length > 0
-                                        ? <CheckCheck size={14} className="text-cyan-200" />
-                                        : <Check size={14} className="text-blue-200" />}
-                                </span>
-                            )}
+
+                            {/* Tap hint */}
+                            <div className={`text-center py-1.5 text-[10px] font-medium tracking-wide ${isMe ? 'bg-blue-100 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
+                                {isDownloading ? 'LOADING...' : 'TAP TO VIEW'}
+                            </div>
+
+                            {/* Meta */}
+                            <div className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] ${isMe ? 'bg-blue-500 text-blue-100' : 'bg-gray-50 text-gray-400'} border-t ${isMe ? 'border-blue-400' : 'border-gray-100'}`}>
+                                <Lock size={10} />
+                                <span>{timeString}</span>
+                                {message.expiresAt && (
+                                    <div className="flex items-center gap-0.5 ml-2 bg-black/10 px-1.5 py-0.5 rounded-full">
+                                        <Flame size={10} className={isMe ? 'text-orange-200' : 'text-orange-500'} />
+                                        <span className="font-mono">{timeLeft}</span>
+                                    </div>
+                                )}
+                                {isMe && (
+                                    <span className="ml-auto">
+                                        {Object.keys(message.readBy || {}).length > 0
+                                            ? <CheckCheck size={14} className="text-cyan-200" />
+                                            : <Check size={14} className="text-blue-200" />}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -198,6 +287,9 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey 
                         onImport={onImportArtifact ? (art) => { onImportArtifact(art); setViewerOpen(false); } : null}
                     />
                 )}
+                {viewingFile && (
+                    <FileViewer file={viewingFile} onClose={() => setViewingFile(null)} />
+                )}
             </>
         );
     }
@@ -205,35 +297,72 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey 
     // Standard Text Bubble
     return (
         <div className={`flex flex-col w-full mb-4 ${isMe ? 'items-end' : 'items-start'}`}>
-            <div className={`flex flex-col max-w-[75%] px-4 py-2 rounded-2xl ${isMe
-                ? 'bg-blue-500 text-white rounded-br-sm'
-                : 'bg-gray-100 text-gray-800 rounded-bl-sm'
-                }`}>
-                {/* Sender name for group chats */}
-                {senderName && !isMe && (
-                    <p className="text-xs font-semibold text-blue-600 mb-1">{senderName}</p>
-                )}
-                <div className="text-[15px] break-words whitespace-pre-wrap">
-                    {displayedText}
-                </div>
-
-                <div className={`flex items-center gap-1.5 mt-1 text-[10px] ${isMe ? 'text-blue-100' : 'text-gray-400'}`}>
-                    <Lock size={10} />
-                    <span>{timeString}</span>
-
-                    {message.expiresAt && (
-                        <div className="flex items-center gap-0.5 ml-2 bg-black/10 px-1.5 py-0.5 rounded-full">
-                            <Flame size={10} className={isMe ? 'text-orange-200' : 'text-orange-500'} />
-                            <span className="font-mono">{timeLeft}</span>
-                        </div>
+            <div className="relative group max-w-[75%]" ref={bubbleRef}>
+                {/* Three-dot menu - desktop hover */}
+                <button
+                    onClick={(e) => { e.stopPropagation(); setShowContextMenu(v => !v); }}
+                    className={`absolute top-1 ${isMe ? '-left-8' : '-right-8'} p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity z-10`}
+                >
+                    <MoreVertical size={16} />
+                </button>
+                {showContextMenu && <ContextMenu />}
+                <div
+                    className={`flex flex-col px-4 py-2 rounded-2xl ${isMe
+                        ? 'bg-blue-500 text-white rounded-br-sm'
+                        : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                        }`}
+                    onTouchStart={onTouchStart}
+                    onTouchEnd={onTouchEnd}
+                    onTouchCancel={onTouchEnd}
+                    onContextMenu={(e) => { e.preventDefault(); setShowContextMenu(true); }}
+                >
+                    {/* Sender name for group chats */}
+                    {senderName && !isMe && (
+                        <p className="text-xs font-semibold text-blue-600 mb-1">{senderName}</p>
                     )}
-                    {isMe && (
-                        <span className="ml-auto">
-                            {Object.keys(message.readBy || {}).length > 0
-                                ? <CheckCheck size={14} className="text-cyan-200" />
-                                : <Check size={14} className="text-blue-200" />}
-                        </span>
-                    )}
+                    <div className="text-[15px] break-words whitespace-pre-wrap">
+                        {displayedText && displayedText.startsWith('> ') ? (() => {
+                            const lines = displayedText.split('\n');
+                            const quoteLines = [];
+                            const restLines = [];
+                            let quoteDone = false;
+                            for (const line of lines) {
+                                if (!quoteDone && line.startsWith('> ')) {
+                                    quoteLines.push(line.slice(2));
+                                } else {
+                                    quoteDone = true;
+                                    restLines.push(line);
+                                }
+                            }
+                            return (
+                                <>
+                                    <div className={`border-l-2 ${isMe ? 'border-white/50 bg-white/15' : 'border-blue-400 bg-blue-50'} rounded-r-lg px-2.5 py-1 mb-1.5 text-[13px] ${isMe ? 'text-blue-100' : 'text-gray-500'}`}>
+                                        {quoteLines.join('\n')}
+                                    </div>
+                                    {restLines.join('\n').trim()}
+                                </>
+                            );
+                        })() : displayedText}
+                    </div>
+
+                    <div className={`flex items-center gap-1.5 mt-1 text-[10px] ${isMe ? 'text-blue-100' : 'text-gray-400'}`}>
+                        <Lock size={10} />
+                        <span>{timeString}</span>
+
+                        {message.expiresAt && (
+                            <div className="flex items-center gap-0.5 ml-2 bg-black/10 px-1.5 py-0.5 rounded-full">
+                                <Flame size={10} className={isMe ? 'text-orange-200' : 'text-orange-500'} />
+                                <span className="font-mono">{timeLeft}</span>
+                            </div>
+                        )}
+                        {isMe && (
+                            <span className="ml-auto">
+                                {Object.keys(message.readBy || {}).length > 0
+                                    ? <CheckCheck size={14} className="text-cyan-200" />
+                                    : <Check size={14} className="text-blue-200" />}
+                            </span>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

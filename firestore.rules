@@ -2,14 +2,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- User Encryption Keys ---
-    match /users/{userId} {
+    // --- User Profile, Encryption Keys & Vault Files ---
+    match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
     // --- Per-User App Data (notes, tasks, passwords, etc.) ---
     match /artifacts/{appId}/users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // --- Transfer App (Drop) - Global Rooms ---
+    match /artifacts/{appId}/global_transfers/{document=**} {
+      allow read, write: if request.auth != null;
     }
 
     // --- Shared Notes (public encrypted blobs) ---

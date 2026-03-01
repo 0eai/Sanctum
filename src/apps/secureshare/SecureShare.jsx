@@ -4,16 +4,16 @@ import {
     getChatId, getMyPrivateKey, getRecipientPublicKey,
     listenToGroups, getGroupKey, sendGroupMessage, listenToGroupMessages,
     importArtifact, createGroup, deleteExpiredMessages,
-    listenToChatUnreadCount, markChatMessagesAsRead
+    listenToChatUnreadCount, markChatMessagesAsRead, deleteMessage
 } from '../../services/secureshare';
 import { listenToContacts as listenToMyContacts } from '../../services/contacts';
 import { appId } from '../../lib/firebase';
-import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Paperclip } from 'lucide-react';
+import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Reply } from 'lucide-react';
 import MessageBubble from './components/MessageBubble';
 import CreateGroupModal from './components/CreateGroupModal';
 import GroupInfoPanel from './components/GroupInfoPanel';
 import ShareMenu from './components/ShareMenu';
-import { uploadEncryptedFile } from '../../services/driveStorage';
+import { uploadShareableFile, deleteDriveFile } from '../../services/driveStorage';
 import { useDriveGuard } from '../../hooks/useDriveGuard';
 import DriveGuardDialog from '../../components/ui/DriveGuardDialog';
 
@@ -34,6 +34,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [sidebarTab, setSidebarTab] = useState('contacts');
     const [savedArtifactIds, setSavedArtifactIds] = useState(new Set());
+    const [replyingTo, setReplyingTo] = useState(null);
     const messagesEndRef = useRef(null);
     const unreadDividerRef = useRef(null);
     const inputRef = useRef(null);
@@ -203,12 +204,19 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
     // --- Send handler ---
     const handleSend = async (e, artifactToSend = null) => {
         e?.preventDefault?.();
-        const text = inputText.trim();
+        let text = inputText.trim();
         if (!text && !artifactToSend) return;
         if (!selectedChat) return;
 
+        // Prepend reply context
+        if (replyingTo) {
+            const replyPreview = (replyingTo.text || replyingTo.artifact?.sharedTitle || 'Attachment').substring(0, 50);
+            text = `> ${replyPreview}\n${text}`;
+        }
+
         const expireMinutes = isSelfDestruct ? 1440 : null; // 24 hours
         setInputText("");
+        setReplyingTo(null);
         if (inputRef.current) {
             inputRef.current.style.height = 'auto';
         }
@@ -548,6 +556,24 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                                 cryptoKey={cryptoKey}
                                                 onImportArtifact={alreadySaved ? null : handleImportArtifact}
                                                 senderName={selectedChat.isGroup ? contacts.find(c => c.id === msg.senderId)?.displayName || (msg.senderId === user.uid ? 'You' : 'Unknown') : null}
+                                                onReply={(msg) => {
+                                                    setReplyingTo(msg);
+                                                    inputRef.current?.focus();
+                                                }}
+                                                onDelete={async (msg) => {
+                                                    if (!confirm('Delete this message?')) return;
+                                                    try {
+                                                        // Delete Drive file if this is a drive_file artifact
+                                                        if (msg.artifact?.appType === 'drive_file' && msg.artifact?.data) {
+                                                            await deleteDriveFile(msg.artifact.data, cryptoKey);
+                                                        }
+                                                        const chatOrGroupId = selectedChat.isGroup ? selectedChat.id : getChatId(user.uid, selectedChat.id);
+                                                        await deleteMessage(chatOrGroupId, msg.id, selectedChat.isGroup);
+                                                    } catch (e) {
+                                                        console.error('Failed to delete message', e);
+                                                        alert('Failed to delete message.');
+                                                    }
+                                                }}
                                             />
                                         );
                                     }
@@ -558,61 +584,32 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                         </div>
 
                         {/* Input Area */}
-                        <div className="p-3 bg-white border-t border-gray-200 shrink-0">
-                            {isSelfDestruct && (
-                                <div className="flex items-center gap-1.5 text-xs text-orange-500 mb-2 pl-1">
-                                    <Flame size={12} className="animate-pulse" />
-                                    Self-destruct enabled — message will vanish in 24 hours
+                        <div className="p-3 bg-white border-t border-gray-200 shrink-0" style={{ paddingBottom: 'max(32px, env(safe-area-inset-bottom))' }}>
+                            {replyingTo && (
+                                <div className="flex items-center gap-2 mb-2 px-1 max-w-2xl mx-auto">
+                                    <div className="flex-1 flex items-center gap-2 bg-blue-50 border-l-3 border-blue-500 rounded-lg px-3 py-1.5 min-w-0">
+                                        <Reply size={14} className="text-blue-500 flex-shrink-0" />
+                                        <p className="text-xs text-gray-600 truncate">
+                                            {replyingTo.text || replyingTo.artifact?.sharedTitle || 'Attachment'}
+                                        </p>
+                                    </div>
+                                    <button onClick={() => setReplyingTo(null)} className="p-1 text-gray-400 hover:text-gray-600">
+                                        <X size={14} />
+                                    </button>
                                 </div>
                             )}
-                            <form onSubmit={handleSend} className="flex items-end gap-2 max-w-2xl mx-auto">
-                                {/* File Share / Attachment button */}
-                                <label
-                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors flex-shrink-0 cursor-pointer"
-                                    title="Attach File"
-                                >
-                                    <Paperclip size={20} />
-                                    <input type="file" className="hidden" onChange={async (e) => {
-                                        const file = e.target.files[0];
-                                        if (!file) return;
-
-                                        if (!requireDrive()) {
-                                            e.target.value = null;
-                                            return;
-                                        }
-
-                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                        if (!accessToken) {
-                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
-                                            return;
-                                        }
-
-                                        try {
-                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'secureshare');
-                                            const artifact = {
-                                                appType: 'drive_file',
-                                                data: driveFileId,
-                                                sharedTitle: file.name,
-                                                sharedPreview: `${(file.size / 1024).toFixed(0)} KB`,
-                                                fileType: file.type
-                                            };
-                                            // Make the background send call
-                                            await handleSend(null, artifact);
-                                        } catch (e) {
-                                            console.error("SecureShare Upload to Drive failed", e);
-                                            alert(e.message);
-                                        }
-
-                                        // Reset input
-                                        e.target.value = null;
-                                    }} />
-                                </label>
-
+                            {isSelfDestruct && (
+                                <div className="flex items-center gap-1.5 text-xs text-orange-500 mb-1.5 pl-1">
+                                    <Flame size={12} className="animate-pulse" />
+                                    Auto-deletes in 24h
+                                </div>
+                            )}
+                            <form onSubmit={handleSend} className="flex items-end gap-1.5 max-w-2xl mx-auto">
                                 {/* App Share "+" button */}
                                 <button
                                     type="button"
                                     onClick={() => setShowShareMenu(true)}
-                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 transition-colors flex-shrink-0"
+                                    className="p-3 rounded-2xl bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors flex-shrink-0"
                                     title="Share from apps"
                                 >
                                     <Plus size={20} />
@@ -625,7 +622,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                         ? 'bg-orange-100 text-orange-600'
                                         : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
                                         }`}
-                                    title="Toggle self-destruct (5 min)"
+                                    title="Toggle self-destruct (24h)"
                                 >
                                     <Flame size={20} />
                                 </button>
@@ -686,6 +683,33 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                     cryptoKey={cryptoKey}
                     onClose={() => setShowShareMenu(false)}
                     onShare={handleShareArtifact}
+                    onFileUpload={async (file) => {
+                        if (!requireDrive()) return;
+                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
+                        if (!accessToken) {
+                            alert("Google Drive access token is missing. Please sign out and sign back in.");
+                            return;
+                        }
+                        try {
+                            const chatId = selectedChat.isGroup
+                                ? selectedChat.id
+                                : getChatId(user.uid, selectedChat.id);
+
+                            const { fileId, fileKey } = await uploadShareableFile(file, cryptoKey, accessToken, chatId);
+                            const artifact = {
+                                appType: 'drive_file',
+                                data: fileId,
+                                fileKey: fileKey,
+                                sharedTitle: file.name,
+                                sharedPreview: `${(file.size / 1024).toFixed(0)} KB`,
+                                fileType: file.type
+                            };
+                            await handleSend(null, artifact);
+                        } catch (e) {
+                            console.error("SecureShare Upload to Drive failed", e);
+                            alert(e.message);
+                        }
+                    }}
                 />
             )}
 
