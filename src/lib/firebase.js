@@ -7,20 +7,27 @@ import { getFunctions } from 'firebase/functions';
 import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "AIzaSyAreNhyPHuhi0jUWNMAG1zvPxxzgu-aumw",
-  authDomain: "aks-hub.firebaseapp.com",
-  projectId: "aks-hub",
-  storageBucket: "aks-hub.firebasestorage.app",
-  messagingSenderId: "668905909424",
-  appId: "1:668905909424:web:d7f0b3440d9dd343d0df75"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
+
+// Safety check for open source / build time errors
+if (!firebaseConfig.apiKey && typeof __firebase_config === 'undefined') {
+  const msg = "Firebase API Key is missing. If you're building for production, ensure your .env file is populated. See .env.example.";
+  console.error(msg);
+  if (typeof window !== 'undefined') alert(msg);
+}
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
-export const rtdb = getDatabase(app, "https://aks-hub-default-rtdb.asia-southeast1.firebasedatabase.app");
+export const rtdb = getDatabase(app, import.meta.env.VITE_FIREBASE_DATABASE_URL);
 
 // Initialize Firebase App Check if a ReCAPTCHA site key is provided
 if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
