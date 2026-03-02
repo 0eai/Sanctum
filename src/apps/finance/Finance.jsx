@@ -11,7 +11,7 @@ import Fab from '../../components/ui/Fab';
 import { 
   listenToFinanceItems, fetchFinanceConfig, saveFinanceItem, 
   deleteFinanceItem, calculateMonthlySummary, exportFinanceData, importFinanceData 
-} from '../../services/finance';
+} from './services/finance';
 
 import StatsView from './components/StatsView';
 import FinanceFormModal from './components/FinanceFormModal';

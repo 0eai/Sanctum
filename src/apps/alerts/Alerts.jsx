@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 
 import { LoadingSpinner, Button } from '../../components/ui';
-import { getRelativeTime } from '../../lib/dateUtils';
+import { getRelativeTime, categorizeItem } from '../../lib/dateUtils';
 import { encryptData } from '../../lib/crypto';
 import { updateDoc, setDoc, doc } from 'firebase/firestore';
 import { db, appId } from '../../lib/firebase';
@@ -13,11 +13,11 @@ import { db, appId } from '../../lib/firebase';
 import {
     listenToAlertsData, listenToCalendarEvents,
     initializeGoogleClient, createTokenClient,
-    fetchAndSaveGcalEvents, checkStoredToken, disconnectGoogleCalendar
-} from '../../services/alerts';
+    fetchAndSaveGcalEvents, checkStoredToken
+} from './services/alerts';
+import { fetchAppPreferences } from '../settings/services/settings';
 
 import AlertCard from './components/AlertCard';
-import AlertSettingsModal from './components/AlertSettingsModal';
 
 const TABS = [
     { id: 'today', label: 'Today' },
@@ -27,52 +27,33 @@ const TABS = [
     { id: 'upcoming', label: 'Upcoming' },
 ];
 
-const categorizeItem = (date) => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const itemDate = new Date(date);
-    itemDate.setHours(0, 0, 0, 0);
-    const diffTime = itemDate - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (date < new Date()) return 'today';
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'tomorrow';
-
-    const dayOfWeek = now.getDay();
-    const daysUntilEndOfWeek = 6 - dayOfWeek;
-    if (diffDays <= daysUntilEndOfWeek) return 'this_week';
-
-    const daysUntilEndOfNextWeek = daysUntilEndOfWeek + 7;
-    if (diffDays <= daysUntilEndOfNextWeek) return 'next_week';
-
-    return 'upcoming';
-};
+// TABS and activeTab state ...
 
 // FIXED: Accepting route and navigate, removed onLaunch
 const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [loading, setLoading] = useState(true);
     const [autoSwitched, setAutoSwitched] = useState(false);
 
-    // --- URL-Driven State ---
-    // Extract tab from route.resource (e.g., #alerts/today), fallback to 'today'
     const activeTab = TABS.find(t => t.id === route.resource)?.id || 'today';
-
-    // Extract modal state from query param (e.g., #alerts/today?modal=settings)
-    const isSettingsOpen = route.query?.modal === 'settings';
 
     // Data
     const [items, setItems] = useState({ tasks: [], notes: [], checklists: [], counters: [], finance: [], markdown: [] });
     const [calendarEvents, setCalendarEvents] = useState([]);
 
     // Google Auth
-    const [tokenClient, setTokenClient] = useState(null);
     const [gapiInited, setGapiInited] = useState(false);
     const [gcalSignedIn, setGcalSignedIn] = useState(false);
     const [gcalError, setGcalError] = useState(null);
     const [syncing, setSyncing] = useState(false);
+    const [calendarIds, setCalendarIds] = useState([]);
 
-    const [calendarIds, setCalendarIds] = useState(() => JSON.parse(localStorage.getItem('daypulse_calendar_ids') || '[]'));
+    useEffect(() => {
+        if (user) {
+            fetchAppPreferences(user.uid).then(prefs => {
+                if (prefs?.calendarIds) setCalendarIds(prefs.calendarIds);
+            });
+        }
+    }, [user]);
 
     // Swipe
     const [touchStart, setTouchStart] = useState(null);
@@ -92,7 +73,9 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     // --- Google Calendar Init ---
     useEffect(() => {
         initializeGoogleClient(
-            (type) => { if (type === 'gapi') setGapiInited(true); else setTokenClient(createTokenClient(user.uid, cryptoKey, () => setGcalSignedIn(true))); },
+            (type) => {
+                if (type === 'gapi') setGapiInited(true);
+            },
             (err) => setGcalError(err)
         );
     }, [user, cryptoKey]);
@@ -115,30 +98,6 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     // Auto-Sync on load/change
     useEffect(() => { handleSync(); }, [gcalSignedIn, gapiInited, calendarIds]);
-
-    // --- Handlers ---
-    const handleConnect = () => { if (tokenClient) tokenClient.requestAccessToken({ prompt: 'consent' }); };
-    const handleDisconnect = async () => {
-        setGcalSignedIn(false);
-        await disconnectGoogleCalendar(user.uid);
-    };
-
-    const handleAddCalendar = (input) => {
-        let calId = input.trim();
-        if (!calId) return;
-        if (calId.includes('src=')) calId = decodeURIComponent(calId.match(/src=([^&]+)/)[1]);
-        if (!calendarIds.includes(calId)) {
-            const newIds = [...calendarIds, calId];
-            setCalendarIds(newIds);
-            localStorage.setItem('daypulse_calendar_ids', JSON.stringify(newIds));
-        }
-    };
-
-    const handleRemoveCalendar = (id) => {
-        const newIds = calendarIds.filter(c => c !== id);
-        setCalendarIds(newIds);
-        localStorage.setItem('daypulse_calendar_ids', JSON.stringify(newIds));
-    };
 
     // --- Action Handlers ---
     const handleComplete = async (item) => {
@@ -267,8 +226,6 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                         <div className="flex items-center gap-2">
                             {syncing && <RefreshCw size={16} className="text-blue-500 animate-spin" />}
                             {gcalError && <CloudOff size={16} className="text-gray-400" />}
-                            {/* FIXED: Open Settings Modal by appending the query string to the current URL */}
-                            <button onClick={() => navigate(`#alerts/${activeTab}?modal=settings`)} className="p-2 rounded-full hover:bg-gray-100 text-gray-600 transition-colors"><Settings size={20} /></button>
                         </div>
                     </div>
 
@@ -323,18 +280,6 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     )}
                 </div>
             </main>
-
-            <AlertSettingsModal
-                isOpen={isSettingsOpen}
-                onClose={() => navigate(`#alerts/${activeTab}`)} // FIXED: Strip the modal query param to close it
-                gcalSignedIn={gcalSignedIn}
-                gcalError={gcalError}
-                calendarIds={calendarIds}
-                onConnect={handleConnect}
-                onDisconnect={handleDisconnect}
-                onAddCalendar={handleAddCalendar}
-                onRemoveCalendar={handleRemoveCalendar}
-            />
         </div>
     );
 };

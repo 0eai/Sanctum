@@ -3,16 +3,14 @@ import React, { useState, useEffect } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import FileViewer from '../../../components/ui/FileViewer';
 
-import { savePaper, deletePaper, parseBibTeX, formatCitation } from '../../../services/research';
-import { uploadEncryptedFile, downloadEncryptedFile, downloadEncryptedFileBlob, uploadNormalFile, downloadNormalFile, downloadNormalFileBlob } from '../../../services/driveStorage';
+import { savePaper, deletePaper, parseBibTeX, formatCitation } from '../services/research';
+import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFileBlob as downloadBlobFirebase, uploadNormalFile as uploadNormalFirebase, downloadNormalFileBlob as downloadNormalBlobFirebase, deleteFirebaseFile } from '../../../services/firebaseStorage';
 import { analyzePaperWithGemini, DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
-import { fetchApiIntegrations } from '../../../services/settings';
-import { saveTask } from '../../../services/tasks';
-import { listenToNotes, saveNote, getOrCreateAiPromptsFolder } from '../../../services/notes';
-import { saveMarkdownDoc } from '../../../services/markdown';
+import { fetchApiIntegrations } from '../../settings/services/settings';
+import { saveTask } from '../../tasks/services/tasks';
+import { listenToNotes, saveNote, getOrCreateAiPromptsFolder } from '../../notes/services/notes';
+import { saveMarkdownDoc } from '../../markdown/services/markdown';
 import { useDebounce } from '../../../hooks/useDebounce';
-import { useDriveGuard } from '../../../hooks/useDriveGuard';
-import DriveGuardDialog from '../../../components/ui/DriveGuardDialog';
 
 import PaperEditorHeader from './PaperEditorHeader';
 import PaperMetaBar from './PaperMetaBar';
@@ -22,7 +20,6 @@ import PaperNotesPanel from './PaperNotesPanel';
 import PaperModals from './PaperModals';
 
 const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navigate }) => {
-    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     // Basic Meta
     const [internalPaperId, setInternalPaperId] = useState(paper?.id || null);
 
@@ -319,17 +316,9 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 } catch (e) { console.error("Failed to delete linked markdown", e); }
             }
 
-            // Delete Drive file if exists
+            // Delete file if exists
             if (driveFileId) {
-                try {
-                    const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                    if (accessToken) {
-                        await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': `Bearer ${accessToken}` }
-                        });
-                    }
-                } catch (e) { console.error("Failed to delete Drive file", e); }
+                await deleteFirebaseFile(driveFileId, 'research');
             }
 
             await deletePaper(user.uid, internalPaperId);
@@ -358,14 +347,9 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         const file = e.target.files?.[0];
         if (!file || file.type !== 'application/pdf') return;
 
-        if (!requireDrive()) {
+        if (file.size > 50 * 1024 * 1024) {
+            alert("File is too large. Maximum size is 50MB.");
             e.target.value = null;
-            return;
-        }
-
-        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-        if (!accessToken) {
-            alert("Google Drive access token missing. Please sign out and sign in again.");
             return;
         }
 
@@ -391,15 +375,29 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
             setPdfHash(hash);
 
             setUploadProgress('Encrypting and uploading...');
+
             let fileId;
             if (isEncrypted || isPrivate) {
-                fileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'research');
+                const res = await uploadToFirebase(file, cryptoKey, null, 'research');
+                fileId = res.id;
             } else {
-                fileId = await uploadNormalFile(file, cryptoKey, accessToken, 'research');
+                fileId = await uploadNormalFirebase(file, cryptoKey, null, 'research');
             }
 
+            // Re-fetch paper state here or pass provider through state
             setDriveFileId(fileId);
             setHasPdf(true);
+
+            // Hack to save provider to paper immediately (or auto-save will catch it)
+            setLastSavedHash(null); // Force save on next tick
+            setTimeout(() => {
+                handleSave(JSON.stringify({
+                    title: title || file.name.replace('.pdf', ''), authors, year, venue, url, bibtex, tags, isPrivate, hasPdf: true,
+                    pdfPath: tempPdfPath, pdfWrappingKey: tempWrappingKey, pdfHash: hash,
+                    driveFileId: fileId, isEncrypted, aiSummary, noteId, markdownId, provider
+                }));
+            }, 500);
+
             setUploadProgress('');
 
             if (!title) setTitle(file.name.replace('.pdf', ''));
@@ -419,24 +417,17 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         setIsDecrypting(true);
 
         try {
-            const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-            if (!accessToken) {
-                alert('Google Drive access token missing. Please sign out and sign in again.');
-                setIsDecrypting(false);
-                return;
-            }
-
             if (driveFileId) {
                 let blob;
                 if (paper?.isEncrypted || paper?.isPrivate) {
-                    blob = await downloadEncryptedFileBlob(driveFileId, cryptoKey, accessToken);
+                    blob = await downloadBlobFirebase(driveFileId, cryptoKey, null, 'research');
                 } else {
-                    blob = await downloadNormalFileBlob(driveFileId, cryptoKey, accessToken);
+                    blob = await downloadNormalBlobFirebase(driveFileId, cryptoKey, null, 'research');
                 }
                 const url = URL.createObjectURL(blob);
                 setPdfUrl(url);
             } else if (tempPdfPath) {
-                const blob = await downloadEncryptedFileBlob(tempPdfPath, cryptoKey);
+                const blob = await downloadBlobFirebase(tempPdfPath, cryptoKey, null, 'research');
                 const url = URL.createObjectURL(blob);
                 setPdfUrl(url);
             }
@@ -449,12 +440,6 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
     };
 
     const handleGenerateAi = async () => {
-        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-        if (!accessToken) {
-            alert("Google Drive access token missing. Please sign out and sign in again.");
-            return;
-        }
-
         const geminiKey = integrations?.gemini;
         if (!geminiKey) {
             alert("Please add your Gemini API Key in Settings → Integrations.");
@@ -468,12 +453,12 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
             let blobForAi;
             if (driveFileId) {
                 if (paper?.isEncrypted || paper?.isPrivate) {
-                    blobForAi = await downloadEncryptedFileBlob(driveFileId, cryptoKey, accessToken);
+                    blobForAi = await downloadBlobFirebase(driveFileId, cryptoKey, null, 'research');
                 } else {
-                    blobForAi = await downloadNormalFileBlob(driveFileId, cryptoKey, accessToken);
+                    blobForAi = await downloadNormalBlobFirebase(driveFileId, cryptoKey, null, 'research');
                 }
             } else if (tempPdfPath) {
-                blobForAi = await downloadEncryptedFileBlob(tempPdfPath, cryptoKey);
+                blobForAi = await downloadBlobFirebase(tempPdfPath, cryptoKey, null, 'research');
             }
 
             if (!blobForAi) {
@@ -630,8 +615,6 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 handleSavePrompt={handleSavePrompt}
                 isSavingPrompt={isSavingPrompt} isPromptSaved={isPromptSaved}
             />
-
-            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </div>
     );
 };

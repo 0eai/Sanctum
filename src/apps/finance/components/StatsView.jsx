@@ -1,7 +1,7 @@
 // src/apps/finance/components/StatsView.jsx
 import React, { useState, useMemo } from 'react';
 import { DollarSign, Sprout, Settings } from 'lucide-react';
-import { calculateStats } from '../../../services/finance';
+import { calculateStats } from '../services/finance';
 
 const CURRENCY_LOCALES = { KRW: 'ko-KR', INR: 'en-IN', USD: 'en-US', EUR: 'de-DE', GBP: 'en-GB', JPY: 'ja-JP' };
 const formatCurrency = (amount, code) => new Intl.NumberFormat(CURRENCY_LOCALES[code] || 'en-US', { style: 'currency', currency: code, maximumFractionDigits: 0 }).format(amount);

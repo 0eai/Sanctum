@@ -5,7 +5,7 @@ import { ChevronLeft, Plus, Bell, CheckCircle2 } from 'lucide-react';
 import { LoadingSpinner, Button, Modal } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
 
-import { listenToReminders, saveReminder, deleteReminder } from '../../services/reminders';
+import { listenToReminders, saveReminder, deleteReminder } from './services/reminders';
 import ReminderCard from './components/ReminderCard';
 import ReminderFormModal from './components/ReminderFormModal';
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, UserMinus, Users, Shield, Crown } from 'lucide-react';
-import { getGroupMembers, addGroupMember, removeGroupMember } from '../../../services/secureshare';
+import { getGroupMembers, addGroupMember, removeGroupMember } from '../services/secureshare';
 
 const GroupInfoPanel = ({ group, contacts, currentUser, groupKey, onClose }) => {
     const currentUid = currentUser?.uid;

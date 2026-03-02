@@ -8,12 +8,9 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import MarkdownViewer from '../../../components/ui/MarkdownViewer';
 import FileViewer from '../../../components/ui/FileViewer';
-import { uploadEncryptedFile, downloadEncryptedFile } from '../../../services/driveStorage';
-import { useDriveGuard } from '../../../hooks/useDriveGuard';
-import DriveGuardDialog from '../../../components/ui/DriveGuardDialog';
+import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFile as downloadFromFirebase } from '../../../services/firebaseStorage';
 
 const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus, navigate, user }) => {
-    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...item
@@ -240,30 +237,28 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                         const file = e.target.files[0];
                                         if (!file) return;
 
-                                        if (!requireDrive()) {
+                                        if (file.size > 50 * 1024 * 1024) {
+                                            alert("File is too large. Maximum size is 50MB.");
                                             e.target.value = null;
                                             return;
                                         }
 
-                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                        if (!accessToken) {
-                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
-                                            return;
-                                        }
-
                                         try {
-                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'markdown');
+                                            const res = await uploadToFirebase(file, cryptoKey, null, 'markdown');
+                                            const driveFileId = res.id;
+
                                             setData(prev => ({
                                                 ...prev,
                                                 attachments: [...prev.attachments, {
                                                     name: file.name,
                                                     type: file.type,
                                                     driveFileId,
+                                                    provider: 'firebase',
                                                     size: file.size
                                                 }]
                                             }));
                                         } catch (e) {
-                                            console.error("Upload to Drive failed", e);
+                                            console.error("Upload failed", e);
                                             alert(e.message);
                                         }
 
@@ -281,16 +276,11 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                             if (att.data) {
                                                 setViewingAttachment(att); // Legacy Base64
                                             } else if (att.driveFileId) {
-                                                const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                                if (!accessToken) {
-                                                    alert("Not signed into Google Drive.");
-                                                    return;
-                                                }
                                                 try {
-                                                    const url = await downloadEncryptedFile(att.driveFileId, cryptoKey, accessToken);
+                                                    const url = await downloadFromFirebase(att.driveFileId, cryptoKey, null, 'markdown');
                                                     setViewingAttachment({ ...att, data: url });
                                                 } catch (e) {
-                                                    alert("Failed to decrypt file from Google Drive");
+                                                    alert("Failed to decrypt file");
                                                 }
                                             }
                                         }} className="group relative flex-shrink-0 w-16 h-16 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all">
@@ -324,8 +314,6 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
             </div >
 
             <FileViewer file={viewingAttachment} onClose={() => setViewingAttachment(null)} />
-
-            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </>
     );
 };

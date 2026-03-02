@@ -20,7 +20,7 @@ import {
   listenToCounters, listenToEntries, // <-- ADDED THESE LISTENERS
   saveCounter, saveEntry, deleteCounterEntity, startTimer, stopTimer,
   exportAllCounters, importCounters, reorderCounter
-} from '../../services/counter';
+} from './services/counter';
 
 // --- Helpers ---
 const getNextDate = (currentDateStr, frequency) => {

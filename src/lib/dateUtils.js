@@ -20,14 +20,14 @@ export const getRelativeTime = (dateInput) => {
   if (diffHrs < 1) return "In < 1 hr";
   if (diffHrs < 24 && now.getDate() === date.getDate()) return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
   if (diffDays === 1) return "Tomorrow";
-  
+
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 };
 
 export const getNextDate = (currentDateStr, frequency) => {
   if (!currentDateStr) return null;
   const date = new Date(currentDateStr);
-  switch(frequency) {
+  switch (frequency) {
     case 'daily': date.setDate(date.getDate() + 1); break;
     case 'weekly': date.setDate(date.getDate() + 7); break;
     case 'monthly': date.setMonth(date.getMonth() + 1); break;
@@ -60,4 +60,26 @@ export const toDatetimeLocal = (date) => {
   const d = new Date(date);
   const offset = d.getTimezoneOffset() * 60000;
   return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+};
+
+export const categorizeItem = (date) => {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const itemDate = new Date(date);
+  itemDate.setHours(0, 0, 0, 0);
+  const diffTime = itemDate - now;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (date < new Date()) return 'today';
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'tomorrow';
+
+  const dayOfWeek = now.getDay();
+  const daysUntilEndOfWeek = 6 - dayOfWeek;
+  if (diffDays <= daysUntilEndOfWeek) return 'this_week';
+
+  const daysUntilEndOfNextWeek = daysUntilEndOfWeek + 7;
+  if (diffDays <= daysUntilEndOfNextWeek) return 'next_week';
+
+  return 'upcoming';
 };

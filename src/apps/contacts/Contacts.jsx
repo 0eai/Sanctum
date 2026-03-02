@@ -6,8 +6,9 @@ import { Modal, Button, LoadingSpinner } from '../../components/ui';
 import Fab from '../../components/ui/Fab';
 
 import {
-    listenToContacts, saveContact, deleteContact
-} from '../../services/contacts';
+    saveContact, deleteContact
+} from './services/contacts';
+import { useEncryptedCollection } from '../../hooks/useEncryptedCollection';
 
 import ContactEditor from './components/ContactEditor';
 import ContactDetail from './components/ContactDetail';
@@ -47,14 +48,14 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const selectedContact = selectedContactId ? contacts.find(c => c.id === selectedContactId) : null;
     const editingData = view === 'editor' && selectedContactId ? selectedContact : null;
 
+    const fetchedContacts = useEncryptedCollection(user?.uid, cryptoKey, 'contacts');
+
     useEffect(() => {
-        if (!user || !cryptoKey) return;
-        const unsub = listenToContacts(user.uid, cryptoKey, (data) => {
-            setContacts(data);
+        if (fetchedContacts !== null) {
+            setContacts(fetchedContacts);
             setLoading(false);
-        });
-        return () => unsub();
-    }, [user, cryptoKey]);
+        }
+    }, [fetchedContacts]);
 
     useEffect(() => {
         // Safely scroll to whichever tab is active (system or label)

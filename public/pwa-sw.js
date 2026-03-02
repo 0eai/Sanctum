@@ -1,5 +1,5 @@
 // Sanctum PWA Service Worker — App Shell Cache
-const CACHE_NAME = 'sanctum-shell-v6';
+const CACHE_NAME = 'sanctum-shell-v7';
 
 // Cache the app shell on install
 self.addEventListener('install', (event) => {
@@ -35,9 +35,6 @@ self.addEventListener('fetch', (event) => {
     // Skip non-GET requests and cross-origin requests
     if (request.method !== 'GET') return;
     if (!request.url.startsWith(self.location.origin)) return;
-
-    // Don't intercept requests that the StreamSaver sw.js handles
-    if (request.url.includes('/ping')) return;
 
     // Navigation requests (HTML pages): network-first
     if (request.mode === 'navigate') {

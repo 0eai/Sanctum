@@ -2,12 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { Network, Key, Eye, EyeOff, Save, Check, Loader2, Bot, Edit2, Cloud, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui';
-import { fetchApiIntegrations, saveApiIntegration } from '../../../services/settings';
-import { connectGoogleDrive, disconnectGoogleDrive, checkGoogleDriveConnection } from '../../../services/driveAuth';
+import { fetchApiIntegrations, saveApiIntegration } from '../services/settings';
 import { DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
 import PromptEditor from '../../../components/ui/PromptEditor';
 import { functions } from '../../../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
+import { CalendarDays, AlertTriangle, CheckCircle, Plus, Globe, X } from 'lucide-react';
+import { initializeGoogleClient, createTokenClient, checkStoredToken, disconnectGoogleCalendar } from '../../alerts/services/alerts';
+import { fetchAppPreferences, saveAppPreferences } from '../services/settings';
 
 const IntegrationsTab = ({ user, cryptoKey }) => {
     const [geminiKey, setGeminiKey] = useState('');
@@ -17,12 +19,14 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
     const [isSavingKey, setIsSavingKey] = useState(false);
     const [isKeySaved, setIsKeySaved] = useState(false);
 
-    // Google Drive States
-    const [isDriveConnected, setIsDriveConnected] = useState(false);
-    const [isConnectingDrive, setIsConnectingDrive] = useState(false);
-    const [isDisconnectingDrive, setIsDisconnectingDrive] = useState(false);
-
     const [isLoading, setIsLoading] = useState(true);
+
+    // Google Calendar States
+    const [tokenClient, setTokenClient] = useState(null);
+    const [gapiInited, setGapiInited] = useState(false);
+    const [gcalSignedIn, setGcalSignedIn] = useState(false);
+    const [gcalError, setGcalError] = useState(null);
+    const [calendarIds, setCalendarIds] = useState([]);
 
     useEffect(() => {
         const loadKeys = async () => {
@@ -32,39 +36,55 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
                 setGeminiKey(data.gemini);
             }
 
-            const driveStatus = await checkGoogleDriveConnection(user.uid);
-            setIsDriveConnected(driveStatus);
+            const prefs = await fetchAppPreferences(user.uid) || {};
+            setCalendarIds(prefs.calendarIds || []);
 
             setIsLoading(false);
         };
         loadKeys();
     }, [user, cryptoKey]);
 
-    const handleConnectDrive = async () => {
-        setIsConnectingDrive(true);
-        try {
-            const getClientIdFn = httpsCallable(functions, 'getGoogleClientId');
-            const result = await getClientIdFn();
+    // Google Calendar Init
+    useEffect(() => {
+        initializeGoogleClient(
+            (type) => {
+                if (type === 'gapi') setGapiInited(true);
+                else setTokenClient(createTokenClient(user?.uid, cryptoKey, () => setGcalSignedIn(true)));
+            },
+            (err) => setGcalError(err)
+        );
+    }, [user, cryptoKey]);
 
-            await connectGoogleDrive(user.uid, cryptoKey, result.data.clientId);
-            setIsDriveConnected(true);
-        } catch (error) {
-            console.error("Failed to connect Google Drive", error);
-            alert(error.message || "Failed to connect Google Drive.");
+    useEffect(() => {
+        if (gapiInited && user && cryptoKey) {
+            checkStoredToken(user.uid, cryptoKey, () => setGcalSignedIn(true), (err) => setGcalError(err));
         }
-        setIsConnectingDrive(false);
+    }, [gapiInited, user, cryptoKey]);
+
+    const handleConnectCalendar = () => { if (tokenClient) tokenClient.requestAccessToken({ prompt: 'consent' }); };
+
+    const handleDisconnectCalendar = async () => {
+        setGcalSignedIn(false);
+        await disconnectGoogleCalendar(user.uid);
     };
 
-    const handleDisconnectDrive = async () => {
-        if (!window.confirm("Are you sure you want to disconnect Google Drive? Your encrypted offline token will be deleted.")) return;
-        setIsDisconnectingDrive(true);
-        try {
-            await disconnectGoogleDrive(user.uid);
-            setIsDriveConnected(false);
-        } catch (error) {
-            console.error("Failed to disconnect Google Drive", error);
+    const handleAddCalendar = async (e) => {
+        e.preventDefault();
+        let calId = e.target.calUrl.value.trim();
+        if (!calId) return;
+        if (calId.includes('src=')) calId = decodeURIComponent(calId.match(/src=([^&]+)/)[1]);
+        if (!calendarIds.includes(calId)) {
+            const newIds = [...calendarIds, calId];
+            setCalendarIds(newIds);
+            await saveAppPreferences(user.uid, { calendarIds: newIds });
         }
-        setIsDisconnectingDrive(false);
+        e.target.reset();
+    };
+
+    const handleRemoveCalendar = async (id) => {
+        const newIds = calendarIds.filter(c => c !== id);
+        setCalendarIds(newIds);
+        await saveAppPreferences(user.uid, { calendarIds: newIds });
     };
 
     const handleSaveKey = async () => {
@@ -101,17 +121,18 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col divide-y divide-gray-100">
-                {/* GOOGLE DRIVE SECTION */}
+
+                {/* GOOGLE CALENDAR SECTION */}
                 <div className="p-4 sm:p-5">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg text-emerald-600">
-                                <Cloud className="w-5 h-5" />
+                            <div className="p-2 bg-gradient-to-br from-orange-100 to-red-100 rounded-lg text-orange-600">
+                                <CalendarDays className="w-5 h-5" />
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
-                                    <h4 className="font-medium text-gray-900">Google Drive Storage</h4>
-                                    {isDriveConnected ? (
+                                    <h4 className="font-medium text-gray-900">Google Calendar</h4>
+                                    {gcalSignedIn ? (
                                         <span className="flex items-center gap-1 text-[10px] font-medium bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full border border-emerald-100">
                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                                             Connected
@@ -122,39 +143,57 @@ const IntegrationsTab = ({ user, cryptoKey }) => {
                                         </span>
                                     )}
                                 </div>
-                                <p className="text-xs text-gray-500 mt-0.5">Offline access token for attaching files.</p>
+                                <p className="text-xs text-gray-500 mt-0.5">Integrates with DayPulse alerts app.</p>
                             </div>
                         </div>
                     </div>
 
                     <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            Sanctum requests an offline refresh token so you don't have to keep logging into Google Drive.
-                            <br /><br />
-                            <strong>Your connection token is end-to-end encrypted. Sanctum cannot access your Drive without your Master Key.</strong>
-                        </p>
+                        {gcalError && (
+                            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 p-3 rounded-lg border border-red-100">
+                                <AlertTriangle size={14} /> {gcalError}
+                            </div>
+                        )}
 
-                        <div className="flex items-center gap-3 pt-2">
-                            {!isDriveConnected ? (
-                                <Button
-                                    onClick={handleConnectDrive}
-                                    disabled={isConnectingDrive}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white border-0"
-                                >
-                                    {isConnectingDrive ? <Loader2 size={16} className="animate-spin mr-2" /> : <Cloud size={16} className="mr-2" />}
-                                    Connect Google Drive
+                        {!gcalSignedIn ? (
+                            <div className="flex flex-col gap-2 pt-2">
+                                <Button onClick={handleConnectCalendar} className="bg-orange-600 hover:bg-orange-700 text-white w-max border-0">
+                                    Connect Google Calendar
                                 </Button>
-                            ) : (
-                                <Button
-                                    onClick={handleDisconnectDrive}
-                                    disabled={isDisconnectingDrive}
-                                    variant="danger"
-                                >
-                                    {isDisconnectingDrive ? <Loader2 size={16} className="animate-spin mr-2" /> : <Trash2 size={16} className="mr-2" />}
-                                    Disconnect
-                                </Button>
-                            )}
-                        </div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200">
+                                    <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                                        <CheckCircle size={16} className="text-emerald-500" /> Connection Active
+                                    </span>
+                                    <Button onClick={handleDisconnectCalendar} variant="danger" className="text-xs py-1.5">Disconnect</Button>
+                                </div>
+
+                                <div className="border-t border-gray-200 pt-4 mt-2">
+                                    <p className="text-sm font-medium text-gray-800 mb-3">Sync Additional Calendars</p>
+                                    <form onSubmit={handleAddCalendar} className="flex gap-2 mb-3">
+                                        <input
+                                            name="calUrl"
+                                            placeholder="Calendar ID or Embed URL"
+                                            className="block w-full px-3 py-2 sm:text-sm border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white outline-none border"
+                                        />
+                                        <Button type="submit" className="bg-orange-600 w-10 p-0 flex items-center justify-center flex-shrink-0"><Plus size={16} /></Button>
+                                    </form>
+                                    <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+                                        {calendarIds.map(id => (
+                                            <div key={id} className="flex items-center justify-between bg-gray-50 p-2.5 rounded-lg border border-gray-200 text-xs text-gray-700">
+                                                <span className="truncate flex-1 pr-2 flex items-center"><Globe size={14} className="mr-2 text-gray-400" /> {id}</span>
+                                                <button onClick={() => handleRemoveCalendar(id)} className="text-gray-400 hover:text-red-500 p-1"><X size={14} /></button>
+                                            </div>
+                                        ))}
+                                        {calendarIds.length === 0 && (
+                                            <p className="text-xs text-gray-500 italic">No additional public calendars added.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 

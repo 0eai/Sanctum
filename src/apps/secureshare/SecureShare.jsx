@@ -5,20 +5,18 @@ import {
     listenToGroups, getGroupKey, sendGroupMessage, listenToGroupMessages,
     importArtifact, createGroup, deleteExpiredMessages,
     listenToChatUnreadCount, markChatMessagesAsRead, deleteMessage
-} from '../../services/secureshare';
-import { listenToContacts as listenToMyContacts } from '../../services/contacts';
+} from './services/secureshare';
+import { listenToContacts as listenToMyContacts } from '../contacts/services/contacts';
 import { appId } from '../../lib/firebase';
-import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Reply } from 'lucide-react';
+import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Reply, Phone, Video, PhoneOff, VideoOff, PhoneCall } from 'lucide-react';
 import MessageBubble from './components/MessageBubble';
 import CreateGroupModal from './components/CreateGroupModal';
 import GroupInfoPanel from './components/GroupInfoPanel';
 import ShareMenu from './components/ShareMenu';
-import { uploadShareableFile, deleteDriveFile } from '../../services/driveStorage';
-import { useDriveGuard } from '../../hooks/useDriveGuard';
-import DriveGuardDialog from '../../components/ui/DriveGuardDialog';
+import { uploadShareableFile as uploadToFirebaseShareable, deleteFirebaseFile } from '../../services/firebaseStorage';
+import { useWebRTC } from './hooks/useWebRTC';
 
 const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
-    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [isInitializing, setIsInitializing] = useState(true);
     const [groups, setGroups] = useState([]);
     const [messages, setMessages] = useState([]);
@@ -40,6 +38,34 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
     const inputRef = useRef(null);
     const initialUnreadInfo = useRef(null); // { firstUnreadId, count } — snapshot when chat opens
     const [showUnreadDivider, setShowUnreadDivider] = useState(false);
+
+    // --- WebRTC ---
+    const {
+        callState,
+        incomingCallData,
+        localStream,
+        remoteStream,
+        activeCallTarget,
+        callUser,
+        acceptCall,
+        rejectCall,
+        endCall
+    } = useWebRTC(user?.uid, cryptoKey);
+
+    const localVideoRef = useRef(null);
+    const remoteVideoRef = useRef(null);
+
+    useEffect(() => {
+        if (localVideoRef.current && localStream) {
+            localVideoRef.current.srcObject = localStream;
+        }
+    }, [localStream]);
+
+    useEffect(() => {
+        if (remoteVideoRef.current && remoteStream) {
+            remoteVideoRef.current.srcObject = remoteStream;
+        }
+    }, [remoteStream]);
 
     // --- URL-driven chat selection (defined after contacts) ---
     const chatType = route?.resource; // 'dm' or 'group'
@@ -479,6 +505,24 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                     <Info size={20} />
                                 </button>
                             )}
+                            {!selectedChat.isGroup && (
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => callUser(selectedChat.id, false)}
+                                        className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition-colors"
+                                        title="Audio Call"
+                                    >
+                                        <Phone size={18} />
+                                    </button>
+                                    <button
+                                        onClick={() => callUser(selectedChat.id, true)}
+                                        className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition-colors"
+                                        title="Video Call"
+                                    >
+                                        <Video size={18} />
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Chat Messages */}
@@ -554,6 +598,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                                 message={msg}
                                                 isMe={msg.senderId === user.uid}
                                                 cryptoKey={cryptoKey}
+                                                chatId={selectedChat.isGroup ? selectedChat.id : getChatId(user.uid, selectedChat.id)}
                                                 onImportArtifact={alreadySaved ? null : handleImportArtifact}
                                                 senderName={selectedChat.isGroup ? contacts.find(c => c.id === msg.senderId)?.displayName || (msg.senderId === user.uid ? 'You' : 'Unknown') : null}
                                                 onReply={(msg) => {
@@ -565,7 +610,8 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                                     try {
                                                         // Delete Drive file if this is a drive_file artifact
                                                         if (msg.artifact?.appType === 'drive_file' && msg.artifact?.data) {
-                                                            await deleteDriveFile(msg.artifact.data, cryptoKey);
+                                                            const chatId = selectedChat.isGroup ? selectedChat.id : getChatId(user.uid, selectedChat.id);
+                                                            await deleteFirebaseFile(msg.artifact.data, `secureshare/${chatId}`);
                                                         }
                                                         const chatOrGroupId = selectedChat.isGroup ? selectedChat.id : getChatId(user.uid, selectedChat.id);
                                                         await deleteMessage(chatOrGroupId, msg.id, selectedChat.isGroup);
@@ -684,36 +730,125 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onClose={() => setShowShareMenu(false)}
                     onShare={handleShareArtifact}
                     onFileUpload={async (file) => {
-                        if (!requireDrive()) return;
-                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                        if (!accessToken) {
-                            alert("Google Drive access token is missing. Please sign out and sign back in.");
+                        if (file.size > 50 * 1024 * 1024) {
+                            alert("File is too large. Maximum size is 50MB.");
                             return;
                         }
+
                         try {
                             const chatId = selectedChat.isGroup
                                 ? selectedChat.id
                                 : getChatId(user.uid, selectedChat.id);
 
-                            const { fileId, fileKey } = await uploadShareableFile(file, cryptoKey, accessToken, chatId);
+                            const res = await uploadToFirebaseShareable(file, cryptoKey, null, chatId);
+                            const fileId = res.id;
+                            const fileKey = res.encryptedKey;
+
                             const artifact = {
                                 appType: 'drive_file',
                                 data: fileId,
                                 fileKey: fileKey,
+                                provider: 'firebase',
                                 sharedTitle: file.name,
                                 sharedPreview: `${(file.size / 1024).toFixed(0)} KB`,
                                 fileType: file.type
                             };
                             await handleSend(null, artifact);
                         } catch (e) {
-                            console.error("SecureShare Upload to Drive failed", e);
+                            console.error("SecureShare Upload failed", e);
                             alert(e.message);
                         }
                     }}
                 />
             )}
 
-            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
+            {/* --- WEBRTC CALL OVERLAYS --- */}
+            {callState === 'INCOMING' && incomingCallData && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-sm mx-4 text-center shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 relative">
+                            <PhoneCall size={32} className="text-blue-600 animate-pulse" />
+                            <div className="absolute inset-0 rounded-full border-4 border-blue-400 animate-ping opacity-20"></div>
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-900 mb-1">Incoming Call</h2>
+                        <p className="text-sm text-gray-500 mb-8">
+                            {contacts.find(c => c.id === incomingCallData.from)?.displayName || 'Someone'} is calling you.
+                        </p>
+                        <div className="flex justify-center gap-4">
+                            <button
+                                onClick={rejectCall}
+                                className="flex-1 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors"
+                            >
+                                <PhoneOff size={18} /> Decline
+                            </button>
+                            <button
+                                onClick={() => acceptCall(true)}
+                                className="flex-1 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-green-200"
+                            >
+                                <Phone size={18} className="animate-bounce" /> Accept
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {(callState === 'CALLING' || callState === 'CONNECTED') && (
+                <div className="fixed inset-4 md:inset-10 z-[90] bg-gray-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col pointer-events-auto border border-gray-800">
+                    {/* Call Header */}
+                    <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/60 to-transparent flex justify-between items-start z-10">
+                        <div className="text-white drop-shadow-md">
+                            <h3 className="font-bold text-lg">{contacts.find(c => c.id === activeCallTarget)?.displayName || 'Contact'}</h3>
+                            <p className="text-sm text-gray-200 opacity-90 tracking-wide font-medium">
+                                {callState === 'CALLING' ? 'Calling...' : 'Connected • E2E Encrypted'}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Video Area */}
+                    <div className="flex-1 relative bg-black flex items-center justify-center">
+                        {remoteStream ? (
+                            <video
+                                ref={remoteVideoRef}
+                                autoPlay
+                                playsInline
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <div className="w-24 h-24 rounded-full bg-gray-800 flex items-center justify-center">
+                                <User size={48} className="text-gray-600" />
+                            </div>
+                        )}
+
+                        {/* Local PIP Video */}
+                        <div className="absolute bottom-24 right-4 md:bottom-20 md:right-8 w-24 h-36 md:w-32 md:h-48 bg-gray-800 rounded-xl overflow-hidden border-2 border-gray-700 shadow-xl z-20">
+                            {localStream ? (
+                                <video
+                                    ref={localVideoRef}
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    className="w-full h-full object-cover transform -scale-x-100"
+                                />
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                                    <VideoOff size={24} className="text-gray-700" />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Call Controls */}
+                    <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent flex justify-center items-center gap-6 z-10 pb-8 md:pb-6">
+                        <button
+                            onClick={endCall}
+                            className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-lg transition-transform hover:scale-105"
+                        >
+                            <PhoneOff size={24} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };

@@ -15,7 +15,7 @@ import {
   updateChecklistEntity, addChecklistItem, toggleChecklistItem,
   resetChecklist, deleteChecklistEntity, exportChecklists,
   importChecklists, reorderList, reorderItem, fetchChecklistItemsForShare
-} from '../../services/checklist';
+} from './services/checklist';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 // FIXED: Accept route and navigate from props

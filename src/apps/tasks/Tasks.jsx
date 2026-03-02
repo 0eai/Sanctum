@@ -12,7 +12,7 @@ import {
   listenToTaskFolders, listenToTasks, saveTaskFolder, saveTask,
   toggleTaskCompletion, deleteTaskEntity, reorderTasks,
   exportTasks, importTasks
-} from '../../services/tasks';
+} from './services/tasks';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 import TaskCard from './components/TaskCard';

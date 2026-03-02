@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { listenToActivityLog } from '../../../services/activityLog';
-import { exportRecoveryKey } from '../../../services/settings';
+import { exportRecoveryKey } from '../services/settings';
 import { Button } from '../../../components/ui/Button';
 
 const AUTO_LOCK_OPTIONS = [

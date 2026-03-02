@@ -4,7 +4,7 @@ import { signOut } from 'firebase/auth';
 import { LogOut, Trash2, User, ChevronDown } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { Button, Input } from '../../../components/ui';
-import { rotateUserPasskey, deleteUserAccount } from '../../../services/settings';
+import { rotateUserPasskey, deleteUserAccount } from '../services/settings';
 
 const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false, variant = 'default' }) => {
   const [open, setOpen] = useState(defaultOpen);

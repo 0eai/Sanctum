@@ -1,8 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { getFunctions } from 'firebase/functions';
+import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyAreNhyPHuhi0jUWNMAG1zvPxxzgu-aumw",
@@ -16,7 +18,9 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 export const functions = getFunctions(app);
+export const rtdb = getDatabase(app, "https://aks-hub-default-rtdb.asia-southeast1.firebasedatabase.app");
 
 // Initialize Firebase App Check if a ReCAPTCHA site key is provided
 if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {

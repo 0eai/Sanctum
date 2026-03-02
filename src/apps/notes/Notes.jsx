@@ -11,7 +11,7 @@ import MultiFab from '../../components/ui/MultiFab';
 import {
   listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem,
   togglePin, rescheduleNote, shareNote, stopSharingNote
-} from '../../services/notes';
+} from './services/notes';
 
 import NoteCard from './components/NoteCard';
 import NoteEditor from './components/NoteEditor';

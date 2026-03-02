@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import {
   GoogleAuthProvider, signInWithPopup, signInWithCustomToken, onAuthStateChanged
 } from 'firebase/auth';
@@ -7,7 +7,7 @@ import { Grid, LogIn } from 'lucide-react';
 
 import { auth } from './lib/firebase';
 import { Button, LoadingSpinner } from './components/ui';
-import { fetchAppPreferences } from './services/settings';
+import { fetchAppPreferences } from './apps/settings/services/settings';
 import { syncUserProfile } from './services/profile';
 import { logActivity } from './services/activityLog';
 import { registerDevice, updateDeviceActivity } from './services/deviceTracker';
@@ -18,26 +18,24 @@ import { useHashRoute } from './hooks/useHashRoute';
 import LockScreen from './components/system/LockScreen';
 import Launcher from './components/system/Launcher';
 
-// App Modules
-import ChecklistApp from './apps/checklist/Checklist';
-import CounterApp from './apps/counter/Counter';
-import BookmarksApp from './apps/bookmarks/Bookmarks';
-import NotesApp from './apps/notes/Notes';
-import TasksApp from './apps/tasks/Tasks';
-import PasswordsApp from './apps/passwords/Passwords';
-import AlertsApp from './apps/alerts/Alerts';
-import BankingApp from './apps/banking/Banking';
-import FinanceApp from './apps/finance/Finance';
-import SettingsApp from './apps/settings/Settings';
-import SharedNote from './apps/SharedNote';
-import MarkdownApp from './apps/markdown/Markdown';
-import RemindersApp from './apps/reminders/Reminders';
-import ContactsApp from './apps/contacts/Contacts';
-import TransferApp from './apps/transfer/Transfer';
-import AuthenticatorApp from './apps/authenticator/Authenticator';
-import SecureShareApp from './apps/secureshare/SecureShare';
-import ResearchApp from './apps/research/ResearchApp';
-import FileVaultApp from './apps/filevault/FileVault';
+// App Modules - Lazy Loaded
+const ChecklistApp = React.lazy(() => import('./apps/checklist/Checklist'));
+const CounterApp = React.lazy(() => import('./apps/counter/Counter'));
+const BookmarksApp = React.lazy(() => import('./apps/bookmarks/Bookmarks'));
+const NotesApp = React.lazy(() => import('./apps/notes/Notes'));
+const TasksApp = React.lazy(() => import('./apps/tasks/Tasks'));
+const PasswordsApp = React.lazy(() => import('./apps/passwords/Passwords'));
+const AlertsApp = React.lazy(() => import('./apps/alerts/Alerts'));
+const BankingApp = React.lazy(() => import('./apps/banking/Banking'));
+const FinanceApp = React.lazy(() => import('./apps/finance/Finance'));
+const SettingsApp = React.lazy(() => import('./apps/settings/Settings'));
+const SharedNote = React.lazy(() => import('./apps/SharedNote'));
+const MarkdownApp = React.lazy(() => import('./apps/markdown/Markdown'));
+const RemindersApp = React.lazy(() => import('./apps/reminders/Reminders'));
+const ContactsApp = React.lazy(() => import('./apps/contacts/Contacts'));
+const AuthenticatorApp = React.lazy(() => import('./apps/authenticator/Authenticator'));
+const SecureShareApp = React.lazy(() => import('./apps/secureshare/SecureShare'));
+const ResearchApp = React.lazy(() => import('./apps/research/ResearchApp'));
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -149,12 +147,7 @@ export default function App() {
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/drive');
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential?.accessToken) {
-        sessionStorage.setItem('googleDriveAccessToken', credential.accessToken);
-      }
+      await signInWithPopup(auth, provider);
     }
     catch (e) { console.error(e); alert("Login failed"); }
   };
@@ -185,25 +178,30 @@ export default function App() {
   // Pass route and navigate down to apps so they can handle sub-routing
   const props = { user, cryptoKey, onExit: exitApp, route, navigate };
 
+  let AppRenderer;
   switch (route.appId) {
-    case 'alerts': return <AlertsApp {...props} />;
-    case 'banking': return <BankingApp {...props} />;
-    case 'finance': return <FinanceApp {...props} />;
-    case 'checklist': return <ChecklistApp {...props} />;
-    case 'tasks': return <TasksApp {...props} />;
-    case 'reminders': return <RemindersApp {...props} />;
-    case 'passwords': return <PasswordsApp {...props} />;
-    case 'counter': return <CounterApp {...props} />;
-    case 'bookmarks': return <BookmarksApp {...props} />;
-    case 'transfer': return <TransferApp {...props} />;
-    case 'notes': return <NotesApp {...props} />;
-    case 'markdown': return <MarkdownApp {...props} />;
-    case 'contacts': return <ContactsApp {...props} />;
-    case 'authenticator': return <AuthenticatorApp {...props} />;
-    case 'secureshare': return <SecureShareApp {...props} />;
-    case 'research': return <ResearchApp {...props} onOpenApp={(appId) => navigate(`#${appId}`)} />;
-    case 'filevault': return <FileVaultApp {...props} />;
-    case 'settings': return <SettingsApp {...props} />;
-    default: return <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />;
+    case 'alerts': AppRenderer = <AlertsApp {...props} />; break;
+    case 'banking': AppRenderer = <BankingApp {...props} />; break;
+    case 'finance': AppRenderer = <FinanceApp {...props} />; break;
+    case 'checklist': AppRenderer = <ChecklistApp {...props} />; break;
+    case 'tasks': AppRenderer = <TasksApp {...props} />; break;
+    case 'reminders': AppRenderer = <RemindersApp {...props} />; break;
+    case 'passwords': AppRenderer = <PasswordsApp {...props} />; break;
+    case 'counter': AppRenderer = <CounterApp {...props} />; break;
+    case 'bookmarks': AppRenderer = <BookmarksApp {...props} />; break;
+    case 'notes': AppRenderer = <NotesApp {...props} />; break;
+    case 'markdown': AppRenderer = <MarkdownApp {...props} />; break;
+    case 'contacts': AppRenderer = <ContactsApp {...props} />; break;
+    case 'authenticator': AppRenderer = <AuthenticatorApp {...props} />; break;
+    case 'secureshare': AppRenderer = <SecureShareApp {...props} />; break;
+    case 'research': AppRenderer = <ResearchApp {...props} onOpenApp={(appId) => navigate(`#${appId}`)} />; break;
+    case 'settings': AppRenderer = <SettingsApp {...props} />; break;
+    default: AppRenderer = <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />; break;
   }
+
+  return (
+    <Suspense fallback={<div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>}>
+      {AppRenderer}
+    </Suspense>
+  );
 }

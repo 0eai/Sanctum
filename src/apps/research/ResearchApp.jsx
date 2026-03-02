@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, Plus, FolderPlus, Grid, List, Search, BookOpen, X, ChevronRight, Hash } from 'lucide-react';
 import { Button, Modal, Input } from '../../components/ui';
 import MultiFab from '../../components/ui/MultiFab';
-import { listenToPapers, createFolder, updateFolder, deletePaper } from '../../services/research';
+import { listenToPapers, createFolder, updateFolder, deletePaper } from './services/research';
 import PaperEditor from './components/PaperEditor';
 import PaperCard from './components/PaperCard';
 
@@ -181,7 +181,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             // But since savePaper merges, passing the unencrypted payload works if we re-encrypt.
             // Actually, we need to pass the full unencrypted payload to `savePaper` to avoid erasing fields.
             const fullPayload = { ...moveModal.item, parentId: newParentId };
-            const { savePaper } = await import('../../services/research');
+            const { savePaper } = await import('./services/research');
             await savePaper(user.uid, cryptoKey, fullPayload, newParentId);
         }
     };

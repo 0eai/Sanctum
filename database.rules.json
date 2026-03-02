@@ -1,0 +1,24 @@
+{
+    "rules": {
+        "artifacts": {
+            "$appId": {
+                "presence": {
+                    "$uid": {
+                        ".read": "auth != null",
+                        ".write": "auth != null && auth.uid == $uid"
+                    }
+                },
+                "signals": {
+                    "$uid": {
+                        ".read": "auth != null && auth.uid == $uid",
+                        ".write": "auth != null && auth.uid == $uid",
+                        "$signalId": {
+                            ".write": "auth != null",
+                            ".validate": "newData.hasChildren(['from', 'type', 'encryptedData', 'timestamp'])"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

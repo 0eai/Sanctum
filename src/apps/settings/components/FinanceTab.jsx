@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Globe, List, Save, Check, ChevronDown } from 'lucide-react';
 import { Button } from '../../../components/ui';
-import { fetchFinanceSettings, saveFinanceSettings } from '../../../services/settings';
+import { fetchFinanceSettings, saveFinanceSettings } from '../services/settings';
 import { DEFAULT_CURRENCIES, DEFAULT_CATEGORIES } from '../constants';
 
 const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false }) => {

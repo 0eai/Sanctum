@@ -1,10 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Download, Upload, Trash2, AlertTriangle, Database, ChevronDown, FileText } from 'lucide-react';
 import { Button } from '../../../components/ui';
-import { exportUserData, importUserData, wipeAllUserData, wipeAppData } from '../../../services/settings';
-import { exportContactsCSV, importContactsCSV, importContacts, exportContactsVCF, importContactsVCF } from '../../../services/contacts';
-import { exportPasswordsCSV, importPasswordsCSV } from '../../../services/passwords';
-import { exportBookmarksHtml, importBookmarksFromHtml } from '../../../services/bookmarks';
+import { exportUserData, importUserData, wipeAllUserData, wipeAppData } from '../services/settings';
+import { exportContactsCSV, importContactsCSV, importContacts, exportContactsVCF, importContactsVCF } from '../../contacts/services/contacts';
+import { exportPasswordsCSV, importPasswordsCSV } from '../../passwords/services/passwords';
+import { exportBookmarksHtml, importBookmarksFromHtml } from '../../bookmarks/services/bookmarks';
 
 // Per-app config: collection name, label, supported export/import formats
 const APP_DATA_CONFIG = [
@@ -58,7 +58,6 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
     const appFileInputRef = useRef(null);
     const [selectedApp, setSelectedApp] = useState(APP_DATA_CONFIG[0].id);
     const [appProcessing, setAppProcessing] = useState(false);
-
     // --- Full Backup ---
     const handleExport = async (singleApp = null) => {
         setLoading(true);
@@ -246,6 +245,8 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                     <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
                 </div>
             </div>
+
+
 
             {/* Per-App Import/Export */}
             <CollapsibleCard title="App Import / Export" icon={FileText}>

@@ -12,7 +12,7 @@ import { useClipboard } from '../../hooks/useClipboard';
 import { getDomain, parseNetscapeHtml } from '../../lib/bookmarkUtils';
 import { 
   listenToBookmarks, saveBookmarkItem, deleteBookmarkItem, importBookmarksFromHtml 
-} from '../../services/bookmarks';
+} from './services/bookmarks';
 
 import BookmarkCard from './components/BookmarkCard';
 import AddBookmarkModal from './components/AddBookmarkModal';

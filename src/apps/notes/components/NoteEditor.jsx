@@ -7,13 +7,10 @@ import {
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import FileViewer from '../../../components/ui/FileViewer';
-import { uploadEncryptedFile, downloadEncryptedFile } from '../../../services/driveStorage';
-import { useDriveGuard } from '../../../hooks/useDriveGuard';
-import DriveGuardDialog from '../../../components/ui/DriveGuardDialog';
+import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFile as downloadFromFirebase } from '../../../services/firebaseStorage';
 import TextareaAutosize from 'react-textarea-autosize';
 
 const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate }) => {
-    const { isDriveConnected, showDriveDialog, requireDrive, dismissDialog } = useDriveGuard(user?.uid);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...note
@@ -250,30 +247,28 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                         const file = e.target.files[0];
                                         if (!file) return;
 
-                                        if (!requireDrive()) {
+                                        if (file.size > 50 * 1024 * 1024) {
+                                            alert("File is too large. Maximum size is 50MB.");
                                             e.target.value = null;
                                             return;
                                         }
 
-                                        const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                        if (!accessToken) {
-                                            alert("Google Drive access token is missing. Please sign out and sign back in.");
-                                            return;
-                                        }
-
                                         try {
-                                            const driveFileId = await uploadEncryptedFile(file, cryptoKey, accessToken, 'notes');
+                                            const res = await uploadToFirebase(file, cryptoKey, null, 'notes');
+                                            const driveFileId = res.id;
+
                                             setData(prev => ({
                                                 ...prev,
                                                 attachments: [...prev.attachments, {
                                                     name: file.name,
                                                     type: file.type,
                                                     driveFileId,
+                                                    provider: 'firebase',
                                                     size: file.size
                                                 }]
                                             }));
                                         } catch (e) {
-                                            console.error("Upload to Drive failed", e);
+                                            console.error("Upload failed", e);
                                             alert(e.message);
                                         }
 
@@ -293,16 +288,11 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                                 if (att.data) {
                                                     setViewingAttachment(att); // Legacy Base64
                                                 } else if (att.driveFileId) {
-                                                    const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                                    if (!accessToken) {
-                                                        alert("Not signed into Google Drive.");
-                                                        return;
-                                                    }
                                                     try {
-                                                        const url = await downloadEncryptedFile(att.driveFileId, cryptoKey, accessToken);
+                                                        const url = await downloadFromFirebase(att.driveFileId, cryptoKey, null, 'notes');
                                                         setViewingAttachment({ ...att, data: url });
                                                     } catch (e) {
-                                                        alert("Failed to decrypt file from Google Drive");
+                                                        alert("Failed to decrypt file");
                                                     }
                                                 }
                                             }}
@@ -343,8 +333,6 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
 
             {/* Full Screen File Viewer Overlay */}
             <FileViewer file={viewingAttachment} onClose={() => setViewingAttachment(null)} />
-
-            {showDriveDialog && <DriveGuardDialog onDismiss={dismissDialog} navigate={navigate} />}
         </>
     );
 };

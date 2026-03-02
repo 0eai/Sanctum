@@ -5,7 +5,7 @@ import Fab from '../../components/ui/Fab';
 
 import {
     listenToAuthenticators, saveAuthenticator, deleteAuthenticator
-} from '../../services/authenticator';
+} from './services/authenticator';
 
 import AuthCard from './components/AuthCard';
 import AuthEditor from './components/AuthEditor';

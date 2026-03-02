@@ -12,7 +12,7 @@ import { escapeCSV } from '../../lib/passwordUtils';
 import { 
   listenToPasswords, savePasswordItem, deletePasswordItem, createNewPasswordEntry,
   createPasswordFolder, updatePasswordFolder
-} from '../../services/passwords';
+} from './services/passwords';
 
 import PasswordCard from './components/PasswordCard';
 import ServiceGroup from './components/ServiceGroup';

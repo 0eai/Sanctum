@@ -42,9 +42,9 @@ const VIEWER_MAP = {
     contacts: ContactViewer,
 };
 
-import { downloadEncryptedFile, downloadEncryptedFileBlob, downloadShareableFileBlob } from '../../../services/driveStorage';
+import { downloadEncryptedFileBlob as downloadEncryptedFileBlobFirebase, downloadShareableFileBlob as downloadShareableFileBlobFirebase } from '../../../services/firebaseStorage';
 
-const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey, onReply, onDelete }) => {
+const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey, onReply, onDelete, chatId }) => {
     const [displayedText, setDisplayedText] = useState("Decrypting...");
     const [viewerOpen, setViewerOpen] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -171,12 +171,14 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey,
                                         let blob;
                                         if (message.artifact.fileKey) {
                                             // New per-file key approach (cross-user shareable)
-                                            blob = await downloadShareableFileBlob(message.artifact.data, message.artifact.fileKey, cryptoKey);
+                                            if (message.artifact.provider === 'firebase' || message.artifact.provider === 'drive') {
+                                                blob = await downloadShareableFileBlobFirebase(message.artifact.data, message.artifact.fileKey, cryptoKey, chatId);
+                                            }
                                         } else {
                                             // Legacy: encrypted with user's master key
-                                            const accessToken = sessionStorage.getItem('googleDriveAccessToken');
-                                            if (!accessToken) throw new Error("Google Drive access token missing.");
-                                            blob = await downloadEncryptedFileBlob(message.artifact.data, cryptoKey, accessToken);
+                                            if (message.artifact.provider === 'firebase' || message.artifact.provider === 'drive') {
+                                                blob = await downloadEncryptedFileBlobFirebase(message.artifact.data, cryptoKey, null, 'misc');
+                                            }
                                         }
                                         const fileType = message.artifact.fileType || blob.type || 'application/octet-stream';
                                         const reader = new FileReader();

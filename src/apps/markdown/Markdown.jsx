@@ -12,7 +12,7 @@ import MultiFab from '../../components/ui/MultiFab';
 import {
   listenToMarkdownDocs, saveMarkdownDoc, deleteMarkdownItem, createFolder, updateFolder,
   exportMarkdownDocs, importMarkdownDocs
-} from '../../services/markdown';
+} from './services/markdown';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 import MarkdownEditor from './components/MarkdownEditor';

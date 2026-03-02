@@ -24,14 +24,10 @@ const AVAILABLE_APPS = [
     { id: 'finance', name: 'Finance', icon: 'PieChart' },
     { id: 'research', name: 'Research', icon: 'GraduationCap' },
     { id: 'bookmarks', name: 'Bookmarks', icon: 'Bookmark' },
-    { id: 'transfer', name: 'Drop', icon: 'Share2' },
-    { id: 'streampi', name: 'StreamPi', icon: 'Cast', isExternal: true, url: 'https://aks-streampi.web.app' },
-    { id: 'drive', name: 'Cloud Drive', icon: 'Cloud', isExternal: true, url: 'https://aks-cloud-drive.web.app' },
-    { id: 'filevault', name: 'File Vault', icon: 'HardDrive' },
     { id: 'settings', name: 'Settings', icon: 'Settings' },
 ];
 
-import { fetchAppPreferences, saveAppPreferences } from '../../../services/settings';
+import { fetchAppPreferences, saveAppPreferences } from '../services/settings';
 import { Button, Input, Modal } from '../../../components/ui';
 
 // --- Icon Mapping Configuration ---
@@ -69,7 +65,6 @@ const getIconComponent = (iconName) => {
         case 'Share2': return Share2;
         case 'MessageCircle': return MessageCircle;
         case 'GraduationCap': return GraduationCap;
-        case 'HardDrive': return HardDrive;
         default: break;
     }
 
@@ -178,7 +173,7 @@ const AppsTab = ({ user, setLoading, setMessage }) => {
     const handleSave = async () => {
         setLoading(true);
         try {
-            await saveAppPreferences(user.uid, selectedIds, appList);
+            await saveAppPreferences(user.uid, { selectedApps: selectedIds, customAppList: appList });
             setMessage({ type: 'success', text: "App layout saved!" });
             setTimeout(() => window.location.reload(), 1000);
         } catch (e) {

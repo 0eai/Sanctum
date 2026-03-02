@@ -11,7 +11,7 @@ import Fab from '../../components/ui/Fab';
 import { 
   listenToBankingItems, saveBankingItem, deleteBankingItem, 
   exportBankingData, importBankingData 
-} from '../../services/banking';
+} from './services/banking';
 
 import BankCard from './components/BankCard';
 import AccountRow from './components/AccountRow';

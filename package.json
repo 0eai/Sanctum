@@ -37,7 +37,6 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "spark-md5": "^3.0.2",
-    "streamsaver": "^2.0.6",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
