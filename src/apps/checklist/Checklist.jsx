@@ -1,5 +1,5 @@
 // src/apps/checklist/Checklist.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ChevronLeft, Trash2, CheckSquare, Check, X, Plus, AlertCircle,
   Bell, Clock, RotateCcw, Edit2, RefreshCw, Settings, MoveUp, MoveDown,
@@ -17,6 +17,14 @@ import {
   importChecklists, reorderList, reorderItem, fetchChecklistItemsForShare
 } from './services/checklist';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
+
+import useCollaboration from '../../hooks/useCollaboration';
+
+import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
+import WorkspacePanel from '../../components/ui/WorkspacePanel';
+import CollaborateModal from '../../components/ui/CollaborateModal';
+import SharedDocsView from '../../components/ui/SharedDocsView';
+import { Users } from 'lucide-react';
 
 // FIXED: Accept route and navigate from props
 const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
@@ -45,6 +53,13 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [shareModal, setShareModal] = useState(null);
   const [shareTTL, setShareTTL] = useState(0);
 
+  // Collaboration (all state + effects handled by the hook)
+  const collab = useCollaboration(user, cryptoKey, 'checklist');
+  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+
+  // Combined item sets for viewing
+  const allAvailableLists = useMemo(() => [...lists, ...sharedDocs], [lists, sharedDocs]);
+
   // --- URL-Driven State ---
   const isSettingsOpen = route.query?.modal === 'settings';
   const currentBasePath = activeList ? `#checklist/list/${activeList.id}` : `#checklist`;
@@ -66,35 +81,38 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- 1. URL Route Sync ---
   useEffect(() => {
-    // Legacy Catch: Redirect old deep links to the new RESTful format
     if (route.query?.openId) {
       window.location.replace(
         `${window.location.pathname}${window.location.search}#checklist/list/${route.query.openId}`
       );
       return;
     }
-
-    // Sync active list based on URL
     if (route.resource === 'list' && route.resourceId) {
-      const foundList = lists.find(l => l.id === route.resourceId);
+      const foundList = allAvailableLists.find(l => l.id === route.resourceId);
       if (foundList) setActiveList(foundList);
     } else {
       setActiveList(null);
     }
-  }, [route, lists]);
+  }, [route, allAvailableLists]);
 
   // --- 2. Data Listeners ---
   useEffect(() => {
-    if (!user || !cryptoKey) return;
-    const unsubscribe = listenToChecklists(user.uid, cryptoKey, setLists);
+    if (!user || (!cryptoKey && !collab.workspaceKey)) return;
+    if (activeWorkspace && !collab.workspaceKey) return;
+
+    const unsubscribe = listenToChecklists(user.uid, cryptoKey, setLists, ctx);
     return () => unsubscribe();
-  }, [user, cryptoKey]);
+  }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   useEffect(() => {
-    if (!activeList || !user || !cryptoKey) return;
-    const unsubscribe = listenToItems(user.uid, activeList.id, cryptoKey, setItems);
+    if (!activeList || !user || (!cryptoKey && !collab.workspaceKey)) return;
+
+    // For shared documents viewed from Personal Vault, create a specific ctx
+    const listCtx = activeList.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
+
+    const unsubscribe = listenToItems(user.uid, activeList.id, cryptoKey, setItems, listCtx);
     return () => unsubscribe();
-  }, [activeList, user, cryptoKey]);
+  }, [activeList, user, cryptoKey, collab.workspaceKey, ctx]);
 
   // --- 3. Handlers ---
   const handleOpenList = (list) => {
@@ -128,7 +146,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       title: formTitle,
       dueDate: formDueDate ? new Date(formDueDate).toISOString() : null,
       repeat: formRepeat || 'none'
-    });
+    }, ctx);
     setIsCreateModalOpen(false);
   };
 
@@ -143,7 +161,8 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     };
 
     const isList = editingTarget.type === 'list';
-    await updateChecklistEntity(user.uid, activeList?.id || editingTarget.id, editingTarget.id, cryptoKey, payload, isList);
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
+    await updateChecklistEntity(user.uid, activeList?.id || editingTarget.id, editingTarget.id, cryptoKey, payload, isList, actionCtx);
 
     if (isList && activeList?.id === editingTarget.id) {
       setActiveList(prev => ({ ...prev, ...payload }));
@@ -155,11 +174,12 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     e.preventDefault();
     if (!newItemText.trim()) return;
 
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
     await addChecklistItem(user.uid, activeList.id, cryptoKey, {
       text: newItemText,
       dueDate: itemDueDate ? new Date(itemDueDate).toISOString() : null,
       repeat: itemRepeatFreq || 'none'
-    });
+    }, actionCtx);
 
     setNewItemText("");
     setItemDueDate("");
@@ -168,21 +188,24 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleToggleItem = async (item) => {
-    await toggleChecklistItem(user.uid, activeList.id, item, cryptoKey);
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
+    await toggleChecklistItem(user.uid, activeList.id, item, cryptoKey, actionCtx);
   };
 
   const handleReorderList = async (e, list, direction) => {
     e.stopPropagation();
-    await reorderList(user.uid, list.id, direction, lists);
+    await reorderList(user.uid, list.id, direction, lists, ctx);
   };
 
   const handleReorderItem = async (item, direction) => {
-    await reorderItem(user.uid, activeList.id, item.id, direction, items);
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
+    await reorderItem(user.uid, activeList.id, item.id, direction, items, actionCtx);
   };
 
   const handleReset = async (list) => {
     if (!window.confirm("Reset this list? This will uncheck all items and move the due date.")) return;
-    const nextDate = await resetChecklist(user.uid, list.id, items, list, cryptoKey);
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
+    const nextDate = await resetChecklist(user.uid, list.id, items, list, cryptoKey, actionCtx);
     if (activeList?.id === list.id) {
       setActiveList(prev => ({ ...prev, dueDate: nextDate, completedCount: 0 }));
     }
@@ -192,11 +215,13 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!deleteConfirmation) return;
     const { type, data } = deleteConfirmation;
 
+    const actionCtx = activeList?.isSharedDoc ? { workspaceId: activeList.workspaceId, key: activeList.sharedKey || activeList.key } : ctx;
     await deleteChecklistEntity(
       user.uid,
       activeList?.id || data.id,
       type === 'item' ? data.id : null,
-      data.isCompleted
+      data.isCompleted,
+      actionCtx
     );
 
     // FIXED: Drop back to root URL if the active list is deleted
@@ -249,24 +274,44 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     <div className="flex flex-col h-[100dvh] bg-gray-50">
       <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
         <div className="max-w-4xl mx-auto p-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 overflow-hidden">
+          <div className="flex items-center gap-2 overflow-hidden w-full">
             <button onClick={handleBack} className="p-1 hover:bg-white/20 rounded-full transition-colors flex-shrink-0">
               <ChevronLeft />
             </button>
-            <div className="flex flex-col overflow-hidden">
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold truncate">{activeList ? activeList.title : "My Checklists"}</h1>
-                {activeList && (
-                  <button onClick={() => openEditModal({ type: 'list', ...activeList })} className="opacity-50 hover:opacity-100 hover:text-white transition-opacity"><Edit2 size={14} /></button>
+            {!activeList ? (
+              <div className="flex-1 flex justify-between items-center mr-2 lg:mr-4">
+                <WorkspaceSwitcher
+                  {...collab.switcherProps}
+                  onSelect={(ws) => {
+                    collab.switchWorkspace(ws);
+                    navigate('#checklist');
+                  }}
+                />
+                {activeWorkspace && (
+                  <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors ml-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                  </button>
                 )}
               </div>
-              {activeList?.dueDate && (
-                <div className="flex items-center gap-2 text-xs text-blue-100">
-                  <span className="flex items-center gap-1"><Clock size={10} /> {formatDate(activeList.dueDate)}</span>
-                  {activeList.repeat !== 'none' && <span className="flex items-center gap-1"><RotateCcw size={10} /> {activeList.repeat}</span>}
+            ) : (
+              <div className="flex flex-col overflow-hidden">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold truncate">{activeList.title}</h1>
+                  {(!activeList.isSharedDoc || activeList.role === 'editor') && (
+                    <button onClick={() => openEditModal({ type: 'list', ...activeList })} className="opacity-50 hover:opacity-100 hover:text-white transition-opacity"><Edit2 size={14} /></button>
+                  )}
+                  {activeList.isSharedDoc && !ctx && (
+                    <button onClick={() => collab.openCollaborateModal(activeList)} className="text-white opacity-80 hover:opacity-100 p-1"><Users size={14} /></button>
+                  )}
                 </div>
-              )}
-            </div>
+                {activeList?.dueDate && (
+                  <div className="flex items-center gap-2 text-xs text-blue-100">
+                    <span className="flex items-center gap-1"><Clock size={10} /> {formatDate(activeList.dueDate)}</span>
+                    {activeList.repeat !== 'none' && <span className="flex items-center gap-1"><RotateCcw size={10} /> {activeList.repeat}</span>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex gap-1">
             {activeList && activeList.repeat !== 'none' && (
@@ -283,32 +328,49 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         <div className="max-w-3xl mx-auto p-4">
           {!activeList ? (
             <div className="grid gap-3">
-              {lists.map(list => (
-                <div key={list.id} onClick={() => handleOpenList(list)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 relative group active:scale-[0.99] transition-transform cursor-pointer">
-                  <div className="flex items-start gap-3">
-                    <div className="flex flex-col gap-1 text-gray-300 -ml-1 mr-1">
-                      <button onClick={(e) => handleReorderList(e, list, -1)} className="hover:text-blue-500 hover:bg-gray-50 rounded p-0.5"><MoveUp size={14} /></button>
-                      <button onClick={(e) => handleReorderList(e, list, 1)} className="hover:text-blue-500 hover:bg-gray-50 rounded p-0.5"><MoveDown size={14} /></button>
-                    </div>
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="bg-blue-100 p-2.5 rounded-lg text-[#4285f4]"><CheckSquare size={20} /></div>
-                      <div>
-                        <h3 className="font-bold text-gray-800">{list.title}</h3>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          <span className="text-xs text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded">{list.completedCount || 0}/{list.itemCount || 0} done</span>
-                          {list.dueDate && <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${new Date(list.dueDate) < new Date() ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}><Clock size={10} /> {formatDate(list.dueDate)}</span>}
-                          {list.repeat !== 'none' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded"><RotateCcw size={10} /></span>}
+              {!activeWorkspace && sharedDocs.length > 0 && (
+                <div className="mb-4">
+                  <SharedDocsView
+                    sharedDocs={sharedDocs}
+                    appType="checklist"
+                    onOpenDoc={(doc) => navigate(`#checklist/list/${doc.id}`)}
+                  />
+                </div>
+              )}
+
+              {lists.map(list => {
+                const isOwner = !list.ownerId || list.ownerId === user?.uid;
+                return (
+                  <div key={list.id} onClick={() => handleOpenList(list)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 relative group active:scale-[0.99] transition-transform cursor-pointer">
+                    <div className="flex items-start gap-3">
+                      <div className="flex flex-col gap-1 text-gray-300 -ml-1 mr-1">
+                        {isOwner && (
+                          <>
+                            <button onClick={(e) => handleReorderList(e, list, -1)} className="hover:text-blue-500 hover:bg-gray-50 rounded p-0.5"><MoveUp size={14} /></button>
+                            <button onClick={(e) => handleReorderList(e, list, 1)} className="hover:text-blue-500 hover:bg-gray-50 rounded p-0.5"><MoveDown size={14} /></button>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="bg-blue-100 p-2.5 rounded-lg text-[#4285f4]"><CheckSquare size={20} /></div>
+                        <div>
+                          <h3 className="font-bold text-gray-800">{list.title}</h3>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            <span className="text-xs text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded">{list.completedCount || 0}/{list.itemCount || 0} done</span>
+                            {list.dueDate && <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${new Date(list.dueDate) < new Date() ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}><Clock size={10} /> {formatDate(list.dueDate)}</span>}
+                            {list.repeat !== 'none' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded"><RotateCcw size={10} /></span>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); handleShareChecklist(list); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50" title="Share"><Globe size={16} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); openEditModal({ type: 'list', ...list }); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50"><Edit2 size={16} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ type: 'list', data: list }); }} className="p-2 text-gray-300 hover:text-red-500 rounded-full hover:bg-gray-50"><Trash2 size={16} /></button>
+                      <div className="flex items-center gap-1">
+                        {isOwner && <button onClick={(e) => { e.stopPropagation(); handleShareChecklist(list); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50" title="Share"><Globe size={16} /></button>}
+                        <button onClick={(e) => { e.stopPropagation(); openEditModal({ type: 'list', ...list }); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50"><Edit2 size={16} /></button>
+                        {isOwner && <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ type: 'list', data: list }); }} className="p-2 text-gray-300 hover:text-red-500 rounded-full hover:bg-gray-50"><Trash2 size={16} /></button>}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               {lists.length === 0 && <div className="text-center py-10 text-gray-400"><p>No checklists yet.</p><button onClick={openCreateModal} className="text-[#4285f4] font-medium mt-2 hover:underline">Create one</button></div>}
             </div>
           ) : (
@@ -317,11 +379,13 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 const isOverdue = item.dueDate && new Date(item.dueDate) < new Date() && !item.isCompleted;
                 return (
                   <div key={item.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3 group">
-                    <div className="flex flex-col gap-0.5 text-gray-300 self-center">
-                      <button onClick={() => handleReorderItem(item, -1)} className="hover:text-blue-500 p-0.5"><MoveUp size={12} /></button>
-                      <button onClick={() => handleReorderItem(item, 1)} className="hover:text-blue-500 p-0.5"><MoveDown size={12} /></button>
-                    </div>
-                    <button onClick={() => handleToggleItem(item)} className={`flex-none mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${item.isCompleted ? 'bg-[#4285f4] border-[#4285f4] text-white' : 'border-gray-300 text-transparent'}`}><Check size={14} strokeWidth={3} /></button>
+                    {(!activeList.isSharedDoc || activeList.role === 'editor') && (
+                      <div className="flex flex-col gap-0.5 text-gray-300 self-center">
+                        <button onClick={() => handleReorderItem(item, -1)} className="hover:text-blue-500 p-0.5"><MoveUp size={12} /></button>
+                        <button onClick={() => handleReorderItem(item, 1)} className="hover:text-blue-500 p-0.5"><MoveDown size={12} /></button>
+                      </div>
+                    )}
+                    <button disabled={activeList.isSharedDoc && activeList.role === 'viewer'} onClick={() => handleToggleItem(item)} className={`flex-none mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${item.isCompleted ? 'bg-[#4285f4] border-[#4285f4] text-white' : 'border-gray-300 text-transparent'} ${(activeList.isSharedDoc && activeList.role === 'viewer') ? 'opacity-50 cursor-not-allowed' : ''}`}><Check size={14} strokeWidth={3} /></button>
                     <div className="flex-1 min-w-0">
                       <span className={`text-gray-800 break-words ${item.isCompleted ? 'line-through text-gray-400' : ''}`}>{item.text}</span>
                       {(item.dueDate || (item.repeat && item.repeat !== 'none')) && (
@@ -331,10 +395,12 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => openEditModal({ type: 'item', ...item })} className="text-gray-300 hover:text-blue-500 p-2"><Edit2 size={16} /></button>
-                      <button onClick={() => setDeleteConfirmation({ type: 'item', data: item })} className="text-gray-300 hover:text-red-500 p-2"><X size={18} /></button>
-                    </div>
+                    {(!activeList.isSharedDoc || activeList.role === 'editor') && (
+                      <div className="flex items-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openEditModal({ type: 'item', ...item })} className="text-gray-300 hover:text-blue-500 p-2"><Edit2 size={16} /></button>
+                        <button onClick={() => setDeleteConfirmation({ type: 'item', data: item })} className="text-gray-300 hover:text-red-500 p-2"><X size={18} /></button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -350,7 +416,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           maxWidth="max-w-4xl"
           ariaLabel="Create Checklist"
         />
-      ) : (
+      ) : activeList && (!activeList.isSharedDoc || activeList.role === 'editor') ? (
         <div className="flex-none bg-white border-t border-gray-100 p-4 pb-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
           <div className="max-w-3xl mx-auto">
             {showOptions && (
@@ -366,7 +432,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             </form>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* --- Modals --- */}
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="New Checklist">
@@ -485,6 +551,42 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           </div>
         </div>
       </Modal>
+
+      <WorkspacePanel
+        {...collab.workspacePanelProps}
+        onDelete={async () => {
+          await collab.deleteActiveWorkspace();
+          navigate('#checklist');
+        }}
+      />
+
+      <CollaborateModal
+        isOpen={!!collab.collaborateModalItem}
+        onClose={() => collab.closeCollaborateModal()}
+        docId={collab.collaborateModalItem?.id}
+        docTitle={collab.collaborateModalItem?.title || 'Untitled'}
+        fullDocData={collab.collaborateModalItem}
+        shareId={collab.collaborateModalItem?.sharedId || null}
+        docKey={collab.collaborateModalItem?.docKey || null}
+        appType="checklist"
+        currentUser={user}
+        privateKey={privateKey}
+        cryptoKey={cryptoKey}
+        onShareCreated={async (newShareId) => {
+          if (collab.collaborateModalItem) {
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: newShareId };
+            await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
+            setLists(lists.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+          }
+        }}
+        onShareDeleted={async () => {
+          if (collab.collaborateModalItem) {
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: null };
+            await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
+            setLists(lists.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+          }
+        }}
+      />
     </div >
   );
 };

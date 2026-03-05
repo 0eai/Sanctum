@@ -1,10 +1,12 @@
 import React from 'react';
 import {
-    FileText, Folder, Star, X, Move, ChevronRight
+    FileText, Folder, Star, X, Move, ChevronRight, Users
 } from 'lucide-react';
+import { usePermissions } from '../../../hooks/usePermissions';
 
-const PaperCard = ({ item, papers, onClick, onMove, onDelete }) => {
+const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) => {
     const isFolder = item.type === 'folder';
+    const { canDelete } = usePermissions(item);
 
     const formatDateTime = (dateVal) => {
         if (!dateVal) return '';
@@ -66,12 +68,19 @@ const PaperCard = ({ item, papers, onClick, onMove, onDelete }) => {
                     {formatDateTime(item.updatedAt || item.addedAt)}
                 </span>
                 <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    {onCollaborate && !isFolder && (
+                        <button onClick={(e) => { e.stopPropagation(); onCollaborate(item); }} className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}>
+                            <Users size={14} />
+                        </button>
+                    )}
                     <button onClick={(e) => { e.stopPropagation(); onMove(item); }} className="text-gray-300 hover:text-blue-500 p-1">
                         <Move size={14} />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(item); }} className="text-gray-300 hover:text-red-500 p-1">
-                        <X size={14} />
-                    </button>
+                    {canDelete && (
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(item); }} className="text-gray-300 hover:text-red-500 p-1">
+                            <X size={14} />
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

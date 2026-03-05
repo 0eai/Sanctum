@@ -1,42 +1,71 @@
 // src/services/tasks.js
-import { 
-  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, 
+import {
+  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp,
   updateDoc, doc, deleteDoc, writeBatch, getDocs
 } from 'firebase/firestore';
-import { db, appId } from '../../../lib/firebase'; // Ensure appId is imported correctly
+import { db, appId } from '../../../lib/firebase';
 import { encryptData, decryptData } from '../../../lib/crypto';
 import { getNextDate } from '../../../lib/dateUtils';
 
+// --- Workspace Context Helper ---
+const getTasksCol = (userId, ctx) =>
+  ctx?.workspaceId
+    ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'tasks')
+    : collection(db, 'artifacts', appId, 'users', userId, 'tasks');
+
+const getTaskDoc = (userId, taskId, ctx) =>
+  ctx?.workspaceId
+    ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'tasks', taskId)
+    : doc(db, 'artifacts', appId, 'users', userId, 'tasks', taskId);
+
+const getFoldersCol = (userId, ctx) =>
+  ctx?.workspaceId
+    ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'task_folders')
+    : collection(db, 'artifacts', appId, 'users', userId, 'task_folders');
+
+const getFolderDoc = (userId, folderId, ctx) =>
+  ctx?.workspaceId
+    ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'task_folders', folderId)
+    : doc(db, 'artifacts', appId, 'users', userId, 'task_folders', folderId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
 // --- Listeners ---
 
-export const listenToTaskFolders = (userId, cryptoKey, callback) => {
-  const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'task_folders'), 
-    orderBy('createdAt', 'asc')
-  );
+export const listenToTaskFolders = (userId, cryptoKey, callback, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const q = query(getFoldersCol(userId, ctx), orderBy('createdAt', 'asc'));
   return onSnapshot(q, async (snapshot) => {
     const decrypted = await Promise.all(snapshot.docs.map(async d => {
-      const data = await decryptData(d.data(), cryptoKey);
+      const data = await decryptData(d.data(), key);
       return { id: d.id, ...data };
     }));
     callback(decrypted);
   });
 };
 
-export const listenToTasks = (userId, cryptoKey, callback) => {
-  const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'tasks'), 
-    orderBy('order', 'desc')
-  );
+export const listenToTasks = (userId, cryptoKey, callback, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const q = query(getTasksCol(userId, ctx), orderBy('order', 'desc'));
   return onSnapshot(q, async (snapshot) => {
     const decrypted = await Promise.all(snapshot.docs.map(async d => {
-      const data = await decryptData(d.data(), cryptoKey);
-      return { 
-        id: d.id, 
-        ...data, 
-        subtasks: data.subtasks || [],
-        order: d.data().order || 0
-      };
+      try {
+        const data = await decryptData(d.data(), key);
+        return {
+          id: d.id,
+          ...(data || {}),
+          subtasks: data?.subtasks || [],
+          order: d.data().order || 0
+        };
+      } catch (error) {
+        console.warn('Failed to decrypt task doc', d.id, error.message || error);
+        return {
+          id: d.id,
+          title: 'Encrypted Data (Decryption Failed)',
+          subtasks: [],
+          order: d.data().order || 0
+        };
+      }
     }));
     callback(decrypted);
   });
@@ -44,83 +73,79 @@ export const listenToTasks = (userId, cryptoKey, callback) => {
 
 // --- Actions ---
 
-export const saveTaskFolder = async (userId, cryptoKey, name) => {
-  const encrypted = await encryptData({ name }, cryptoKey);
-  const ref = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'task_folders'), {
+export const saveTaskFolder = async (userId, cryptoKey, name, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const encrypted = await encryptData({ name }, key);
+  const ref = await addDoc(getFoldersCol(userId, ctx), {
     ...encrypted, createdAt: serverTimestamp()
   });
   return ref.id;
 };
 
-export const saveTask = async (userId, cryptoKey, taskData) => {
+export const saveTask = async (userId, cryptoKey, taskData, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   const order = taskData.order || Date.now();
-  
+
   const payload = {
-    title: taskData.title || "", // Ensure this is empty string, not "Untitled Task" if you want clean auto-delete
+    title: taskData.title || "",
     folderId: taskData.folderId || null,
     completed: taskData.completed || false,
     isPinned: taskData.isPinned || false,
     dueDate: taskData.dueDate || "",
-    hasTime: taskData.hasTime || false, 
-    repeat: taskData.repeat || "none", 
-    deadline: taskData.deadline || "", 
+    hasTime: taskData.hasTime || false,
+    repeat: taskData.repeat || "none",
+    deadline: taskData.deadline || "",
     notes: taskData.notes || "",
-    subtasks: taskData.subtasks || []
+    subtasks: taskData.subtasks || [],
+    sharedId: taskData.sharedId || null,
+    shareUrlKey: taskData.shareUrlKey || null
   };
 
-  const encrypted = await encryptData(payload, cryptoKey);
-  
+  const encrypted = await encryptData(payload, key);
+
   if (taskData.id) {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', taskData.id), { 
-        ...encrypted 
-    });
-    return taskData.id; // Return the existing ID
+    await updateDoc(getTaskDoc(userId, taskData.id, ctx), { ...encrypted });
+    return taskData.id;
   } else {
-    // FIX: Capture the reference and return the ID
-    const ref = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'tasks'), {
+    const ref = await addDoc(getTasksCol(userId, ctx), {
       ...encrypted, order, createdAt: serverTimestamp()
     });
-    return ref.id; // Return the new ID
+    return ref.id;
   }
 };
 
-export const toggleTaskCompletion = async (userId, cryptoKey, task) => {
-  // Repeat Logic
+export const toggleTaskCompletion = async (userId, cryptoKey, task, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   if (!task.completed && task.repeat && task.repeat !== 'none') {
-      const nextDate = getNextDate(task.dueDate, task.repeat);
-      const encrypted = await encryptData({ 
-          ...task, 
-          completed: false, // Keep active
-          dueDate: nextDate // Move forward
-      }, cryptoKey);
-      
-      await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', task.id), { ...encrypted });
-      return true; // Indicates task repeated
+    const nextDate = getNextDate(task.dueDate, task.repeat);
+    const encrypted = await encryptData({
+      ...task, completed: false, dueDate: nextDate
+    }, key);
+    await updateDoc(getTaskDoc(userId, task.id, ctx), { ...encrypted });
+    return true;
   } else {
-      const encrypted = await encryptData({ ...task, completed: !task.completed }, cryptoKey);
-      await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', task.id), { ...encrypted });
-      return false;
+    const encrypted = await encryptData({ ...task, completed: !task.completed }, key);
+    await updateDoc(getTaskDoc(userId, task.id, ctx), { ...encrypted });
+    return false;
   }
 };
 
-export const deleteTaskEntity = async (userId, entity, allTasks) => {
+export const deleteTaskEntity = async (userId, entity, allTasks, ctx = null) => {
   if (entity.type === 'folder') {
     const batch = writeBatch(db);
     const folderTasks = allTasks.filter(t => t.folderId === entity.id);
-    folderTasks.forEach(t => batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'tasks', t.id)));
-    batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'task_folders', entity.id));
+    folderTasks.forEach(t => batch.delete(getTaskDoc(userId, t.id, ctx)));
+    batch.delete(getFolderDoc(userId, entity.id, ctx));
     await batch.commit();
   } else {
-    // Standard task deletion
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'tasks', entity.id));
+    await deleteDoc(getTaskDoc(userId, entity.id, ctx));
   }
 };
 
-export const reorderTasks = async (userId, draggedTask, targetTask) => {
+export const reorderTasks = async (userId, draggedTask, targetTask, ctx = null) => {
   const batch = writeBatch(db);
-  // Swap Order Fields
-  batch.update(doc(db, 'artifacts', appId, 'users', userId, 'tasks', draggedTask.id), { order: targetTask.order });
-  batch.update(doc(db, 'artifacts', appId, 'users', userId, 'tasks', targetTask.id), { order: draggedTask.order });
+  batch.update(getTaskDoc(userId, draggedTask.id, ctx), { order: targetTask.order });
+  batch.update(getTaskDoc(userId, targetTask.id, ctx), { order: draggedTask.order });
   await batch.commit();
 };
 
@@ -139,8 +164,8 @@ export const exportTasks = async (userId, cryptoKey) => {
   const tasks = await Promise.all(taskSnap.docs.map(async (d) => {
     const raw = d.data();
     const data = await decryptData(raw, cryptoKey);
-    return { 
-      id: d.id, 
+    return {
+      id: d.id,
       ...data,
       subtasks: data.subtasks || [],
       createdAt: raw.createdAt?.toDate?.()?.toISOString() || null
@@ -170,7 +195,7 @@ export const importTasks = async (userId, cryptoKey, data) => {
   // 2. Import Tasks
   for (const task of tasks) {
     const { id, createdAt, folderId, ...taskData } = task;
-    
+
     // Map old folder ID to new folder ID (or null if it was root/inbox)
     const newFolderId = folderId && folderIdMap[folderId] ? folderIdMap[folderId] : null;
 
@@ -180,16 +205,16 @@ export const importTasks = async (userId, cryptoKey, data) => {
       completed: taskData.completed || false,
       isPinned: taskData.isPinned || false,
       dueDate: taskData.dueDate || "",
-      hasTime: taskData.hasTime || false, 
-      repeat: taskData.repeat || "none", 
-      deadline: taskData.deadline || "", 
+      hasTime: taskData.hasTime || false,
+      repeat: taskData.repeat || "none",
+      deadline: taskData.deadline || "",
       notes: taskData.notes || "",
       subtasks: taskData.subtasks || []
     };
 
     const encrypted = await encryptData(payload, cryptoKey);
     await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'tasks'), {
-      ...encrypted, 
+      ...encrypted,
       order: Date.now(), // Reset order to "now" to push to top
       createdAt: serverTimestamp()
     });

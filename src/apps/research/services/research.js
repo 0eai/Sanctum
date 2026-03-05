@@ -4,28 +4,47 @@ import { encryptData, decryptData } from '../../../lib/crypto';
 import '@citation-js/plugin-bibtex';
 import { Cite } from '@citation-js/core';
 
-export const listenToPapers = (userId, cryptoKey, callback) => {
-    const q = collection(db, 'artifacts', appId, 'users', userId, 'research');
+// --- Workspace Context Helper ---
+const getResearchCol = (userId, ctx) =>
+    ctx?.workspaceId
+        ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'research')
+        : collection(db, 'artifacts', appId, 'users', userId, 'research');
+
+const getResearchDoc = (userId, docId, ctx) =>
+    ctx?.workspaceId
+        ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'research', docId)
+        : doc(db, 'artifacts', appId, 'users', userId, 'research', docId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
+export const listenToPapers = (userId, cryptoKey, callback, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const q = getResearchCol(userId, ctx);
     return onSnapshot(q, async (snapshot) => {
         const decrypted = await Promise.all(snapshot.docs.map(async (docSnap) => {
             const raw = docSnap.data();
             try {
-                const data = await decryptData(raw, cryptoKey);
+                const data = await decryptData(raw, key);
                 return {
                     id: docSnap.id,
-                    ...raw, // mixin unencrypted like type, parentId, createdAt, updatedAt
-                    ...data,
+                    ...raw,
+                    ...(data || {}),
                     type: raw.type || 'paper',
                     parentId: raw.parentId || null,
-                    pdfHash: data.pdfHash || null
+                    pdfHash: data?.pdfHash || null
                 };
             } catch (error) {
-                console.error('Failed to decrypt paper', docSnap.id, error);
-                return { id: docSnap.id, title: 'Encrypted Data (Decryption Failed)', type: raw.type || 'paper', parentId: raw.parentId || null };
+                console.warn('Failed to decrypt paper', docSnap.id, error.message || error);
+                return {
+                    id: docSnap.id,
+                    title: 'Encrypted Data (Decryption Failed)',
+                    type: raw.type || 'paper',
+                    parentId: raw.parentId || null,
+                    pdfHash: null
+                };
             }
         }));
 
-        // Sort descending by when they were added/updated
         decrypted.sort((a, b) => {
             const timeA = a.type === 'folder' ? a.updatedAt?.toMillis?.() || 0 : new Date(a.addedAt || 0).getTime();
             const timeB = b.type === 'folder' ? b.updatedAt?.toMillis?.() || 0 : new Date(b.addedAt || 0).getTime();
@@ -36,10 +55,11 @@ export const listenToPapers = (userId, cryptoKey, callback) => {
     });
 };
 
-export const savePaper = async (userId, cryptoKey, paper, parentId = null) => {
+export const savePaper = async (userId, cryptoKey, paper, parentId = null, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     const paperRef = paper.id
-        ? doc(db, 'artifacts', appId, 'users', userId, 'research', paper.id)
-        : doc(collection(db, 'artifacts', appId, 'users', userId, 'research'));
+        ? getResearchDoc(userId, paper.id, ctx)
+        : doc(getResearchCol(userId, ctx));
 
     const payload = {
         title: paper.title || '',
@@ -51,16 +71,18 @@ export const savePaper = async (userId, cryptoKey, paper, parentId = null) => {
         isPrivate: paper.isPrivate || false,
         hasPdf: paper.hasPdf || false,
         pdfPath: paper.pdfPath || null,
-        pdfWrappingKey: paper.pdfWrappingKey || null, // AES-GCM local wrapping key
-        pdfHash: paper.pdfHash || null, // Deduplication SHA-256 hash
+        pdfWrappingKey: paper.pdfWrappingKey || null,
+        pdfHash: paper.pdfHash || null,
         driveFileId: paper.driveFileId || null,
         isEncrypted: paper.isEncrypted || false,
-        aiSummary: paper.aiSummary || null, // Contains { summary, architectures, metrics, datasets }
+        aiSummary: paper.aiSummary || null,
         tags: paper.tags || [],
-        addedAt: paper.addedAt || new Date().toISOString()
+        addedAt: paper.addedAt || new Date().toISOString(),
+        sharedId: paper.sharedId || null,
+        shareUrlKey: paper.shareUrlKey || null
     };
 
-    const encrypted = await encryptData(payload, cryptoKey);
+    const encrypted = await encryptData(payload, key);
     const meta = {
         type: 'paper',
         parentId: paper.parentId || parentId || null,
@@ -75,9 +97,10 @@ export const savePaper = async (userId, cryptoKey, paper, parentId = null) => {
     return paperRef.id;
 };
 
-export const createFolder = async (userId, cryptoKey, title, parentId) => {
-    const encrypted = await encryptData({ title }, cryptoKey);
-    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'research'), {
+export const createFolder = async (userId, cryptoKey, title, parentId, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encrypted = await encryptData({ title }, key);
+    await addDoc(getResearchCol(userId, ctx), {
         ...encrypted,
         type: 'folder',
         parentId: parentId || null,
@@ -86,23 +109,23 @@ export const createFolder = async (userId, cryptoKey, title, parentId) => {
     });
 };
 
-export const updateFolder = async (userId, cryptoKey, folderId, title, parentId = undefined) => {
-    const encrypted = await encryptData({ title }, cryptoKey);
+export const updateFolder = async (userId, cryptoKey, folderId, title, parentId = undefined, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encrypted = await encryptData({ title }, key);
     const update = { ...encrypted, updatedAt: serverTimestamp() };
     if (parentId !== undefined) update.parentId = parentId;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'research', folderId), update);
+    await updateDoc(getResearchDoc(userId, folderId, ctx), update);
 };
 
-export const deletePaper = async (userId, paperId, isFolder = false, allItems = []) => {
+export const deletePaper = async (userId, paperId, isFolder = false, allItems = [], ctx = null) => {
     if (isFolder) {
-        // Recursive delete for folder contents
         const batch = writeBatch(db);
         const children = allItems.filter(i => i.parentId === paperId);
-        children.forEach(c => batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'research', c.id)));
-        batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'research', paperId));
+        children.forEach(c => batch.delete(getResearchDoc(userId, c.id, ctx)));
+        batch.delete(getResearchDoc(userId, paperId, ctx));
         await batch.commit();
     } else {
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'research', paperId));
+        await deleteDoc(getResearchDoc(userId, paperId, ctx));
     }
 };
 

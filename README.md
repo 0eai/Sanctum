@@ -13,11 +13,13 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 - **Argon2id key derivation** — memory-hard (64 MB), GPU/ASIC resistant, via WebAssembly
 - **AES-256-GCM encryption** — all data encrypted/decrypted in the browser using the Web Crypto API
 - **Zero-knowledge architecture** — Firebase only stores encrypted blobs
+- **RSA-4096-OAEP** — asymmetric key exchange for collaboration and E2E messaging
+- **ECDH P-256 forward secrecy** — per-message ephemeral keys for SecureShare 1:1 chats
 - **Passkey strength enforcement** — min 8 characters with visual strength meter
-- **Client-side rate limiting** — progressive delays on failed attempts (2s → 5s → 15s → 60s)
+- **Client + server-side rate limiting** — progressive delays on failed attempts
 - **Auto-lock timer** — configurable inactivity timeout (5 min / 15 min / 1 hour / Never)
 - **Lock on tab hidden** — instant vault lock when switching tabs or minimizing
-- **Master Key Recovery** — offline recovery method exporting the raw master key
+- **Master Key Recovery** — offline recovery exporting the raw master key
 - **Device tracking** — see all active sessions, sign out other devices
 - **Activity log** — real-time audit trail of vault events
 - **Firebase App Check** — ReCAPTCHA v3 prevents unauthorized API access
@@ -27,25 +29,35 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 
 | App | Description |
 |-----|-------------|
-| **Notes** | Rich notes with tags, attachments, folders, pinning, and scheduling |
+| **Notes** | Rich notes with tags, attachments, folders, pinning, scheduling |
 | **Markdown** | Full markdown editor with live preview, syntax highlighting, and KaTeX math |
-| **Tasks** | Task manager with folders, subtasks, due dates, recurring tasks, and drag reorder |
+| **Tasks** | Task manager with folders, subtasks, due dates, recurring tasks, drag reorder |
 | **Checklists** | Reorderable checklists with items, due dates, repeat cycles, and reset |
 | **Passwords** | Password vault with generator, strength meter, and copy-to-clipboard |
 | **Authenticator** | TOTP 2FA code generator (Google Authenticator compatible) with QR import |
-| **Contacts** | Encrypted address book with photo upload, labels, and multi-field support |
+| **Contacts** | Encrypted address book with photo upload, labels, multi-field support |
 | **Bookmarks** | Bookmark manager with folders and browser-compatible HTML import/export |
 | **Finance** | Expense tracker with categories and multi-currency support |
 | **Banking** | Wallet / banking interface with transaction history |
 | **Reminders** | Date/time reminders with recurring schedules |
 | **Alerts** | Alert/notification manager |
-| **SecureShare** | End-to-end encrypted messaging (1:1 and group chats) with RSA+AES hybrid encryption |
+| **Research** | Academic paper vault with PDF storage, AI summaries, and BibTeX |
+| **SecureShare** | E2E encrypted messaging with ECDH forward secrecy, groups, WebRTC calls |
 | **Counter** | Tally counter with multiple counters and history |
-| **Transfer** | Encrypted file transfer |
+| **Transfer** | Encrypted file transfer with room-based sharing |
 
-### 🔗 Sharing
+### 🤝 Collaboration
 
-Notes, Markdown documents, Tasks, and Checklists can be shared via encrypted public links. The recipient doesn't need an account — the decryption key is embedded in the URL fragment (never sent to the server).
+- **Per-document sharing** — share Notes, Markdown, Tasks, Research, Bookmarks, Checklists with specific users
+- **Per-doc encryption keys** — each shared document gets its own AES-256 key, RSA-wrapped per collaborator
+- **Key rotation** — new key generated on collaborator removal, doc re-encrypted
+- **File re-encryption** — attachments copied to shared storage and re-encrypted with doc key
+- **Workspace sharing** — workspace-level collaboration with shared AES key
+- **Role-based access** — owner, editor, viewer roles per collaborator
+
+### 🔗 Public Sharing
+
+Notes, Markdown, Tasks, and Checklists can be shared via encrypted public links. The decryption key is in the URL fragment (never sent to the server).
 
 ### ⚙️ Settings
 
@@ -68,13 +80,11 @@ All import/export is centralized in **Settings → Data**:
 | All other apps | JSON | JSON |
 | **Full Backup** | JSON (all collections) | JSON (all collections) |
 
-Per-app data deletion is also available with confirmation prompt.
-
 ### 📲 Progressive Web App
 
-Sanctum is installable as a PWA:
-- **Android**: Open in Chrome → three-dot menu → "Install app"
-- **iOS**: Open in Safari → Share → "Add to Home Screen"
+Installable as a PWA:
+- **Android**: Chrome → three-dot menu → "Install app"
+- **iOS**: Safari → Share → "Add to Home Screen"
 - Offline shell caching for instant launch
 
 ---
@@ -86,11 +96,12 @@ Sanctum is installable as a PWA:
 | **Framework** | React 19 |
 | **Build** | Vite 7 |
 | **Styling** | Tailwind CSS 4 |
-| **Backend** | Firebase (Auth, Firestore, Hosting, App Check) |
+| **Backend** | Firebase (Auth, Firestore, Storage, Hosting, App Check, RTDB) |
 | **Encryption** | Web Crypto API (AES-GCM, RSA-OAEP, ECDH P-256) + Argon2id (hash-wasm) |
 | **Markdown** | react-markdown + remark-gfm + rehype-katex + react-syntax-highlighter |
 | **Icons** | Lucide React |
 | **2FA** | OTPAuth |
+| **Real-time** | WebRTC (SecureShare voice/video) |
 
 ---
 
@@ -99,7 +110,7 @@ Sanctum is installable as a PWA:
 ### Prerequisites
 
 - Node.js 18+
-- Firebase project with Firestore and Authentication enabled
+- Firebase project with Firestore, Authentication, Storage, and RTDB enabled
 
 ### Install
 
@@ -109,28 +120,19 @@ cd sanctum
 npm install
 ```
 
-### Configure Firebase
+### Configure
 
-Create `src/lib/firebase.js` with your Firebase config:
+Copy `.env.example` to `.env` and fill in your Firebase config:
 
-```javascript
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-
-const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
-};
-
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const appId = "your-app-id";
+```env
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_DATABASE_URL=...
+VITE_RECAPTCHA_SITE_KEY=...
 ```
 
 ### Development
@@ -148,84 +150,88 @@ firebase deploy
 
 ---
 
-## Firestore Rules
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /artifacts/{appId}/users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /shared_notes/{noteId} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow delete: if request.auth != null && resource.data.createdBy == request.auth.uid;
-    }
-    match /artifacts/{appId}/public_keys/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /artifacts/{appId}/chats/{chatId}/{document=**} {
-      allow read, write: if request.auth != null
-        && request.auth.uid in chatId.split('_');
-    }
-    match /artifacts/{appId}/groups/{groupId} {
-      allow create: if request.auth != null;
-      allow read, update: if request.auth != null
-        && request.auth.uid in resource.data.memberUids;
-      allow delete: if request.auth != null
-        && resource.data.createdBy == request.auth.uid;
-      match /messages/{msgId} {
-        allow read, write: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/groups/$(groupId)).data.memberUids;
-      }
-      match /group_members/{memberId} {
-        allow read, write: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/groups/$(groupId)).data.memberUids;
-      }
-    }
-  }
-}
-```
-
----
-
 ## Project Structure
 
 ```
 src/
-├── App.jsx                  # Main app shell, auth, routing, auto-lock
+├── App.jsx                      # App shell: auth, vault lock, routing, auto-lock
+├── main.jsx                     # React entry point
+├── index.css                    # Global styles
+│
 ├── apps/
-│   ├── notes/               # Notes app
-│   ├── markdown/            # Markdown editor
-│   ├── tasks/               # Task manager
-│   ├── checklist/           # Checklists
-│   ├── passwords/           # Password vault
-│   ├── authenticator/       # TOTP 2FA
-│   ├── contacts/            # Address book
-│   ├── bookmarks/           # Bookmarks
-│   ├── finance/             # Expense tracker
-│   ├── banking/             # Wallet
-│   ├── reminders/           # Reminders
-│   ├── counter/             # Tally counter
-│   ├── transfer/            # File transfer
-│   ├── secureshare/         # E2E encrypted chat
-│   ├── settings/            # Settings (6 tabs)
-│   └── SharedNote.jsx       # Public shared content viewer
+│   ├── notes/                   # Notes app (Notes.jsx + NoteEditor + NoteCard)
+│   ├── markdown/                # Markdown editor (Markdown.jsx + MarkdownEditor)
+│   ├── tasks/                   # Task manager (Tasks.jsx + TaskCard)
+│   ├── checklist/               # Checklists (Checklist.jsx)
+│   ├── passwords/               # Password vault (Passwords.jsx)
+│   ├── authenticator/           # TOTP 2FA (Authenticator.jsx)
+│   ├── contacts/                # Address book (Contacts.jsx)
+│   ├── bookmarks/               # Bookmarks (Bookmarks.jsx)
+│   ├── finance/                 # Expense tracker (Finance.jsx)
+│   ├── banking/                 # Wallet (Banking.jsx)
+│   ├── reminders/               # Reminders (Reminders.jsx)
+│   ├── alerts/                  # Alerts (Alerts.jsx)
+│   ├── research/                # Academic papers (ResearchApp.jsx + PaperEditor)
+│   ├── secureshare/             # E2E chat (SecureShare.jsx + ChatBubble + GroupPanel)
+│   ├── counter/                 # Tally counters (Counter.jsx)
+│   ├── transfer/                # File transfer (Transfer.jsx)
+│   ├── settings/                # Settings (6 tabs: Account, Apps, Devices, Security, Finance, Data)
+│   └── SharedNote.jsx           # Public shared content viewer
+│
 ├── components/
-│   ├── system/              # LockScreen, Launcher
-│   └── ui/                  # Modal, Button, Input, MarkdownViewer, etc.
-├── services/                # Firestore CRUD + encryption for each app
+│   ├── system/
+│   │   ├── LockScreen.jsx       # Vault lock/unlock with Argon2id + rate limiting
+│   │   └── Launcher.jsx         # App grid with folders (iOS-style)
+│   └── ui/
+│       ├── CollaborateModal.jsx # Per-doc collaboration (add/remove collaborators)
+│       ├── SharedDocsView.jsx   # Shared documents viewer
+│       ├── MarkdownViewer.jsx   # Markdown renderer with KaTeX + syntax highlighting
+│       └── ...                  # Button, Modal, Input, etc.
+│
+├── services/
+│   ├── collaboration.js         # Per-document E2EE sharing (AES+RSA key management)
+│   ├── workspace.js             # Workspace-level E2EE collaboration
+│   ├── firebaseStorage.js       # Encrypted file upload/download
+│   ├── vault.js                 # Vault unlock/initialize
+│   ├── sharing.js               # Public share link generation
+│   ├── activityLog.js           # Audit trail
+│   ├── deviceTracker.js         # Device session management
+│   ├── profile.js               # User profile sync
+│   ├── gemini.js                # AI integration (research summaries)
+│   ├── transfer.js              # File transfer service
+│   ├── pdfStorage.js            # PDF file management
+│   └── firestoredb.js           # Firestore helpers + app stats
+│
 ├── lib/
-│   ├── crypto.js            # AES-GCM, RSA-OAEP, ECDH, Argon2id, PBKDF2
-│   ├── firebase.js          # Firebase config + App Check
-│   └── dateUtils.js         # Date formatting helpers
-└── hooks/                   # useDebounce, useHashRoute, etc.
+│   ├── crypto.js                # AES-GCM, RSA-OAEP, ECDH, Argon2id, PBKDF2
+│   ├── firebase.js              # Firebase config + App Check
+│   ├── dateUtils.js             # Date formatting helpers
+│   ├── fileUtils.js             # File helpers
+│   ├── passwordUtils.js         # Password generation
+│   └── bookmarkUtils.js         # Bookmark HTML parsing
+│
+├── hooks/
+│   ├── useHashRoute.js          # Hash-based routing
+│   └── useDebounce.js           # Debounce hook
+│
+└── context/                     # React context providers
 ```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [DATA_STRUCTURES.md](DATA_STRUCTURES.md) | Complete Firestore/Storage schema with encrypted + decrypted views |
+| [SECURITY.md](SECURITY.md) | Full security audit: crypto, rules, threat model |
+| [ControlFlowGraphs.md](ControlFlowGraphs.md) | Flowcharts for all major application flows |
+| [FiniteStateMachines.md](FiniteStateMachines.md) | State machine diagrams for all stateful components |
+| [SequenceDiagrams.md](SequenceDiagrams.md) | Interaction timelines between components and services |
+| [DataFlowDiagrams.md](DataFlowDiagrams.md) | Data flow through encryption layers |
+| [LOGICAL_BUGS.md](LOGICAL_BUGS.md) | Known bugs and edge cases by severity |
+| [Recommendations.md](Recommendations.md) | Prioritized improvement roadmap |
+| [TASKS.md](TASKS.md) | Development backlog |
 
 ---
 

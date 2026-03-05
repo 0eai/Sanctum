@@ -1,7 +1,8 @@
 // src/context/VaultContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+// Single Source of Truth for authentication and vault encryption state.
+// Auto-lock logic lives in App.jsx (configurable timer + lock-on-hidden).
+// This context only holds state; it does NOT manage timers or side-effects.
+import React, { createContext, useContext, useState, useCallback } from 'react';
 
 const VaultContext = createContext();
 
@@ -9,44 +10,35 @@ export const VaultProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [cryptoKey, setCryptoKey] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // New state to tell the user WHY they were locked out
-  const [lockReason, setLockReason] = useState(""); 
+  const [lockReason, setLockReason] = useState("");
 
-  // 1. Auth Listener
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-      if (!u) {
-        setCryptoKey(null);
-        setLockReason(""); // Clear reason on logout
-      }
-    });
-    return () => unsub();
+  // Lock vault: clear key + optionally set a reason message
+  const lockVault = useCallback((reason = "") => {
+    setLockReason(reason);
+    setCryptoKey(null);
   }, []);
 
-  // 2. Auto-Lock Timer
-  useEffect(() => {
-    if (!cryptoKey) return;
-    
-    // Lock after 1 hour (3600000 ms)
-    const timer = setTimeout(() => {
-      setLockReason("Session expired due to inactivity."); // Set the reason
-      setCryptoKey(null);
-    }, 3600000); 
-
-    return () => clearTimeout(timer);
-  }, [cryptoKey]);
-
-  // Helper to manually lock (e.g. from a "Lock Vault" button)
-  const lockVault = () => {
+  // Unlock vault: set key + clear any lock reason
+  const unlockVault = useCallback((key) => {
     setLockReason("");
-    setCryptoKey(null);
-  };
+    setCryptoKey(key);
+  }, []);
+
+  // Auth state setter (called from App.jsx onAuthStateChanged)
+  const setAuthUser = useCallback((u) => {
+    setUser(u);
+    setLoading(false);
+    if (!u) {
+      setCryptoKey(null);
+      setLockReason("");
+    }
+  }, []);
 
   return (
-    <VaultContext.Provider value={{ user, cryptoKey, setCryptoKey, loading, lockReason, lockVault }}>
+    <VaultContext.Provider value={{
+      user, cryptoKey, loading, lockReason,
+      setAuthUser, setCryptoKey, unlockVault, lockVault
+    }}>
       {children}
     </VaultContext.Provider>
   );

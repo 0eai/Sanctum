@@ -6,14 +6,12 @@ import {
 
 import { LoadingSpinner, Button } from '../../components/ui';
 import { getRelativeTime, categorizeItem } from '../../lib/dateUtils';
-import { encryptData } from '../../lib/crypto';
-import { updateDoc, setDoc, doc } from 'firebase/firestore';
-import { db, appId } from '../../lib/firebase';
 
 import {
     listenToAlertsData, listenToCalendarEvents,
     initializeGoogleClient, createTokenClient,
-    fetchAndSaveGcalEvents, checkStoredToken
+    fetchAndSaveGcalEvents, checkStoredToken,
+    completeAlertItem, snoozeAlertItem
 } from './services/alerts';
 import { fetchAppPreferences } from '../settings/services/settings';
 
@@ -101,40 +99,11 @@ const AlertsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     // --- Action Handlers ---
     const handleComplete = async (item) => {
-        if (item.source === 'task') {
-            const encrypted = await encryptData({ ...item.original, completed: true }, cryptoKey);
-            await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', item.id), encrypted);
-        } else if (item.source === 'reminder') {
-            const encrypted = await encryptData({ ...item.original, isActive: false }, cryptoKey);
-            await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'reminders', item.id), encrypted);
-        }
+        await completeAlertItem(user.uid, cryptoKey, item);
     };
 
     const handleSnooze = async (item) => {
-        const newDate = new Date(item.date);
-        newDate.setDate(newDate.getDate() + 1);
-
-        let collectionName = 'tasks';
-        let dateField = 'dueDate';
-
-        if (item.source === 'note') collectionName = 'notes';
-        if (item.source === 'markdown') collectionName = 'markdown';
-        if (item.source === 'checklist') collectionName = 'checklists';
-        if (item.source === 'counter') collectionName = 'counters';
-        // FIXED: Route snooze logic for Reminders
-        if (item.source === 'reminder') { collectionName = 'reminders'; dateField = 'datetime'; }
-        if (item.source.startsWith('finance')) { collectionName = 'finance'; dateField = item.source === 'finance_sub' ? 'nextDate' : 'dueDate'; }
-
-        const newData = { ...item.original, [dateField]: newDate.toISOString() };
-
-        const payload = { ...newData };
-        delete payload.id; delete payload.updatedAt; delete payload.createdAt;
-        if (item.source === 'task') delete payload.completed;
-
-        const encrypted = await encryptData(payload, cryptoKey);
-        // Use setDoc with merge:true instead of updateDoc to avoid 'not-found' errors
-        // when the document ID is stale or the doc was deleted.
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, item.id), encrypted, { merge: true });
+        await snoozeAlertItem(user.uid, cryptoKey, item);
     };
 
     const handleNavigate = (item) => {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Copy, Edit2, Trash2, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Copy, Edit2, Trash2, CheckCircle2, EyeOff, Eye } from 'lucide-react';
 import * as OTPAuth from 'otpauth';
 
 const AuthCard = ({ item, onEdit, onDelete }) => {
@@ -7,6 +7,8 @@ const AuthCard = ({ item, onEdit, onDelete }) => {
     const [progress, setProgress] = useState(100);
     const [isCopied, setIsCopied] = useState(false);
     const [isWarning, setIsWarning] = useState(false);
+    const [isVisible, setIsVisible] = useState(false);
+    const timeoutRef = useRef(null);
 
     useEffect(() => {
         let totp;
@@ -47,7 +49,19 @@ const AuthCard = ({ item, onEdit, onDelete }) => {
         navigator.clipboard.writeText(token);
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000);
+
+        // Security: clear actual clipboard after 30s
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => {
+            navigator.clipboard.writeText('');
+        }, 30000);
     };
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        };
+    }, []);
 
     // Format token as 123 456
     const formattedToken = token.length === 6 ? `${token.slice(0, 3)} ${token.slice(3)}` : token;
@@ -84,8 +98,12 @@ const AuthCard = ({ item, onEdit, onDelete }) => {
             </div>
 
             <div className="flex items-center justify-between mt-2">
-                <div className={`text-3xl font-mono font-bold tracking-widest ${isWarning ? 'text-red-500 animate-pulse' : 'text-[#4285f4]'}`}>
-                    {formattedToken}
+                <div
+                    className={`text-3xl font-mono font-bold tracking-widest cursor-pointer select-none flex items-center gap-3 transition-all ${!isVisible ? 'text-gray-300 blur-sm' : isWarning ? 'text-red-500 animate-pulse' : 'text-[#4285f4]'}`}
+                    onClick={(e) => { e.stopPropagation(); setIsVisible(!isVisible); }}
+                    title="Click to reveal/hide"
+                >
+                    {isVisible ? formattedToken : '••• •••'}
                 </div>
 
                 <button

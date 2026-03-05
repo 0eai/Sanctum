@@ -1,79 +1,26 @@
-import { 
-  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, 
-  updateDoc, doc, deleteDoc, getDocs 
-} from 'firebase/firestore';
-import { db, appId } from '../../../lib/firebase';
-import { encryptData, decryptData } from '../../../lib/crypto';
+// src/services/banking.js
+// Refactored to use createEncryptedCRUD for standard operations.
+import createEncryptedCRUD from '../../../services/createEncryptedCRUD';
 
-// --- Listeners ---
+const crud = createEncryptedCRUD('banking');
 
-export const listenToBankingItems = (userId, cryptoKey, callback) => {
-  const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'banking'), 
-    orderBy('createdAt', 'desc')
-  );
-  
-  return onSnapshot(q, async (snap) => {
-    const data = await Promise.all(snap.docs.map(async d => {
-      const raw = d.data();
-      const decrypted = await decryptData(raw, cryptoKey);
-      return { id: d.id, ...decrypted };
-    }));
-    callback(data);
-  });
-};
+// --- Standard CRUD (delegated to factory) ---
 
-// --- Actions ---
+export const listenToBankingItems = (userId, cryptoKey, callback) =>
+  crud.listen(userId, cryptoKey, callback);
 
 export const saveBankingItem = async (userId, cryptoKey, itemData, type) => {
   const payload = { ...itemData, type };
-  const encrypted = await encryptData(payload, cryptoKey);
-
-  if (itemData.id) {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'banking', itemData.id), {
-      ...encrypted,
-      updatedAt: serverTimestamp()
-    });
-  } else {
-    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'banking'), {
-      ...encrypted,
-      createdAt: serverTimestamp()
-    });
-  }
+  return crud.save(userId, cryptoKey, payload);
 };
 
-export const deleteBankingItem = async (userId, itemId) => {
-  await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'banking', itemId));
-};
+export const deleteBankingItem = async (userId, itemId) =>
+  crud.remove(userId, itemId);
 
 // --- Import / Export ---
 
-export const exportBankingData = async (userId, cryptoKey) => {
-  const q = query(collection(db, 'artifacts', appId, 'users', userId, 'banking'));
-  const snapshot = await getDocs(q);
-  return Promise.all(snapshot.docs.map(async (doc) => {
-    const raw = doc.data();
-    const decrypted = await decryptData(raw, cryptoKey);
-    return { 
-      ...decrypted, 
-      createdAt: raw.createdAt?.toDate?.()?.toISOString() || null 
-    };
-  }));
-};
+export const exportBankingData = async (userId, cryptoKey) =>
+  crud.exportAll(userId, cryptoKey);
 
-export const importBankingData = async (userId, cryptoKey, data) => {
-  if (!Array.isArray(data)) throw new Error("Invalid format");
-  let count = 0;
-  for (const item of data) {
-    // Validate basic structure
-    if (!item.type) continue;
-    
-    // Clean up ID or timestamps from import to ensure fresh entry
-    const { id, createdAt, updatedAt, ...cleanItem } = item;
-    
-    // Reuse save logic (handles encryption)
-    await saveBankingItem(userId, cryptoKey, cleanItem, item.type);
-    count++;
-  }
-  return count;
-};
+export const importBankingData = async (userId, cryptoKey, data) =>
+  crud.importAll(userId, cryptoKey, data, null, null);

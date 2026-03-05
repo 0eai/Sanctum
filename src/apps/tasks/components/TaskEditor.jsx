@@ -2,11 +2,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, Star, Trash2, CheckSquare, Square, Clock, RotateCcw,
-  AlertCircle, Plus, X, FileText, Move, Globe
+  AlertCircle, Plus, X, FileText, Move, Globe, Users
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
+import { usePermissions } from '../../../hooks/usePermissions';
 
-const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
+const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollaborate, readOnly }) => {
+  const { canShare, canDelete } = usePermissions(task);
   const [data, setData] = useState({
     ...task,
     dueDate: task.dueDate || '',
@@ -57,7 +59,19 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
         subtasks: task.subtasks || [], notes: task.notes || ''
       }));
     }
-  }, [task.id]);
+  }, [task?.id]);
+
+  // Sync collaboration metadata silently without overwriting user edits
+  useEffect(() => {
+    if (task && (task.sharedId !== data.sharedId || task.memberUids?.length !== data.memberUids?.length)) {
+      setData(prev => ({
+        ...prev,
+        sharedId: task.sharedId,
+        docKey: task.docKey || prev.docKey,
+        memberUids: task.memberUids || prev.memberUids
+      }));
+    }
+  }, [task?.sharedId, task?.docKey, task?.memberUids?.length]);
 
   const update = (patch) => {
     const newData = { ...data, ...patch };
@@ -67,6 +81,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
   // Auto-Save Trigger
   const debouncedData = useDebounce(data, 1000);
   useEffect(() => {
+    if (readOnly) return;
     if (debouncedData && lastSavedHash !== null) {
       const currentPayloadObj = {
         title: debouncedData.title, isPinned: debouncedData.isPinned, completed: debouncedData.completed,
@@ -82,7 +97,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
         }).catch(e => console.error("Auto-save failed", e));
       }
     }
-  }, [debouncedData, lastSavedHash, onSave]);
+  }, [debouncedData, lastSavedHash, onSave, readOnly]);
 
   const handleClick = (ref) => {
     if (ref.current) {
@@ -137,34 +152,42 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
         <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
           <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
           <div className="flex gap-1">
-            {onMove && (
+            {!readOnly && onMove && (
               <button onClick={() => onMove(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors">
                 <Move size={20} />
               </button>
             )}
-            {onShare && (
+            {onCollaborate && (
+              <button onClick={() => onCollaborate(data)} className={`p-2 rounded-full transition-colors ${data.memberUids?.length > 0 ? 'text-blue-500 bg-blue-50' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'}`} title="Collaborators">
+                <Users size={20} />
+              </button>
+            )}
+            {!readOnly && canShare && onShare && (
               <button onClick={() => onShare(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors" title="Share">
                 <Globe size={20} />
               </button>
             )}
-            <button onClick={() => update({ isPinned: !data.isPinned })} className={`p-2 rounded-full transition-colors ${data.isPinned ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:bg-gray-100'}`}>
+            <button disabled={readOnly} onClick={() => update({ isPinned: !data.isPinned })} className={`p-2 rounded-full transition-colors ${data.isPinned ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:bg-gray-100'}`}>
               <Star size={20} fill={data.isPinned ? "currentColor" : "none"} />
             </button>
-            <button onClick={() => onDelete({ type: 'task', id: data.id, title: data.title })} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
-              <Trash2 size={20} />
-            </button>
+            {!readOnly && canDelete && (
+              <button onClick={() => onDelete({ type: 'task', id: data.id, title: data.title })} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
+                <Trash2 size={20} />
+              </button>
+            )}
           </div>
         </div>
 
         <div className="flex-1 w-full">
           <div className="p-6 md:p-8 flex flex-col gap-6 min-h-full">
             <div className="flex items-start gap-3">
-              <button onClick={() => update({ completed: !data.completed })} className={`mt-1.5 flex-shrink-0 transition-colors ${data.completed ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}>
+              <button disabled={readOnly} onClick={() => update({ completed: !data.completed })} className={`mt-1.5 flex-shrink-0 transition-colors ${data.completed ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}>
                 {data.completed ? <CheckSquare size={28} /> : <Square size={28} />}
               </button>
               <textarea
                 ref={titleRef}
                 value={data.title}
+                disabled={readOnly}
                 onChange={(e) => {
                   update({ title: e.target.value });
                   e.target.style.height = "auto";
@@ -172,14 +195,15 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                 }}
                 placeholder="Task Name"
                 rows={1}
-                className={`text-3xl font-bold bg-transparent outline-none w-full min-w-0 resize-none overflow-hidden break-words whitespace-pre-wrap ${data.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
+                className={`text-3xl font-bold bg-transparent outline-none w-full min-w-0 resize-none overflow-hidden break-words whitespace-pre-wrap disabled:opacity-80 ${data.completed ? 'text-gray-400 line-through' : 'text-gray-800'}`}
               />
             </div>
 
             <div className="flex flex-wrap gap-2 items-center text-xs pl-10">
               <div className="relative">
                 <button
-                  onClick={() => handleClick(reminderRef)}
+                  disabled={readOnly}
+                  onClick={() => !readOnly && handleClick(reminderRef)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-medium transition-colors ${data.dueDate ? 'bg-blue-50 text-blue-600' : 'text-gray-400 border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4]'}`}
                 >
                   <Clock size={12} />
@@ -190,10 +214,11 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                   type="datetime-local"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                   value={data.dueDate}
+                  disabled={readOnly}
                   onChange={(e) => update({ dueDate: e.target.value, hasTime: true })}
                   onClick={(e) => e.stopPropagation()}
                 />
-                {data.dueDate && (
+                {!readOnly && data.dueDate && (
                   <button
                     onClick={(e) => {
                       e.preventDefault(); e.stopPropagation();
@@ -209,7 +234,8 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
               {data.dueDate && (
                 <div className="relative">
                   <button
-                    onClick={() => handleClick(repeatRef)}
+                    disabled={readOnly}
+                    onClick={() => !readOnly && handleClick(repeatRef)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-medium transition-colors ${data.repeat !== 'none' ? 'bg-purple-50 text-purple-600' : 'text-gray-400 border border-dashed border-gray-300 hover:border-purple-400 hover:text-purple-500'}`}
                   >
                     <RotateCcw size={12} />
@@ -218,6 +244,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                   <select
                     ref={repeatRef}
                     value={data.repeat}
+                    disabled={readOnly}
                     onChange={(e) => update({ repeat: e.target.value })}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 appearance-none"
                     onClick={(e) => e.stopPropagation()}
@@ -233,7 +260,8 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
 
               <div className="relative">
                 <button
-                  onClick={() => handleClick(deadlineRef)}
+                  disabled={readOnly}
+                  onClick={() => !readOnly && handleClick(deadlineRef)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-medium transition-colors ${data.deadline ? 'bg-orange-50 text-orange-600' : 'text-gray-400 border border-dashed border-gray-300 hover:border-orange-400 hover:text-orange-500'}`}
                 >
                   <AlertCircle size={12} />
@@ -244,10 +272,11 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                   type="date"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                   value={data.deadline ? data.deadline.split('T')[0] : ''}
+                  disabled={readOnly}
                   onChange={(e) => update({ deadline: e.target.value })}
                   onClick={(e) => e.stopPropagation()}
                 />
-                {data.deadline && (
+                {!readOnly && data.deadline && (
                   <button
                     onClick={(e) => {
                       e.preventDefault(); e.stopPropagation();
@@ -264,7 +293,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
             <div className="flex flex-col gap-2 pl-2 md:pl-10">
               {data.subtasks && data.subtasks.map((sub, i) => (
                 <div key={sub.id} className="flex items-start gap-2 group w-full">
-                  <button onClick={() => {
+                  <button disabled={readOnly} onClick={() => {
                     const newSubs = [...data.subtasks];
                     newSubs[i].completed = !newSubs[i].completed;
                     update({ subtasks: newSubs });
@@ -274,6 +303,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                   <textarea
                     rows={1}
                     value={sub.title}
+                    disabled={readOnly}
                     ref={(el) => {
                       if (el) {
                         el.style.height = "auto";
@@ -287,38 +317,42 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
                       e.target.style.height = "auto";
                       e.target.style.height = e.target.scrollHeight + "px";
                     }}
-                    className={`flex-1 w-full min-w-0 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
+                    className={`flex-1 w-full min-w-0 bg-transparent text-sm outline-none resize-none overflow-hidden break-words whitespace-pre-wrap py-1 disabled:opacity-80 ${sub.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}
                   />
-                  <button onClick={() => {
-                    const newSubs = data.subtasks.filter((_, idx) => idx !== i);
-                    update({ subtasks: newSubs });
-                  }} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 flex-shrink-0 p-1">
-                    <X size={16} />
-                  </button>
+                  {!readOnly && (
+                    <button onClick={() => {
+                      const newSubs = data.subtasks.filter((_, idx) => idx !== i);
+                      update({ subtasks: newSubs });
+                    }} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 flex-shrink-0 p-1">
+                      <X size={16} />
+                    </button>
+                  )}
                 </div>
               ))}
 
-              <div className="flex items-start gap-2 text-gray-400 mt-1 relative">
-                <Plus size={18} className="flex-shrink-0 mt-1.5" />
-                <textarea
-                  placeholder="Add subtask..."
-                  rows={1}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && e.target.value.trim()) {
-                      e.preventDefault();
-                      const newSub = { id: Date.now().toString(), title: e.target.value.trim(), completed: false };
-                      update({ subtasks: [...(data.subtasks || []), newSub] });
-                      e.target.value = '';
+              {!readOnly && (
+                <div className="flex items-start gap-2 text-gray-400 mt-1 relative">
+                  <Plus size={18} className="flex-shrink-0 mt-1.5" />
+                  <textarea
+                    placeholder="Add subtask..."
+                    rows={1}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && e.target.value.trim()) {
+                        e.preventDefault();
+                        const newSub = { id: Date.now().toString(), title: e.target.value.trim(), completed: false };
+                        update({ subtasks: [...(data.subtasks || []), newSub] });
+                        e.target.value = '';
+                        e.target.style.height = "auto";
+                      }
+                    }}
+                    onChange={(e) => {
                       e.target.style.height = "auto";
-                    }
-                  }}
-                  onChange={(e) => {
-                    e.target.style.height = "auto";
-                    e.target.style.height = e.target.scrollHeight + "px";
-                  }}
-                  className="bg-transparent text-sm outline-none w-full resize-none overflow-hidden break-words whitespace-pre-wrap py-1"
-                />
-              </div>
+                      e.target.style.height = e.target.scrollHeight + "px";
+                    }}
+                    className="bg-transparent text-sm outline-none w-full resize-none overflow-hidden break-words whitespace-pre-wrap py-1"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex-1 flex flex-col gap-2 pl-2 md:pl-10 mt-4 border-t border-gray-50 pt-4">
@@ -328,9 +362,10 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare }) => {
               <textarea
                 ref={notesRef}
                 value={data.notes}
+                disabled={readOnly}
                 onChange={(e) => update({ notes: e.target.value })}
                 placeholder="Add details..."
-                className="w-full outline-none resize-none text-gray-700 leading-relaxed text-base bg-transparent pb-32 overflow-hidden"
+                className="w-full outline-none resize-none text-gray-700 leading-relaxed text-base bg-transparent pb-32 overflow-hidden disabled:opacity-80"
                 style={{ minHeight: '40vh' }}
               />
             </div>

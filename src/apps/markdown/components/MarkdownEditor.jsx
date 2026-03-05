@@ -2,15 +2,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     ChevronLeft, Star, Eye, Edit2, Download, Bell, Clock, RotateCcw, X, Tag, Paperclip,
-    PlayCircle, Music, FileText, Printer
+    PlayCircle, Music, FileText, Printer, Users
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import MarkdownViewer from '../../../components/ui/MarkdownViewer';
 import FileViewer from '../../../components/ui/FileViewer';
 import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFile as downloadFromFirebase } from '../../../services/firebaseStorage';
+import { usePermissions } from '../../../hooks/usePermissions';
 
-const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus, navigate, user }) => {
+const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus, navigate, user, onCollaborate, readOnly }) => {
+    const { canShare } = usePermissions(item);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...item
@@ -42,11 +44,23 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
     const isCreatingRef = useRef(false);
 
     useEffect(() => {
-        if (item.id && item.id !== data.id) {
+        if (item?.id && item.id !== data.id) {
             setData(prev => ({ ...prev, id: item.id }));
             isCreatingRef.current = false;
         }
-    }, [item.id]);
+    }, [item?.id]);
+
+    // Sync collaboration metadata silently without overwriting user edits
+    useEffect(() => {
+        if (item && (item.sharedId !== data.sharedId || item.memberUids?.length !== data.memberUids?.length)) {
+            setData(prev => ({
+                ...prev,
+                sharedId: item.sharedId,
+                docKey: item.docKey || prev.docKey,
+                memberUids: item.memberUids || prev.memberUids
+            }));
+        }
+    }, [item?.sharedId, item?.docKey, item?.memberUids?.length]);
     // Auto-Save
     const debouncedData = useDebounce(data, 1000);
 
@@ -175,10 +189,18 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                             <button onClick={() => window.print()} className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100" title="Print document">
                                 <Printer size={20} />
                             </button>
-                            <button onClick={() => onExport(data)} className="p-2 text-gray-400 hover:text-blue-500 rounded-full hover:bg-gray-100">
+                            <button onClick={() => onExport(data)} className="p-2 text-gray-400 hover:text-blue-500 rounded-full hover:bg-gray-100" title="Export Markdown">
                                 <Download size={20} />
                             </button>
-                            <button onClick={() => setData(s => ({ ...s, isPinned: !s.isPinned }))} className={`p-2 rounded-full ${data.isPinned ? 'bg-yellow-100 text-yellow-600' : 'text-gray-400 hover:bg-gray-100'}`}>
+                            {onCollaborate && (
+                                <button onClick={(e) => onCollaborate(e, data)} className={`p-2 rounded-full ${data.memberUids?.length > 0 ? 'bg-blue-50 text-blue-500' : 'text-gray-400 hover:bg-gray-100 hover:text-blue-500'}`} title="Collaborators">
+                                    <Users size={20} />
+                                </button>
+                            )}
+                            {canShare && (
+                                <></> /* Removed since MarkdownEditor currently doesn't implement onShare button here, but just in case keeping logic */
+                            )}
+                            <button onClick={() => setData(s => ({ ...s, isPinned: !s.isPinned }))} className={`p-2 rounded-full ${data.isPinned ? 'bg-yellow-100 text-yellow-600' : 'text-gray-400 hover:bg-gray-100'}`} disabled={readOnly}>
                                 <Star size={20} fill={data.isPinned ? "currentColor" : "none"} />
                             </button>
                         </div>
@@ -222,50 +244,53 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                         #{tag} <button onClick={() => setData(s => ({ ...s, tags: s.tags.filter((_, idx) => idx !== i) }))} className="hover:text-red-500"><X size={12} /></button>
                                     </span>
                                 ))}
-                                {isTagInputVisible ? (
+                                {isTagInputVisible && !readOnly ? (
                                     <input autoFocus placeholder="Tag..." className="px-3 py-1.5 rounded-full border border-[#4285f4] outline-none w-20 bg-transparent"
                                         onKeyDown={(e) => { if (e.key === 'Enter' && e.target.value.trim()) { setData(s => ({ ...s, tags: [...s.tags, e.target.value.trim()] })); setIsTagInputVisible(false); } }}
                                         onBlur={() => setIsTagInputVisible(false)} />
-                                ) : (
+                                ) : !readOnly && (
                                     <button onClick={() => setIsTagInputVisible(true)} className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] transition-colors"><Tag size={12} /> Tag</button>
                                 )}
 
                                 {/* Attach */}
-                                <label className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] cursor-pointer transition-colors">
-                                    <Paperclip size={12} /> Attach
-                                    <input type="file" className="hidden" onChange={async (e) => {
-                                        const file = e.target.files[0];
-                                        if (!file) return;
+                                {!readOnly && (
+                                    <label className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] cursor-pointer transition-colors">
+                                        <Paperclip size={12} /> Attach
+                                        <input type="file" className="hidden" onChange={async (e) => {
+                                            const file = e.target.files[0];
+                                            if (!file) return;
 
-                                        if (file.size > 50 * 1024 * 1024) {
-                                            alert("File is too large. Maximum size is 50MB.");
+                                            if (file.size > 50 * 1024 * 1024) {
+                                                alert("File is too large. Maximum size is 50MB.");
+                                                e.target.value = null;
+                                                return;
+                                            }
+
+                                            try {
+                                                const scope = data.sharedId ? `shared_docs/${data.sharedId}` : (item.workspaceId ? `workspaces/${item.workspaceId}/markdown` : `users/${user.uid}/markdown`);
+                                                const res = await uploadToFirebase(file, cryptoKey, null, scope);
+                                                const driveFileId = res.id;
+
+                                                setData(prev => ({
+                                                    ...prev,
+                                                    attachments: [...prev.attachments, {
+                                                        name: file.name,
+                                                        type: file.type,
+                                                        driveFileId,
+                                                        provider: 'firebase',
+                                                        size: file.size
+                                                    }]
+                                                }));
+                                            } catch (e) {
+                                                console.error("Upload failed", e);
+                                                alert(e.message);
+                                            }
+
+                                            // Reset input
                                             e.target.value = null;
-                                            return;
-                                        }
-
-                                        try {
-                                            const res = await uploadToFirebase(file, cryptoKey, null, 'markdown');
-                                            const driveFileId = res.id;
-
-                                            setData(prev => ({
-                                                ...prev,
-                                                attachments: [...prev.attachments, {
-                                                    name: file.name,
-                                                    type: file.type,
-                                                    driveFileId,
-                                                    provider: 'firebase',
-                                                    size: file.size
-                                                }]
-                                            }));
-                                        } catch (e) {
-                                            console.error("Upload failed", e);
-                                            alert(e.message);
-                                        }
-
-                                        // Reset input
-                                        e.target.value = null;
-                                    }} />
-                                </label>
+                                        }} />
+                                    </label>
+                                )}
                             </div>
 
                             {/* Attachment Thumbnails */}
@@ -277,7 +302,8 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                                 setViewingAttachment(att); // Legacy Base64
                                             } else if (att.driveFileId) {
                                                 try {
-                                                    const url = await downloadFromFirebase(att.driveFileId, cryptoKey, null, 'markdown');
+                                                    const key = (data.isShared && data.docKey) ? data.docKey : cryptoKey;
+                                                    const url = await downloadFromFirebase(att.driveFileId, key, null, 'markdown');
                                                     setViewingAttachment({ ...att, data: url });
                                                 } catch (e) {
                                                     alert("Failed to decrypt file");
@@ -285,7 +311,7 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                             }
                                         }} className="group relative flex-shrink-0 w-16 h-16 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all">
                                             {att.data && att.type.startsWith('image/') ? <img src={att.data} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt={att.name} /> : getThumbnailIcon(att.type)}
-                                            <button onClick={(e) => { e.stopPropagation(); setData(s => ({ ...s, attachments: s.attachments.filter((_, idx) => idx !== i) })) }} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-lg p-1 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10"><X size={10} /></button>
+                                            {!readOnly && <button onClick={(e) => { e.stopPropagation(); setData(s => ({ ...s, attachments: s.attachments.filter((_, idx) => idx !== i) })) }} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-lg p-1 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10"><X size={10} /></button>}
                                         </div>
                                     ))}
                                 </div>
@@ -303,7 +329,8 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                         value={data.content}
                                         onChange={handleContentChange}
                                         placeholder="# Title\n\nStart typing..."
-                                        className="w-full outline-none resize-none text-gray-700 leading-relaxed text-lg bg-transparent pb-32 font-mono overflow-hidden"
+                                        disabled={readOnly}
+                                        className="w-full outline-none resize-none text-gray-700 leading-relaxed text-lg bg-transparent pb-32 font-mono overflow-hidden disabled:opacity-80"
                                         style={{ minHeight: '60vh' }}
                                     />
                                 )}

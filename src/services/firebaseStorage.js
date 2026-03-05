@@ -5,7 +5,19 @@ import { encryptData, decryptData } from '../lib/crypto';
 
 // Reusing same signature as driveStorage.js functions for interoperability.
 
-export const uploadEncryptedFile = async (file, masterKey, accessToken, appName = 'misc') => {
+// Helper to determine the actual storage path to use.
+// If fileId/scope contains a slash, it's treated as a relative scoped path.
+const getStoragePath = (fileIdOrScope, appName) => {
+    if (!fileIdOrScope) return `artifacts/${appId}/${appName}/unknown`;
+    if (fileIdOrScope.includes('/')) {
+        // e.g., workspaces/123/notes/uuid-1234
+        return `artifacts/${appId}/${fileIdOrScope}`;
+    }
+    // Legacy generic path
+    return `artifacts/${appId}/${appName}/${fileIdOrScope}`;
+};
+
+export const uploadEncryptedFile = async (file, masterKey, accessToken, scopeOrAppName = 'misc') => {
     // Read the File as ArrayBuffer and encrypt it natively (same AES-GCM as driveStorage)
     const arrayBuffer = await file.arrayBuffer();
 
@@ -26,8 +38,19 @@ export const uploadEncryptedFile = async (file, masterKey, accessToken, appName 
     const encryptedBlob = new Blob([ivAndEncryptedData], { type: 'application/octet-stream' });
 
     // Ensure we don't upload file metadata like name in plaintext.
-    const fileId = crypto.randomUUID();
-    const storageRef = ref(storage, `artifacts/${appId}/${appName}/${fileId}`);
+    const uuid = crypto.randomUUID();
+
+    // If scopeOrAppName is something like "workspaces/1abc234", append the app specific string
+    // But since `scopeOrAppName` from the apps might already have "notes" or just be "notes",
+    // We expect the caller to pass: "workspaces/123/notes" or just "notes".
+    let storagePathSuffix = scopeOrAppName;
+    if (scopeOrAppName.includes('/')) {
+        storagePathSuffix = `${scopeOrAppName}/${uuid}`;
+    } else {
+        storagePathSuffix = `${scopeOrAppName}/${uuid}`; // Legacy standard
+    }
+
+    const storageRef = ref(storage, getStoragePath(storagePathSuffix, null));
 
     // Upload to Firebase Storage
     const metadata = {
@@ -38,8 +61,9 @@ export const uploadEncryptedFile = async (file, masterKey, accessToken, appName 
     await uploadBytesResumable(storageRef, encryptedBlob, metadata);
 
     // Return the minimal shape matching Drive response so components don't crash
+    // We return the storagePathSuffix as the 'id' so future downloads know where to look.
     return {
-        id: fileId,
+        id: storagePathSuffix,
         mimeType: file.type || 'application/octet-stream',
         name: file.name,
         size: file.size
@@ -47,7 +71,7 @@ export const uploadEncryptedFile = async (file, masterKey, accessToken, appName 
 };
 
 export const downloadEncryptedFileBlob = async (fileId, masterKey, accessToken, appName = 'misc') => {
-    const storageRef = ref(storage, `artifacts/${appId}/${appName}/${fileId}`);
+    const storageRef = ref(storage, getStoragePath(fileId, appName));
 
     // Get the encrypted blob from Firebase
     const encryptedBlob = await getBlob(storageRef);
@@ -78,7 +102,7 @@ export const downloadEncryptedFile = async (fileId, masterKey, accessToken, appN
 
 export const deleteFirebaseFile = async (fileId, appName = 'misc') => {
     if (!fileId) return;
-    const storageRef = ref(storage, `artifacts/${appId}/${appName}/${fileId}`);
+    const storageRef = ref(storage, getStoragePath(fileId, appName));
     try {
         await deleteObject(storageRef);
     } catch (e) {
@@ -86,20 +110,27 @@ export const deleteFirebaseFile = async (fileId, appName = 'misc') => {
     }
 };
 
-export const uploadNormalFile = async (file, cryptoKey, accessToken, appName = 'misc') => {
-    const fileId = crypto.randomUUID();
-    const storageRef = ref(storage, `artifacts/${appId}/${appName}/${fileId}`);
+export const uploadNormalFile = async (file, cryptoKey, accessToken, scopeOrAppName = 'misc') => {
+    const uuid = crypto.randomUUID();
+    let storagePathSuffix = scopeOrAppName;
+    if (scopeOrAppName.includes('/')) {
+        storagePathSuffix = `${scopeOrAppName}/${uuid}`;
+    } else {
+        storagePathSuffix = `${scopeOrAppName}/${uuid}`;
+    }
+
+    const storageRef = ref(storage, getStoragePath(storagePathSuffix, null));
 
     const metadata = {
         contentType: file.type || 'application/octet-stream'
     };
 
     await uploadBytesResumable(storageRef, file, metadata);
-    return fileId;
+    return storagePathSuffix;
 };
 
 export const downloadNormalFileBlob = async (fileId, cryptoKey, accessToken, appName = 'misc') => {
-    const storageRef = ref(storage, `artifacts/${appId}/${appName}/${fileId}`);
+    const storageRef = ref(storage, getStoragePath(fileId, appName));
     return await getBlob(storageRef);
 };
 

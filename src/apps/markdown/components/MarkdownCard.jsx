@@ -1,10 +1,12 @@
 // src/apps/markdown/components/MarkdownCard.jsx
 import React from 'react';
 import {
-    FileText, Folder, Star, X, Move, Paperclip, Clock, Globe
+    FileText, Folder, Star, X, Move, Paperclip, Clock, Globe, Users
 } from 'lucide-react';
+import { usePermissions } from '../../../hooks/usePermissions';
 
-const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare }) => {
+const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare, onCollaborate }) => {
+    const { canDelete, canShare } = usePermissions(item);
 
     // Format Date & Time
     const formatDateTime = (dateVal) => {
@@ -75,13 +77,26 @@ const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare }) => {
                 </span>
                 <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     {item.type !== 'folder' && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onShare?.(item); }}
-                            className={`p-1 ${item.sharedId ? 'text-green-500' : 'text-gray-300 hover:text-blue-500'}`}
-                            title={item.sharedId ? 'Shared' : 'Share'}
-                        >
-                            <Globe size={14} />
-                        </button>
+                        <>
+                            {onCollaborate && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onCollaborate(item); }}
+                                    className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}
+                                    title="Collaborate"
+                                >
+                                    <Users size={14} />
+                                </button>
+                            )}
+                            {canShare && onShare && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onShare(item); }}
+                                    className={`p-1 ${item.sharedId ? 'text-green-500' : 'text-gray-300 hover:text-blue-500'}`}
+                                    title={item.sharedId ? 'Shared' : 'Share'}
+                                >
+                                    <Globe size={14} />
+                                </button>
+                            )}
+                        </>
                     )}
                     <button
                         onClick={(e) => { e.stopPropagation(); onMove(item); }}
@@ -89,12 +104,14 @@ const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare }) => {
                     >
                         <Move size={14} />
                     </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(item); }}
-                        className="text-gray-300 hover:text-red-500 p-1"
-                    >
-                        <X size={14} />
-                    </button>
+                    {canDelete && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+                            className="text-gray-300 hover:text-red-500 p-1"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

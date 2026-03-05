@@ -1,40 +1,31 @@
 // src/services/passwords.js
 import {
-  collection, query, onSnapshot, addDoc, serverTimestamp,
+  collection, addDoc, serverTimestamp,
   updateDoc, doc, deleteDoc
 } from 'firebase/firestore';
 import { db, appId } from '../../../lib/firebase';
-import { encryptData, decryptData } from '../../../lib/crypto';
+import { encryptData } from '../../../lib/crypto';
+import createEncryptedCRUD from '../../../services/createEncryptedCRUD';
+
+const crud = createEncryptedCRUD('passwords', {
+  transformDecrypted: (raw, decrypted) => ({
+    type: decrypted.type || 'password',
+    parentId: decrypted.parentId || null,
+    ...decrypted
+  })
+});
 
 // --- Listeners ---
 
-export const listenToPasswords = (userId, cryptoKey, callback) => {
-  const q = query(collection(db, 'artifacts', appId, 'users', userId, 'passwords'));
-
-  return onSnapshot(q, async (snapshot) => {
-    const decrypted = await Promise.all(snapshot.docs.map(async d => {
-      const raw = d.data();
-      const decryptedData = await decryptData(raw, cryptoKey);
-
-      return {
-        id: d.id,
-        // FIXED: Legacy Data Fallbacks
-        // If old data is missing these fields, safely default them so they appear at the root level
-        type: decryptedData.type || 'password',
-        parentId: decryptedData.parentId || null,
-        ...decryptedData
-      };
-    }));
-
-    // Sort locally: Folders first, then alphabetically by service name
-    decrypted.sort((a, b) => {
+export const listenToPasswords = (userId, cryptoKey, callback) =>
+  crud.listen(userId, cryptoKey, (data) => {
+    // Sort: Folders first, then alphabetically by service name
+    data.sort((a, b) => {
       if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
       return (a.service || a.title || '').localeCompare(b.service || b.title || '');
     });
-
-    callback(decrypted);
+    callback(data);
   });
-};
 
 // --- Actions ---
 
@@ -50,27 +41,12 @@ export const savePasswordItem = async (userId, cryptoKey, itemData) => {
     parentId: itemData.parentId || null,
     updatedAt: itemData.updatedAt || new Date().toISOString()
   };
-
-  const encrypted = await encryptData(payload, cryptoKey);
-
-  if (itemData.id) {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'passwords', itemData.id), { ...encrypted });
-    return itemData.id;
-  } else {
-    const ref = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'passwords'), {
-      ...encrypted, createdAt: serverTimestamp()
-    });
-    return ref.id;
-  }
+  return crud.save(userId, cryptoKey, { ...payload, id: itemData.id });
 };
 
 export const createPasswordFolder = async (userId, cryptoKey, title, parentId = null) => {
   const payload = { type: 'folder', title, parentId };
-  const encrypted = await encryptData(payload, cryptoKey);
-  const docRef = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'passwords'), {
-    ...encrypted, createdAt: serverTimestamp()
-  });
-  return docRef.id;
+  return crud.save(userId, cryptoKey, payload);
 };
 
 export const updatePasswordFolder = async (userId, cryptoKey, id, title) => {
@@ -87,16 +63,13 @@ export const deletePasswordItem = async (userId, itemId, allItems = []) => {
       await deletePasswordItem(userId, child.id, allItems);
     }
   }
-  await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'passwords', itemId));
+  await crud.remove(userId, itemId);
 };
 
 export const createNewPasswordEntry = async (userId, cryptoKey, parentId = null) => {
   const initialData = { type: 'password', service: '', username: '', password: '', url: '', notes: '', history: [], parentId };
-  const encrypted = await encryptData(initialData, cryptoKey);
-  const docRef = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'passwords'), {
-    ...encrypted, createdAt: serverTimestamp()
-  });
-  return { ...initialData, id: docRef.id };
+  const id = await crud.save(userId, cryptoKey, initialData);
+  return { ...initialData, id };
 };
 
 // --- CSV INTEGRATION (Google Passwords format) ---

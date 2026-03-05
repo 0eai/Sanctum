@@ -6,33 +6,63 @@ import { db, appId } from '../../../lib/firebase';
 import { encryptData, decryptData } from '../../../lib/crypto';
 import { getNextDate } from '../../../lib/dateUtils';
 
+// --- Workspace Context Helper ---
+const getClCol = (userId, ctx) =>
+    ctx?.workspaceId
+        ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'checklists')
+        : collection(db, 'artifacts', appId, 'users', userId, 'checklists');
+
+const getClDoc = (userId, listId, ctx) =>
+    ctx?.workspaceId
+        ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'checklists', listId)
+        : doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId);
+
+const getItemsCol = (userId, listId, ctx) =>
+    ctx?.workspaceId
+        ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'checklists', listId, 'items')
+        : collection(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items');
+
+const getItemDoc = (userId, listId, itemId, ctx) =>
+    ctx?.workspaceId
+        ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'checklists', listId, 'items', itemId)
+        : doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', itemId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
 // --- Listeners ---
 
-export const listenToChecklists = (userId, cryptoKey, callback) => {
-    const q = query(
-        collection(db, 'artifacts', appId, 'users', userId, 'checklists'),
-        orderBy('createdAt', 'desc')
-    );
+export const listenToChecklists = (userId, cryptoKey, callback, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const q = query(getClCol(userId, ctx), orderBy('createdAt', 'desc'));
 
     return onSnapshot(q, async (snap) => {
         const lists = await Promise.all(snap.docs.map(async (d) => {
             const raw = d.data();
-            const decrypted = await decryptData(raw, cryptoKey);
-            return {
-                id: d.id,
-                ...raw,
-                ...decrypted,
-                dueDate: decrypted.dueDate || null,
-                repeat: decrypted.repeat || 'none'
-            };
+            try {
+                const decrypted = await decryptData(raw, key);
+                return {
+                    id: d.id,
+                    ...raw,
+                    ...(decrypted || {}),
+                    dueDate: decrypted?.dueDate || null,
+                    repeat: decrypted?.repeat || 'none'
+                };
+            } catch (error) {
+                console.warn('Failed to decrypt checklist', d.id, error.message || error);
+                return {
+                    id: d.id,
+                    title: 'Encrypted Checklist (Decryption Failed)',
+                    dueDate: null,
+                    repeat: 'none',
+                    order: raw.order || 0
+                };
+            }
         }));
 
-        // Client-side sort by order
         lists.sort((a, b) => {
             const orderA = a.order ?? 0;
             const orderB = b.order ?? 0;
             if (orderA !== orderB) return orderA - orderB;
-            // Secondary sort by createdAt desc (newest first for 0 order)
             return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
         });
 
@@ -40,16 +70,14 @@ export const listenToChecklists = (userId, cryptoKey, callback) => {
     });
 };
 
-export const listenToItems = (userId, listId, cryptoKey, callback) => {
-    const q = query(
-        collection(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items'),
-        orderBy('createdAt', 'asc')
-    );
+export const listenToItems = (userId, listId, cryptoKey, callback, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const q = query(getItemsCol(userId, listId, ctx), orderBy('createdAt', 'asc'));
 
     return onSnapshot(q, async (snap) => {
         const items = await Promise.all(snap.docs.map(async (d) => {
             const rawData = d.data();
-            const decrypted = await decryptData(rawData, cryptoKey);
+            const decrypted = await decryptData(rawData, key);
             return {
                 id: d.id,
                 ...decrypted,
@@ -73,60 +101,64 @@ export const listenToItems = (userId, listId, cryptoKey, callback) => {
 
 // --- Actions ---
 
-export const createChecklist = async (userId, cryptoKey, { title, dueDate, repeat }) => {
-    const encryptedData = await encryptData({ title, dueDate, repeat }, cryptoKey);
-    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'checklists'), {
+export const createChecklist = async (userId, cryptoKey, { title, dueDate, repeat }, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encryptedData = await encryptData({ title, dueDate, repeat }, key);
+    const ref = await addDoc(getClCol(userId, ctx), {
         ...encryptedData,
         createdAt: serverTimestamp(),
         itemCount: 0,
         completedCount: 0,
-        order: Date.now() // Simple default order
+        order: Date.now()
     });
+    return ref.id;
 };
 
-export const updateChecklistEntity = async (userId, listId, itemId, cryptoKey, payload, isList) => {
-    const encrypted = await encryptData(payload, cryptoKey);
+export const updateChecklistEntity = async (userId, listId, itemId, cryptoKey, payload, isList, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encrypted = await encryptData(payload, key);
     if (isList) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId), encrypted);
+        await updateDoc(getClDoc(userId, listId, ctx), encrypted);
     } else {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', itemId), encrypted);
+        await updateDoc(getItemDoc(userId, listId, itemId, ctx), encrypted);
     }
 };
 
-export const addChecklistItem = async (userId, listId, cryptoKey, { text, dueDate, repeat }) => {
-    const encryptedContent = await encryptData({ text, dueDate, repeat }, cryptoKey);
+export const addChecklistItem = async (userId, listId, cryptoKey, { text, dueDate, repeat }, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encryptedContent = await encryptData({ text, dueDate, repeat }, key);
 
     const batch = writeBatch(db);
-    const itemRef = doc(collection(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items'));
-    const listRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId);
+    const itemRef = doc(getItemsCol(userId, listId, ctx));
+    const listRef = getClDoc(userId, listId, ctx);
 
     batch.set(itemRef, {
         ...encryptedContent,
         isCompleted: false,
         createdAt: serverTimestamp(),
-        order: Date.now() // Simple default order
+        order: Date.now()
     });
     batch.update(listRef, { itemCount: increment(1) });
 
     await batch.commit();
 };
 
-export const toggleChecklistItem = async (userId, listId, item, cryptoKey) => {
-    // Logic: If repeating item is checked, reschedule it instead of completing it
+export const toggleChecklistItem = async (userId, listId, item, cryptoKey, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     if (!item.isCompleted && item.dueDate && item.repeat && item.repeat !== 'none') {
         const nextDate = getNextDate(item.dueDate, item.repeat);
         const payload = { ...item, dueDate: nextDate };
-        delete payload.id; delete payload.isCompleted; // Cleanup before encrypt
+        delete payload.id; delete payload.isCompleted;
 
-        const encrypted = await encryptData(payload, cryptoKey);
-        await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', item.id), {
+        const encrypted = await encryptData(payload, key);
+        await updateDoc(getItemDoc(userId, listId, item.id, ctx), {
             ...encrypted, isCompleted: false
         });
     } else {
         const newStatus = !item.isCompleted;
         const batch = writeBatch(db);
-        const itemRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', item.id);
-        const listRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId);
+        const itemRef = getItemDoc(userId, listId, item.id, ctx);
+        const listRef = getClDoc(userId, listId, ctx);
 
         batch.update(itemRef, { isCompleted: newStatus });
         batch.update(listRef, { completedCount: increment(newStatus ? 1 : -1) });
@@ -135,37 +167,35 @@ export const toggleChecklistItem = async (userId, listId, item, cryptoKey) => {
     }
 };
 
-export const resetChecklist = async (userId, listId, items, listMeta, cryptoKey) => {
+export const resetChecklist = async (userId, listId, items, listMeta, cryptoKey, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     const batch = writeBatch(db);
 
-    // 1. Reset all items
     items.forEach(item => {
         if (item.isCompleted) {
-            const ref = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', item.id);
+            const ref = getItemDoc(userId, listId, item.id, ctx);
             batch.update(ref, { isCompleted: false });
         }
     });
 
-    // 2. Update list metadata (Next Date)
     const nextDate = getNextDate(listMeta.dueDate, listMeta.repeat);
     const payload = { ...listMeta, dueDate: nextDate };
     delete payload.id; delete payload.itemCount; delete payload.completedCount; delete payload.createdAt;
 
-    const encrypted = await encryptData(payload, cryptoKey);
-    const listRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId);
+    const encrypted = await encryptData(payload, key);
+    const listRef = getClDoc(userId, listId, ctx);
 
     batch.update(listRef, { ...encrypted, completedCount: 0 });
     await batch.commit();
 
-    return nextDate; // Return new date to update local state immediately if needed
+    return nextDate;
 };
 
-export const deleteChecklistEntity = async (userId, listId, itemId, isCompleted) => {
+export const deleteChecklistEntity = async (userId, listId, itemId, isCompleted, ctx = null) => {
     if (itemId) {
-        // Delete Item
         const batch = writeBatch(db);
-        const itemRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', itemId);
-        const listRef = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId);
+        const itemRef = getItemDoc(userId, listId, itemId, ctx);
+        const listRef = getClDoc(userId, listId, ctx);
 
         batch.delete(itemRef);
         batch.update(listRef, {
@@ -174,14 +204,13 @@ export const deleteChecklistEntity = async (userId, listId, itemId, isCompleted)
         });
         await batch.commit();
     } else {
-        // Delete List
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId));
+        await deleteDoc(getClDoc(userId, listId, ctx));
     }
 };
 
 // --- Reordering ---
 
-export const reorderList = async (userId, listId, direction, allLists) => {
+export const reorderList = async (userId, listId, direction, allLists, ctx = null) => {
     const index = allLists.findIndex(l => l.id === listId);
     if (index === -1) return;
 
@@ -192,7 +221,6 @@ export const reorderList = async (userId, listId, direction, allLists) => {
     const itemA = allLists[index];
     const itemB = allLists[targetIndex];
 
-    // Check effective order equality (handles null/0/undefined collisions)
     const needsInitialization = (itemA.order || 0) === (itemB.order || 0);
 
     if (needsInitialization) {
@@ -204,13 +232,13 @@ export const reorderList = async (userId, listId, direction, allLists) => {
             else if (idx === targetIndex) newOrder = index * BASE_SPACING;
 
             if (item.order !== newOrder) {
-                const ref = doc(db, 'artifacts', appId, 'users', userId, 'checklists', item.id);
+                const ref = getClDoc(userId, item.id, ctx);
                 batch.update(ref, { order: newOrder });
             }
         });
     } else {
-        const refA = doc(db, 'artifacts', appId, 'users', userId, 'checklists', itemA.id);
-        const refB = doc(db, 'artifacts', appId, 'users', userId, 'checklists', itemB.id);
+        const refA = getClDoc(userId, itemA.id, ctx);
+        const refB = getClDoc(userId, itemB.id, ctx);
 
         batch.update(refA, { order: itemB.order });
         batch.update(refB, { order: itemA.order });
@@ -219,7 +247,7 @@ export const reorderList = async (userId, listId, direction, allLists) => {
     await batch.commit();
 };
 
-export const reorderItem = async (userId, listId, itemId, direction, allItems) => {
+export const reorderItem = async (userId, listId, itemId, direction, allItems, ctx = null) => {
     const index = allItems.findIndex(i => i.id === itemId);
     if (index === -1) return;
 
@@ -241,13 +269,13 @@ export const reorderItem = async (userId, listId, itemId, direction, allItems) =
             else if (idx === targetIndex) newOrder = index * BASE_SPACING;
 
             if (item.order !== newOrder) {
-                const ref = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', item.id);
+                const ref = getItemDoc(userId, listId, item.id, ctx);
                 batch.update(ref, { order: newOrder });
             }
         });
     } else {
-        const refA = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', itemA.id);
-        const refB = doc(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items', itemB.id);
+        const refA = getItemDoc(userId, listId, itemA.id, ctx);
+        const refB = getItemDoc(userId, listId, itemB.id, ctx);
 
         batch.update(refA, { order: itemB.order });
         batch.update(refB, { order: itemA.order });

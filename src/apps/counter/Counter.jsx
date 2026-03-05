@@ -1,10 +1,7 @@
 // src/apps/counter/Counter.jsx
 import React, { useState, useEffect } from 'react';
 import { Plus, AlertCircle } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db, appId } from '../../lib/firebase';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
-import { encryptData } from '../../lib/crypto';
 
 // Sub-components
 import CounterHeader from './components/CounterHeader';
@@ -17,9 +14,9 @@ import Fab from '../../components/ui/Fab';
 
 // Services
 import {
-  listenToCounters, listenToEntries, // <-- ADDED THESE LISTENERS
+  listenToCounters, listenToEntries,
   saveCounter, saveEntry, deleteCounterEntity, startTimer, stopTimer,
-  exportAllCounters, importCounters, reorderCounter
+  exportAllCounters, importCounters, reorderCounter, rescheduleCounter
 } from './services/counter';
 
 // --- Helpers ---
@@ -78,17 +75,17 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   }, [route]);
 
   // --- 2. Data Listeners (FIXED) ---
-  
+
   // Use the service listener so the custom 'order' property is respected!
   useEffect(() => {
     if (!user || !cryptoKey) return;
     setLoading(true);
-    
+
     const unsubscribe = listenToCounters(user.uid, cryptoKey, (data) => {
-        setCounters(data);
-        setLoading(false);
+      setCounters(data);
+      setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, [user, cryptoKey]);
 
@@ -96,9 +93,9 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
     if (!user || !selectedCounter || !cryptoKey || view !== 'detail') return;
 
     const unsubscribe = listenToEntries(user.uid, selectedCounter.id, cryptoKey, (data) => {
-        setEntries(data);
+      setEntries(data);
     });
-    
+
     return () => unsubscribe();
   }, [user, selectedCounter, cryptoKey, view]);
 
@@ -161,10 +158,8 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       entryData.endTimestamp = new Date(formData.endDate);
     }
 
-    if (!editingEntry && selectedCounter.repeat && selectedCounter.repeat !== 'none' && selectedCounter.dueDate) {
-      const nextDate = getNextDate(selectedCounter.dueDate, selectedCounter.repeat);
-      const encryptedMeta = await encryptData({ title: selectedCounter.title, dueDate: nextDate, repeat: selectedCounter.repeat }, cryptoKey);
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'counters', selectedCounter.id), encryptedMeta);
+    if (!editingEntry) {
+      await rescheduleCounter(user.uid, cryptoKey, selectedCounter);
     }
 
     await saveEntry(user.uid, selectedCounter.id, cryptoKey, entryData, selectedCounter);

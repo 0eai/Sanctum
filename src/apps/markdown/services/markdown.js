@@ -8,30 +8,59 @@ import { encryptData, decryptData } from '../../../lib/crypto';
 import { getNextDate } from '../../../lib/dateUtils';
 import { deleteFirebaseFile } from '../../../services/firebaseStorage';
 
+// --- Workspace Context Helper ---
+const getMdCol = (userId, ctx) =>
+    ctx?.workspaceId
+        ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'markdown')
+        : collection(db, 'artifacts', appId, 'users', userId, 'markdown');
+
+const getMdDoc = (userId, docId, ctx) =>
+    ctx?.workspaceId
+        ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'markdown', docId)
+        : doc(db, 'artifacts', appId, 'users', userId, 'markdown', docId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
 // --- Listeners ---
 
-export const listenToMarkdownDocs = (userId, cryptoKey, callback) => {
+export const listenToMarkdownDocs = (userId, cryptoKey, callback, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     const q = query(
-        collection(db, 'artifacts', appId, 'users', userId, 'markdown'),
+        getMdCol(userId, ctx),
         orderBy('updatedAt', 'desc')
     );
     return onSnapshot(q, async (snapshot) => {
         const data = await Promise.all(snapshot.docs.map(async doc => {
             const raw = doc.data();
-            const decrypted = await decryptData(raw, cryptoKey);
-            return {
-                id: doc.id,
-                ...raw,
-                ...decrypted,
-                // Ensure arrays and fields exist
-                tags: decrypted.tags || [],
-                attachments: decrypted.attachments || [],
-                dueDate: decrypted.dueDate || null,
-                repeat: decrypted.repeat || 'none',
-                type: raw.type || 'markdown',
-                parentId: raw.parentId || null,
-                updatedAt: raw.updatedAt?.toDate() || new Date()
-            };
+            try {
+                const decrypted = await decryptData(raw, key);
+                return {
+                    id: doc.id,
+                    ...raw,
+                    ...(decrypted || {}),
+                    tags: decrypted?.tags || [],
+                    attachments: decrypted?.attachments || [],
+                    dueDate: decrypted?.dueDate || null,
+                    repeat: decrypted?.repeat || 'none',
+                    type: raw.type || 'markdown',
+                    parentId: raw.parentId || null,
+                    updatedAt: raw.updatedAt?.toDate() || new Date()
+                };
+            } catch (error) {
+                console.warn('Failed to decrypt markdown doc', doc.id, error.message || error);
+                return {
+                    id: doc.id,
+                    title: 'Encrypted Data (Decryption Failed)',
+                    content: '',
+                    tags: [],
+                    attachments: [],
+                    dueDate: null,
+                    repeat: 'none',
+                    type: raw.type || 'markdown',
+                    parentId: raw.parentId || null,
+                    updatedAt: raw.updatedAt?.toDate() || new Date()
+                };
+            }
         }));
         callback(data);
     });
@@ -39,8 +68,8 @@ export const listenToMarkdownDocs = (userId, cryptoKey, callback) => {
 
 // --- CRUD Operations ---
 
-export const saveMarkdownDoc = async (userId, cryptoKey, docData, parentId) => {
-    // Encrypt all sensitive content including new fields
+export const saveMarkdownDoc = async (userId, cryptoKey, docData, parentId, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     const payload = {
         title: docData.title,
         content: docData.content,
@@ -52,7 +81,7 @@ export const saveMarkdownDoc = async (userId, cryptoKey, docData, parentId) => {
         shareUrlKey: docData.shareUrlKey || null
     };
 
-    const encrypted = await encryptData(payload, cryptoKey);
+    const encrypted = await encryptData(payload, key);
 
     const meta = {
         updatedAt: serverTimestamp(),
@@ -62,29 +91,30 @@ export const saveMarkdownDoc = async (userId, cryptoKey, docData, parentId) => {
     };
 
     if (docData.id) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'markdown', docData.id), { ...encrypted, ...meta });
+        await updateDoc(getMdDoc(userId, docData.id, ctx), { ...encrypted, ...meta });
         return docData.id;
     } else {
-        const ref = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'markdown'), { ...encrypted, ...meta, createdAt: serverTimestamp() });
+        const ref = await addDoc(getMdCol(userId, ctx), { ...encrypted, ...meta, createdAt: serverTimestamp() });
         return ref.id;
     }
 };
 
-export const rescheduleMarkdownDoc = async (userId, cryptoKey, docData) => {
+export const rescheduleMarkdownDoc = async (userId, cryptoKey, docData, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
     const nextDate = getNextDate(docData.dueDate, docData.repeat);
     const payload = { ...docData, dueDate: nextDate };
-    // Remove metadata fields before re-encrypting content
     delete payload.id; delete payload.updatedAt; delete payload.createdAt; delete payload.type; delete payload.isPinned; delete payload.parentId; delete payload.oldId;
 
-    const encrypted = await encryptData(payload, cryptoKey);
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'markdown', docData.id), {
+    const encrypted = await encryptData(payload, key);
+    await updateDoc(getMdDoc(userId, docData.id, ctx), {
         ...encrypted, updatedAt: serverTimestamp()
     });
 };
 
-export const createFolder = async (userId, cryptoKey, title, parentId) => {
-    const encrypted = await encryptData({ title }, cryptoKey);
-    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'markdown'), {
+export const createFolder = async (userId, cryptoKey, title, parentId, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encrypted = await encryptData({ title }, key);
+    await addDoc(getMdCol(userId, ctx), {
         ...encrypted,
         type: 'folder',
         parentId: parentId || null,
@@ -93,14 +123,15 @@ export const createFolder = async (userId, cryptoKey, title, parentId) => {
     });
 };
 
-export const updateFolder = async (userId, cryptoKey, folderId, title, parentId = undefined) => {
-    const encrypted = await encryptData({ title }, cryptoKey);
+export const updateFolder = async (userId, cryptoKey, folderId, title, parentId = undefined, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const encrypted = await encryptData({ title }, key);
     const update = { ...encrypted, updatedAt: serverTimestamp() };
     if (parentId !== undefined) update.parentId = parentId;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'markdown', folderId), update);
+    await updateDoc(getMdDoc(userId, folderId, ctx), update);
 };
 
-export const deleteMarkdownItem = async (userId, item, allItems) => {
+export const deleteMarkdownItem = async (userId, item, allItems, ctx = null) => {
     if (item.type === 'folder') {
         const batch = writeBatch(db);
         const children = allItems.filter(i => i.parentId === item.id);
@@ -111,10 +142,10 @@ export const deleteMarkdownItem = async (userId, item, allItems) => {
                     if (att.driveFileId) await deleteFirebaseFile(att.driveFileId, 'markdown');
                 }
             }
-            batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'markdown', c.id));
+            batch.delete(getMdDoc(userId, c.id, ctx));
         }
 
-        batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'markdown', item.id));
+        batch.delete(getMdDoc(userId, item.id, ctx));
         await batch.commit();
     } else {
         if (item.attachments && item.attachments.length > 0) {
@@ -122,7 +153,7 @@ export const deleteMarkdownItem = async (userId, item, allItems) => {
                 if (att.driveFileId) await deleteFirebaseFile(att.driveFileId, 'markdown');
             }
         }
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'markdown', item.id));
+        await deleteDoc(getMdDoc(userId, item.id, ctx));
     }
 };
 

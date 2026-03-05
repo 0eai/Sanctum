@@ -2,15 +2,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     ChevronLeft, Bell, Share2, Star, X, Tag, Paperclip, FileText,
-    Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer
+    Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer, Users
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import FileViewer from '../../../components/ui/FileViewer';
 import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFile as downloadFromFirebase } from '../../../services/firebaseStorage';
 import TextareaAutosize from 'react-textarea-autosize';
+import { usePermissions } from '../../../hooks/usePermissions';
 
-const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate }) => {
+const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate, onCollaborate, readOnly }) => {
+    const { canShare } = usePermissions(note);
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...note
@@ -35,7 +37,19 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                 isPinned: note.isPinned || false, dueDate: note.dueDate || null, repeat: note.repeat || 'none'
             }));
         }
-    }, [note.id]);
+    }, [note?.id]);
+
+    // Sync collaboration metadata silently without overwriting user edits
+    useEffect(() => {
+        if (note && (note.sharedId !== data.sharedId || note.memberUids?.length !== data.memberUids?.length)) {
+            setData(prev => ({
+                ...prev,
+                sharedId: note.sharedId,
+                docKey: note.docKey || prev.docKey,
+                memberUids: note.memberUids || prev.memberUids
+            }));
+        }
+    }, [note?.sharedId, note?.docKey, note?.memberUids?.length]);
 
     // Auto-Save Trigger
     const debouncedData = useDebounce(data, 1000);
@@ -145,10 +159,17 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                             <button onClick={() => window.print()} className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors" title="Print note">
                                 <Printer size={20} />
                             </button>
-                            <button onClick={(e) => onShare(e, data)} className={`p-2 transition-colors rounded-full ${data.sharedId ? 'text-green-500 bg-green-50' : 'text-gray-400 hover:text-[#4285f4]'}`}>
-                                <Share2 size={20} />
-                            </button>
-                            <button onClick={() => setData(s => ({ ...s, isPinned: !s.isPinned }))} className={`p-2 rounded-full ${data.isPinned ? 'bg-yellow-100 text-yellow-600' : 'text-gray-400 hover:bg-gray-100'}`}>
+                            {onCollaborate && (
+                                <button onClick={(e) => onCollaborate(e, data)} className={`p-2 transition-colors rounded-full ${data.memberUids?.length > 0 ? 'text-blue-500 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`} title="Collaborators">
+                                    <Users size={20} />
+                                </button>
+                            )}
+                            {canShare && onShare && (
+                                <button onClick={(e) => onShare(e, data)} className={`p-2 transition-colors rounded-full ${data.sharedId ? 'text-green-500 bg-green-50' : 'text-gray-400 hover:text-[#4285f4]'}`} title="Public Link">
+                                    <Share2 size={20} />
+                                </button>
+                            )}
+                            <button onClick={() => setData(s => ({ ...s, isPinned: !s.isPinned }))} className={`p-2 rounded-full ${data.isPinned ? 'bg-yellow-100 text-yellow-600' : 'text-gray-400 hover:bg-gray-100'}`} disabled={readOnly}>
                                 <Star size={20} fill={data.isPinned ? "currentColor" : "none"} />
                             </button>
                         </div>
@@ -163,7 +184,8 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                 value={data.title}
                                 onChange={e => setData(s => ({ ...s, title: e.target.value }))}
                                 placeholder="Untitled Note"
-                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800 w-full resize-none overflow-hidden break-words mb-2 break-all"
+                                disabled={readOnly}
+                                className="text-3xl font-bold outline-none placeholder-gray-300 bg-transparent text-gray-800 w-full resize-none overflow-hidden break-words mb-2 break-all disabled:opacity-80"
                             />
 
                             {/* Meta Bar: Alerts, Tags, Attachments */}
@@ -221,7 +243,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                     </span>
                                 ))}
 
-                                {isTagInputVisible ? (
+                                {isTagInputVisible && !readOnly ? (
                                     <input
                                         autoFocus
                                         placeholder="Tag..."
@@ -234,48 +256,51 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                         }}
                                         onBlur={() => setIsTagInputVisible(false)}
                                     />
-                                ) : (
+                                ) : !readOnly && (
                                     <button onClick={() => setIsTagInputVisible(true)} className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] transition-colors">
                                         <Tag size={12} /> Tag
                                     </button>
                                 )}
 
                                 {/* 4. Attach Button */}
-                                <label className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] cursor-pointer transition-colors">
-                                    <Paperclip size={12} /> Attach
-                                    <input type="file" className="hidden" onChange={async (e) => {
-                                        const file = e.target.files[0];
-                                        if (!file) return;
+                                {!readOnly && (
+                                    <label className="flex items-center gap-1 text-gray-400 px-2.5 py-1.5 rounded-full border border-dashed border-gray-300 hover:border-[#4285f4] hover:text-[#4285f4] cursor-pointer transition-colors">
+                                        <Paperclip size={12} /> Attach
+                                        <input type="file" className="hidden" onChange={async (e) => {
+                                            const file = e.target.files[0];
+                                            if (!file) return;
 
-                                        if (file.size > 50 * 1024 * 1024) {
-                                            alert("File is too large. Maximum size is 50MB.");
+                                            if (file.size > 50 * 1024 * 1024) {
+                                                alert("File is too large. Maximum size is 50MB.");
+                                                e.target.value = null;
+                                                return;
+                                            }
+
+                                            try {
+                                                const scope = data.sharedId ? `shared_docs/${data.sharedId}` : (note.workspaceId ? `workspaces/${note.workspaceId}/notes` : `users/${user.uid}/notes`);
+                                                const res = await uploadToFirebase(file, cryptoKey, null, scope);
+                                                const driveFileId = res.id;
+
+                                                setData(prev => ({
+                                                    ...prev,
+                                                    attachments: [...prev.attachments, {
+                                                        name: file.name,
+                                                        type: file.type,
+                                                        driveFileId,
+                                                        provider: 'firebase',
+                                                        size: file.size
+                                                    }]
+                                                }));
+                                            } catch (e) {
+                                                console.error("Upload failed", e);
+                                                alert(e.message);
+                                            }
+
+                                            // Reset input so the same file can be selected again
                                             e.target.value = null;
-                                            return;
-                                        }
-
-                                        try {
-                                            const res = await uploadToFirebase(file, cryptoKey, null, 'notes');
-                                            const driveFileId = res.id;
-
-                                            setData(prev => ({
-                                                ...prev,
-                                                attachments: [...prev.attachments, {
-                                                    name: file.name,
-                                                    type: file.type,
-                                                    driveFileId,
-                                                    provider: 'firebase',
-                                                    size: file.size
-                                                }]
-                                            }));
-                                        } catch (e) {
-                                            console.error("Upload failed", e);
-                                            alert(e.message);
-                                        }
-
-                                        // Reset input so the same file can be selected again
-                                        e.target.value = null;
-                                    }} />
-                                </label>
+                                        }} />
+                                    </label>
+                                )}
                             </div>
 
                             {/* Compact Attachments Row */}
@@ -289,7 +314,8 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                                     setViewingAttachment(att); // Legacy Base64
                                                 } else if (att.driveFileId) {
                                                     try {
-                                                        const url = await downloadFromFirebase(att.driveFileId, cryptoKey, null, 'notes');
+                                                        const key = (data.isShared && data.docKey) ? data.docKey : cryptoKey;
+                                                        const url = await downloadFromFirebase(att.driveFileId, key, null, 'notes');
                                                         setViewingAttachment({ ...att, data: url });
                                                     } catch (e) {
                                                         alert("Failed to decrypt file");
@@ -323,7 +349,8 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                 value={data.content}
                                 onChange={e => setData(s => ({ ...s, content: e.target.value }))}
                                 placeholder="Start writing..."
-                                className="w-full outline-none resize-none text-gray-700 leading-relaxed text-lg bg-transparent pb-32 overflow-hidden"
+                                disabled={readOnly}
+                                className="w-full outline-none resize-none text-gray-700 leading-relaxed text-lg bg-transparent pb-32 overflow-hidden disabled:opacity-80"
                                 style={{ minHeight: '50vh' }}
                             />
                         </div>

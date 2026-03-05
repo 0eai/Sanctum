@@ -134,6 +134,21 @@ export const stopTimer = async (userId, counterId, entryId, counterMeta, cryptoK
     }
 };
 
+// Advance the due date of a counter based on its repeat frequency.
+// Called from Counter.jsx when a new entry is added to a repeating counter.
+export const rescheduleCounter = async (userId, cryptoKey, counter) => {
+    if (!counter.repeat || counter.repeat === 'none' || !counter.dueDate) return;
+    const nextDate = getNextDate(counter.dueDate, counter.repeat);
+    const encryptedMeta = await encryptData(
+        { title: counter.title, dueDate: nextDate, repeat: counter.repeat },
+        cryptoKey
+    );
+    await updateDoc(
+        doc(db, 'artifacts', appId, 'users', userId, 'counters', counter.id),
+        encryptedMeta
+    );
+};
+
 export const deleteCounterEntity = async (userId, counterId, entryId = null) => {
     if (entryId) {
         await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'counters', counterId, 'entries', entryId));

@@ -19,7 +19,7 @@ import PaperAiSection from './PaperAiSection';
 import PaperNotesPanel from './PaperNotesPanel';
 import PaperModals from './PaperModals';
 
-const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navigate }) => {
+const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, onClose, onOpenApp, navigate, onCollaborate, readOnly }) => {
     // Basic Meta
     const [internalPaperId, setInternalPaperId] = useState(paper?.id || null);
 
@@ -127,7 +127,9 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
             const { db, appId } = await import('../../../lib/firebase');
             const { decryptData, encryptData } = await import('../../../lib/crypto');
 
-            const ref = collection(db, 'artifacts', appId, 'users', user.uid, collectionName);
+            const ref = ctx?.workspaceId
+                ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, collectionName)
+                : collection(db, 'artifacts', appId, 'users', user.uid, collectionName);
             const snap = await getDocs(ref);
 
             for (const docSnap of snap.docs) {
@@ -163,16 +165,17 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         setupFolders();
 
         return () => { isMounted = false; };
-    }, [user, cryptoKey]);
+    }, [user, cryptoKey, ctx]);
 
     useEffect(() => {
-        if (!user || !cryptoKey) return;
-        fetchApiIntegrations(user.uid, cryptoKey).then(data => {
+        const key = personalKey || cryptoKey;
+        if (!user || !key) return;
+        fetchApiIntegrations(user.uid, key).then(data => {
             setIntegrations(data);
         });
 
         // Fetch AI Prompts
-        getOrCreateAiPromptsFolder(user.uid, cryptoKey).then(({ folderId, prompts }) => {
+        getOrCreateAiPromptsFolder(user.uid, key).then(({ folderId, prompts }) => {
             setPromptsFolderId(folderId);
             setAiPrompts(prompts);
             if (prompts.length > 0) {
@@ -181,7 +184,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 setSelectedPromptId(defaultPrompt.id);
             }
         }).catch(err => console.error("Failed to load AI Prompts", err));
-    }, [user, cryptoKey]);
+    }, [user, cryptoKey, personalKey]);
 
     useEffect(() => {
         if (!user || !cryptoKey || !title || !isPreviewMode) return;
@@ -210,7 +213,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                     id: noteId,
                     title: targetTitle,
                     content: debouncedNote
-                }, noteFolderId);
+                }, noteFolderId, ctx);
 
                 if (!noteId && newDocId) {
                     setNoteId(newDocId);
@@ -278,7 +281,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 payload.id = internalPaperId;
             }
 
-            const savedId = await savePaper(user.uid, cryptoKey, payload);
+            const savedId = await savePaper(user.uid, cryptoKey, payload, null, ctx);
 
             if (!internalPaperId && savedId) {
                 setInternalPaperId(savedId);
@@ -321,7 +324,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 await deleteFirebaseFile(driveFileId, 'research');
             }
 
-            await deletePaper(user.uid, internalPaperId);
+            await deletePaper(user.uid, internalPaperId, ctx);
             onClose();
         } catch (error) {
             console.error('Failed to delete paper:', error);
@@ -362,7 +365,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
             const arrayBuffer = await file.arrayBuffer();
             const hash = SparkMD5.ArrayBuffer.hash(arrayBuffer);
 
-            const existingPaper = papers?.find(p => p.pdfHash === hash && p.id !== internalPaperId);
+            const existingPaper = papers?.find(p => p?.pdfHash === hash && p?.id !== internalPaperId);
             if (existingPaper) {
                 const proceed = window.confirm(`A PDF with the same content already exists in your library (in "${existingPaper.title || 'Untitled Paper'}"). Upload anyway?`);
                 if (!proceed) {
@@ -377,11 +380,13 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
             setUploadProgress('Encrypting and uploading...');
 
             let fileId;
+            const scope = paper.sharedId ? `shared_docs/${paper.sharedId}` : (paper.workspaceId ? `workspaces/${paper.workspaceId}/research` : `users/${user.uid}/research`);
+
             if (isEncrypted || isPrivate) {
-                const res = await uploadToFirebase(file, cryptoKey, null, 'research');
+                const res = await uploadToFirebase(file, cryptoKey, null, scope);
                 fileId = res.id;
             } else {
-                fileId = await uploadNormalFirebase(file, cryptoKey, null, 'research');
+                fileId = await uploadNormalFirebase(file, cryptoKey, null, scope);
             }
 
             // Re-fetch paper state here or pass provider through state
@@ -394,7 +399,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                 handleSave(JSON.stringify({
                     title: title || file.name.replace('.pdf', ''), authors, year, venue, url, bibtex, tags, isPrivate, hasPdf: true,
                     pdfPath: tempPdfPath, pdfWrappingKey: tempWrappingKey, pdfHash: hash,
-                    driveFileId: fileId, isEncrypted, aiSummary, noteId, markdownId, provider
+                    driveFileId: fileId, isEncrypted, aiSummary, noteId, markdownId
                 }));
             }, 500);
 
@@ -417,17 +422,18 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
         setIsDecrypting(true);
 
         try {
+            const fileKey = (paper?.isShared && paper?.docKey) ? paper.docKey : cryptoKey;
             if (driveFileId) {
                 let blob;
-                if (paper?.isEncrypted || paper?.isPrivate) {
-                    blob = await downloadBlobFirebase(driveFileId, cryptoKey, null, 'research');
+                if (paper?.isEncrypted || paper?.isPrivate || paper?.isShared) {
+                    blob = await downloadBlobFirebase(driveFileId, fileKey, null, 'research');
                 } else {
-                    blob = await downloadNormalBlobFirebase(driveFileId, cryptoKey, null, 'research');
+                    blob = await downloadNormalBlobFirebase(driveFileId, fileKey, null, 'research');
                 }
                 const url = URL.createObjectURL(blob);
                 setPdfUrl(url);
             } else if (tempPdfPath) {
-                const blob = await downloadBlobFirebase(tempPdfPath, cryptoKey, null, 'research');
+                const blob = await downloadBlobFirebase(tempPdfPath, fileKey, null, 'research');
                 const url = URL.createObjectURL(blob);
                 setPdfUrl(url);
             }
@@ -451,14 +457,15 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
 
         try {
             let blobForAi;
+            const fileKey = (paper?.isShared && paper?.docKey) ? paper.docKey : cryptoKey;
             if (driveFileId) {
-                if (paper?.isEncrypted || paper?.isPrivate) {
-                    blobForAi = await downloadBlobFirebase(driveFileId, cryptoKey, null, 'research');
+                if (paper?.isEncrypted || paper?.isPrivate || paper?.isShared) {
+                    blobForAi = await downloadBlobFirebase(driveFileId, fileKey, null, 'research');
                 } else {
-                    blobForAi = await downloadNormalBlobFirebase(driveFileId, cryptoKey, null, 'research');
+                    blobForAi = await downloadNormalBlobFirebase(driveFileId, fileKey, null, 'research');
                 }
             } else if (tempPdfPath) {
-                blobForAi = await downloadBlobFirebase(tempPdfPath, cryptoKey, null, 'research');
+                blobForAi = await downloadBlobFirebase(tempPdfPath, fileKey, null, 'research');
             }
 
             if (!blobForAi) {
@@ -485,7 +492,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                         title: reviewTitle,
                         content: result,
                         parentId: markdownFolderId
-                    });
+                    }, null, ctx);
                     if (!markdownId && newMarkdownId) {
                         setMarkdownId(newMarkdownId);
                     }
@@ -533,6 +540,8 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                     setIsPreviewMode={setIsPreviewMode}
                     setIsMetadataExpanded={setIsMetadataExpanded}
                     setIsDeleteModalOpen={setIsDeleteModalOpen}
+                    onCollaborate={onCollaborate}
+                    readOnly={readOnly}
                 />
 
                 {/* Scrollable Content Container */}
@@ -591,6 +600,7 @@ const PaperEditor = ({ user, cryptoKey, paper, papers, onClose, onOpenApp, navig
                                 noteContent={noteContent}
                                 setNoteContent={setNoteContent}
                                 isNoteLoaded={isNoteLoaded}
+                                readOnly={readOnly}
                             />
                         )}
 

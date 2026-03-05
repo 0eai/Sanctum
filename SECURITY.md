@@ -1,35 +1,40 @@
-# Security Review — Sanctum v1.0.4
+# Security Review — Sanctum v2.0
 
-**Date:** February 26, 2026  
-**Scope:** Full client-side security audit of encryption, authentication, data storage, sharing, and Firestore rules.
+**Date:** March 4, 2026  
+**Scope:** Full client-side security audit of encryption, authentication, data storage, sharing, collaboration, and Firebase rules.
 
 ---
 
 ## 1. Architecture Overview
 
-Sanctum uses a **zero-knowledge** architecture. All sensitive data is encrypted client-side using the **Web Crypto API** before it reaches Firebase Firestore. The server only stores opaque encrypted blobs — even the Firebase project operator cannot read user data.
+Sanctum uses a **zero-knowledge** architecture. All sensitive data is encrypted client-side using the **Web Crypto API** before it reaches Firebase Firestore. The server only stores opaque encrypted blobs.
 
 ```
-┌─────────────────────────────────────────────┐
-│  Browser (Client)                           │
-│  ┌───────────┐  ┌──────────┐  ┌──────────┐ │
-│  │ Passkey   │→ │ Argon2id │→ │ Wrapper  │ │
-│  │ (user)    │  │ (WASM)   │  │ Key      │ │
-│  └───────────┘  └──────────┘  └──────────┘ │
-│                                     │       │
-│                              ┌──────▼─────┐ │
-│                              │ Decrypt    │ │
-│                              │ Master Key │ │
-│                              └──────┬─────┘ │
-│                                     │       │
-│  ┌──────────────────────────────────▼─────┐ │
-│  │ AES-256-GCM  Encrypt / Decrypt        │ │
-│  │ All app data (notes, passwords, etc.) │ │
-│  └───────────────────────────────────────┘ │
-└────────────────────┬────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Browser (Client)                                       │
+│  ┌───────────┐  ┌──────────┐  ┌──────────┐             │
+│  │ Passkey   │→ │ Argon2id │→ │ Wrapper  │             │
+│  │ (user)    │  │ (WASM)   │  │ Key      │             │
+│  └───────────┘  └──────────┘  └──────────┘             │
+│                                     │                   │
+│                              ┌──────▼─────┐             │
+│                              │ Decrypt    │             │
+│                              │ Master Key │             │
+│                              └──────┬─────┘             │
+│                                     │                   │
+│  ┌──────────────────────────────────▼─────────────────┐ │
+│  │ AES-256-GCM  Encrypt / Decrypt all app data       │ │
+│  └────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ RSA-4096-OAEP   Key exchange for collaboration     │ │
+│  │ ECDH P-256      Forward secrecy for messaging      │ │
+│  └────────────────────────────────────────────────────┘ │
+└────────────────────┬──────────────────────────────────┘
                      │ Encrypted blobs only
               ┌──────▼──────┐
+              │  Firebase   │
               │  Firestore  │
+              │  Storage    │
               └─────────────┘
 ```
 
@@ -44,24 +49,25 @@ Sanctum uses a **zero-knowledge** architecture. All sensitive data is encrypted 
 | Legacy → Modern Migration | Argon2id | Auto-migrates on next unlock |
 | Data Encryption | AES-256-GCM | 12-byte random IV per encryption |
 | Key Wrapping | AES-256-GCM | Master key encrypted under Argon2id-derived wrapper key |
-| Chat Encryption (1:1) | RSA-OAEP + AES-256-GCM | RSA-2048, per-message AES key encrypted for each participant |
-| Chat Encryption (Group) | RSA-OAEP + AES-256-GCM | Shared group AES key, RSA-encrypted per member |
-| Forward Secrecy (available) | ECDH P-256 | Elliptic Curve Diffie-Hellman key agreement |
+| Collaboration Key Exchange | RSA-4096-OAEP | Per-doc/workspace AES key wrapped per collaborator |
+| Chat Encryption (1:1) | ECDH P-256 + AES-256-GCM | Per-message ephemeral keys with ECDH shared secret |
+| Chat Encryption (1:1 fallback) | RSA-4096-OAEP + AES-256-GCM | Per-message AES key RSA-encrypted per participant |
+| Chat Encryption (Group) | RSA-4096-OAEP + AES-256-GCM | Shared group AES key, RSA-encrypted per member |
 | Share Link Keys | AES-256-GCM | Random 256-bit key, URL-safe base64 in fragment |
+| File Encryption | AES-256-GCM | 12-byte IV prepended to ciphertext binary |
 
 ### Strengths
-- ✅ **Argon2id** is the gold standard for password hashing — memory-hard, resistant to GPU/ASIC attacks
-- ✅ **AES-256-GCM** provides authenticated encryption (integrity + confidentiality)
-- ✅ **12-byte random IVs** generated via `crypto.getRandomValues()` — unique per operation
-- ✅ **PBKDF2 at 600,000 iterations** (OWASP 2024 recommendation) for legacy users
-- ✅ **Auto-migration** — legacy PBKDF2 users are transparently upgraded to Argon2id on next unlock
-- ✅ **RSA-2048-OAEP** with SHA-256 is standard for hybrid E2E encryption
-- ✅ **Keys never leave the browser** — the master key exists only in memory
-- ✅ **ECDH P-256** primitives available for forward secrecy implementation
+- ✅ **Argon2id** — gold standard memory-hard KDF (64 MB), resistant to GPU/ASIC
+- ✅ **AES-256-GCM** — authenticated encryption (integrity + confidentiality)
+- ✅ **12-byte random IVs** — `crypto.getRandomValues()`, unique per operation
+- ✅ **RSA-4096-OAEP** with SHA-256 — strong asymmetric key exchange
+- ✅ **ECDH P-256** — per-message forward secrecy for 1:1 chats
+- ✅ **Keys never leave the browser** — master key exists only in React state
+- ✅ **Auto-migration** — PBKDF2 users transparently upgraded to Argon2id
 
-### Recommendations
-- ✅ **Upgraded to RSA-4096** for SecureShare legacy key encapsulation.
-- 🤔 **Double Ratchet protocol**: Evaluated. Currently using per-message ephemeral ECDH for forward secrecy. Full Signal-style Double Ratchet is architecturally complex for an async Firebase backend but remains on the roadmap for v2.0.
+### Known Limitations
+- ⚠️ New vault initialization still uses PBKDF2 (pending fix — see LOGICAL_BUGS.md #2)
+- ⚠️ No full Double Ratchet — using ephemeral ECDH per message (v2.0 roadmap)
 
 ---
 
@@ -72,81 +78,74 @@ Sanctum uses a **zero-knowledge** architecture. All sensitive data is encrypted 
 ```
 Passkey (user-memorized, min 8 chars, strength meter enforced)
   │
-  ├── Argon2id (64 MB, 3 iterations) ──→ Wrapper Key (non-extractable)
-  │                                           │
-  │                                           ├── Encrypts Master Key (stored as blob)
-  │                                           │
-  │                                           └── Stored: { iv, data } in /users/{uid}/encryptedMasterKey
+  ├── Argon2id (64 MB, 3 iters) ──→ Wrapper Key (non-extractable)
+  │                                       │
+  │                                       └── Encrypts Master Key (stored as blob)
   │
   └── Master Key (AES-256-GCM, extractable=true)
        │
-       ├── Encrypts all app data
-       ├── Encrypts RSA private key (for SecureShare)
-       └── Validator: { check: "VALID" } encrypted with master key
+       ├── Encrypts all personal app data
+       ├── Encrypts RSA-4096 private key
+       ├── Encrypts ECDH P-256 private key
+       ├── Validator: { check: "VALID" }
+       │
+       └── Per-Doc Key (AES-256-GCM)         Per-Workspace Key (AES-256-GCM)
+            │                                       │
+            ├── Encrypts shared doc content          ├── Encrypts workspace docs
+            └── RSA-wrapped per collaborator         └── RSA-wrapped per member
 ```
 
-### 3.2 Unlock Flow (`LockScreen.jsx`)
+### 3.2 Unlock Flow
 
-1. User enters passkey (minimum 8 characters enforced)
-2. Client-side rate limiting check (progressive delays: 2s → 5s → 15s → 60s)
-3. Fetch `encryptionSalt`, `encryptedMasterKey`, and `kdf` type from `/users/{uid}`
-4. If `kdf === "argon2id"`: derive wrapper key via Argon2id(passkey, salt, 64MB, 3 iters)
-5. If `kdf === "pbkdf2"` (legacy): derive via PBKDF2(passkey, salt, stored_iterations)
+1. User enters passkey (≥8 characters, strength meter enforced)
+2. Client checks rate limit (progressive: 2s → 5s → 15s → 60s after 3/5/8/10 fails)
+3. Server-side `failedAttempts` check from Firestore
+4. Fetch `encryptionSalt`, `encryptedMasterKey`, `kdf` from `/users/{uid}`
+5. Derive wrapper key: Argon2id(passkey, salt, 64MB, 3 iters) or PBKDF2(legacy)
 6. Decrypt master key JWK with wrapper key
 7. Import JWK → `CryptoKey` object
 8. Validate by decrypting `encryptedValidator` — must return `{ check: "VALID" }`
-9. **If legacy PBKDF2**: auto-migrate to Argon2id (re-wrap master key, update `kdf` field)
-10. On success, master key held in React state (memory only)
+9. If legacy PBKDF2 → auto-migrate to Argon2id (re-wrap, update kdf field)
+10. Master key held in React state (memory only)
 
 ### 3.3 Assessment
 
 | Aspect | Status | Notes |
 |--------|--------|-------|
-| KDF algorithm | ✅ Excellent | Argon2id (64 MB memory-hard) for all new users |
-| Legacy migration | ✅ Good | Auto-upgrades PBKDF2 → Argon2id on next unlock |
-| Salt uniqueness | ✅ Good | 16-byte random salt per user via `crypto.getRandomValues()` |
-| Wrapper key extractability | ✅ Good | Set to `false` — cannot be exported |
-| Master key extractability | ⚠️ Acceptable | Set to `true` (needed for JWK export/import). Mitigated: only in memory |
-| Key storage | ✅ Good | Master key JWK only exists encrypted in Firestore |
-| Passkey strength | ✅ Good | Min 8 characters enforced with visual strength meter (Weak/Fair/Strong/Very Strong) |
-| Brute-force protection | ✅ Good | Client-side rate limiting: 3 fails → 2s, 5 → 5s, 8 → 15s, 10 → 60s delay |
-
-### Recommendations
-- ✅ Implemented **failed attempt counter** server-side (Firestore) to persist across page refreshes
-- ✅ Implemented **passkey confirmation** (enter twice) during initial setup to prevent typos
+| KDF algorithm | ✅ Excellent | Argon2id (64 MB) |
+| Legacy migration | ✅ Good | Auto-upgrades PBKDF2 → Argon2id |
+| Salt uniqueness | ✅ Good | 16-byte random per user |
+| Wrapper key extractability | ✅ Good | `false` — cannot be exported |
+| Master key extractability | ⚠️ Acceptable | `true` (needed for JWK). Mitigated: memory-only |
+| Passkey strength | ✅ Good | Min 8 chars + visual strength meter |
+| Brute-force protection | ✅ Good | Client + server-side rate limiting |
+| Key recovery | ✅ Good | Offline master key export available |
 
 ---
 
 ## 4. Data Encryption Pattern
 
-Every service follows the same pattern:
-
 ```javascript
 // ENCRYPT (write)
-const payload = { title, content, tags, ... };              // plaintext
+const payload = { title, content, tags, ... };
 const encrypted = await encryptData(payload, masterKey);    // → { iv, data }
-await setDoc(docRef, { ...encrypted, ...metadata });        // store
+await setDoc(docRef, { ...encrypted, ...metadata });
 
 // DECRYPT (read)
-const raw = docSnapshot.data();                             // { iv, data, ...meta }
+const raw = docSnapshot.data();
 const decrypted = await decryptData(raw, masterKey);        // → { title, content, ... }
 ```
 
-### What's Encrypted vs. Not
+### Encrypted vs. Unencrypted Fields
 
-| Field | Encrypted | Rationale |
-|-------|-----------|---------  |
-| All content (titles, text, passwords, etc.) | ✅ Yes | Primary sensitive data |
-| `isPinned`, `type`, `parentId` | ❌ No | Used for Firestore queries/ordering |
-| `isCompleted` (checklists) | ❌ No | Used for completion counts |
-| `order` | ❌ No | Used for sort ordering |
-| `createdAt`, `updatedAt` | ❌ No | Firestore `serverTimestamp()` for ordering |
-| `itemCount`, `completedCount` | ❌ No | Aggregate counters on parent docs |
-
-### Assessment
-- ✅ **All sensitive content is encrypted** — titles, body text, passwords, URLs, notes, tags, attachments
-- ⚠️ **Structural metadata is unencrypted** — an observer can see how many items exist, their creation times, completion status, and folder structure. This is standard for E2E encrypted apps (Signal stores similar metadata)
-- ⚠️ **Attachments are base64-encoded inside encrypted blob** — works but increases Firestore document size. Files >1MB should be considered for Firebase Storage with per-file encryption
+| Category | Encrypted | Examples |
+|----------|-----------|---------|
+| Content | ✅ Yes | Titles, body text, passwords, URLs, tags, attachments |
+| Structural metadata | ❌ No | `isPinned`, `type`, `parentId`, `order`, timestamps |
+| Aggregate counters | ❌ No | `itemCount`, `completedCount` |
+| Completion status | ❌ No | `completed`, `isCompleted` |
+| Activity log | ❌ No | Action labels (no content data) |
+| Device tracker | ❌ No | OS, browser, userAgent |
 
 ---
 
@@ -158,64 +157,66 @@ const decrypted = await decryptData(raw, masterKey);        // → { title, cont
 https://app.example.com/#view?id=DOC_ID&k=AES_KEY_BASE64
 ```
 
-| Component | Security |
-|-----------|----------|
-| `id` | Firestore document ID (random) |
-| `k` | URL-safe base64 of raw 256-bit AES key |
-| URL fragment (`#`) | ✅ Never sent to server (stays client-side) |
-| Encrypted blob in Firestore | ✅ Readable by anyone, but useless without key |
+| Aspect | Security |
+|--------|----------|
+| Key location | ✅ URL **fragment** — never sent to server |
+| Key uniqueness | ✅ Unique AES-256 per share |
+| Firestore rule | ✅ `allow read: if true` (intentional — blob is useless without key) |
+| Expiration | ⚠️ No TTL — links are permanent |
 
-### Assessment
-- ✅ Key is in URL **fragment** — not sent to server in HTTP request
-- ✅ Each share generates a **unique AES-256 key** — independent of master key
-- ⚠️ Anyone with the full URL can decrypt. URL sharing carries inherent risk (clipboard, browser history, messaging apps may log URLs)
-- ⚠️ No expiration on shared links. Consider adding TTL support
+### 5.2 Per-Document Collaboration
 
-### 5.2 SecureShare (E2E Chat)
+| Aspect | Status | Details |
+|--------|--------|---------|
+| Per-doc key isolation | ✅ | Each shared doc gets its own AES-256 key |
+| RSA key wrapping | ✅ | Per-collaborator RSA-4096-OAEP encryption |
+| Key rotation on removal | ✅ | New key generated, doc re-encrypted |
+| File re-encryption | ✅ | Attachments copied + re-encrypted with docKey |
+| Share deletion cleanup | ✅ | Batch delete shared_docs + members on last removal |
+| Transaction safety | ⚠️ | Read-modify-write not wrapped in Firestore transaction |
 
-**1:1 Chats:**
-- Each message: random AES key → encrypts message → AES key encrypted with each participant's RSA public key
-- Private keys encrypted with user's master key and stored in Firestore
-- Chat IDs: `uid1_uid2` (sorted) — both participants have Firestore read/write access
-
-**Group Chats:**
-- Shared AES-256-GCM group key, RSA-encrypted per member
-- Members validated via `memberUids` array in Firestore rules
+### 5.3 SecureShare E2E Messaging
 
 | Aspect | Status |
 |--------|--------|
-| Forward secrecy | ✅ ECDH P-256 | Per-message ephemeral key pairs with ECDH shared secrets; RSA fallback for legacy |
-| Key rotation on member removal | ✅ Implemented | New AES-256 key generated, RSA-encrypted for all remaining members |
-| Self-destruct messages | ✅ Client-side expiry check + cleanup |
+| Forward secrecy (1:1) | ✅ ECDH P-256 ephemeral keys per message |
+| RSA fallback (1:1) | ✅ RSA-4096 per-message key wrapping |
+| Group encryption | ✅ Shared AES-256 key, RSA-wrapped per member |
+| Key rotation on member removal | ✅ New key + re-wrap for remaining |
+| Self-destruct messages | ✅ Client-side `expiresAt` check + cleanup |
 | Read receipts | ✅ Per-user `readBy` map |
-
-### Recommendations
-- ✅ Checked: **Double Ratchet** protocol evaluated (currently Ephemeral ECDH).
-- ✅ Checked: Server-side TTL cleanup is handled effectively via our new client-side `expiresAt` enforcement.
+| WebRTC calling | ✅ P2P audio/video via WebRTC |
 
 ---
 
-## 6. Firestore Security Rules
+## 6. Firebase Security Rules
 
-### Current Rules Assessment
+### Firestore Rules
 
-| Rule | Verdict | Notes |
-|------|---------|-------|
-| User data isolation | ✅ Secure | `request.auth.uid == userId` enforced |
-| Shared notes — create | ✅ Auth required | Only logged-in users can create |
-| Shared notes — read | ✅ Public | Intentional — encrypted blobs |
-| Shared notes — delete | ⚠️ Broad | Any auth user can delete any shared note. Mitigated: doc IDs are random and only known to creator |
-| Public keys — read | ✅ Auth users | Required for RSA key exchange |
-| Public keys — write | ✅ Owner only | Prevents key impersonation |
-| 1:1 chats | ✅ Participants only | UID in chat ID validation |
-| Group chats — create | ✅ Auth required | |
-| Group chats — read/update | ✅ Members only | `memberUids` array check |
-| Group chats — delete | ✅ Creator only | `createdBy` check |
-| Group chats — subcollections | ✅ Members only | `get()` reads parent `memberUids` for messages and group_members |
+| Resource | Access | Verdict |
+|----------|--------|---------|
+| User data (`/users/{uid}`) | Owner only | ✅ Secure |
+| App data (`/artifacts/.../users/{uid}/`) | Owner only | ✅ Secure |
+| Public keys | Read: any auth user. Write: owner | ✅ Correct |
+| Shared notes | Create: auth. Read: public. Delete: creator | ✅ Correct |
+| 1:1 chats | Participants only (UID in chatId) | ✅ Secure |
+| Groups | Members only (`memberUids` check) | ✅ Secure |
+| Group subcollections | Members only (`get()` parent check) | ✅ Secure |
+| Shared docs | Members only (`memberUids` check) | ✅ Secure |
+| Shared doc members | Members only (`get()` parent check) | ✅ Secure |
+| Workspaces | Members only (`memberUids` check) | ✅ Secure |
+| Workspace docs | Members only (`get()` parent check) | ✅ Secure |
+| Global transfers | Any authenticated user | ⚠️ Broad |
 
-### Recommendations
-- ✅ **Shared notes delete**: Added `request.auth.uid == resource.data.createdBy`.
-- ✅ **Rate limiting**: Now using Firebase App Check + Server-side Tracking `failedAttempts/lockoutUntil` in Firestore.
+### Storage Rules
+
+| Resource | Access | Verdict |
+|----------|--------|---------|
+| Personal vault files | Owner only | ✅ Secure |
+| Workspace files | Members only (`firestore.get`) | ✅ Secure |
+| Shared doc files | Any authenticated user | ⚠️ Broad (mitigated: AES-encrypted) |
+| SecureShare files | Any authenticated user | ⚠️ Broad (mitigated: AES-encrypted) |
+| Legacy folder paths | Any authenticated user | ❌ **Vulnerability** — see LOGICAL_BUGS.md #1 |
 
 ---
 
@@ -223,25 +224,21 @@ https://app.example.com/#view?id=DOC_ID&k=AES_KEY_BASE64
 
 | Control | Status |
 |---------|--------|
-| Auto-lock on inactivity | ✅ Configurable timer (5m / 15m / 1h / Never) |
-| Lock when tab hidden | ✅ Instant vault lock on tab switch/minimize |
+| Auto-lock on inactivity | ✅ Configurable (5m/15m/1h/Never) |
+| Lock when tab hidden | ✅ Instant vault lock on tab switch |
 | Key cleared on lock | ✅ Master key removed from React state |
-| Device tracking | ✅ Sessions logged in Firestore with UA/OS/browser |
-| Activity audit log | ✅ Real-time log: vault unlocks, failed attempts, resets |
+| Device tracking | ✅ Sessions logged with UA/OS/browser |
+| Activity audit log | ✅ Real-time event log |
 | Vault factory reset | ✅ Deletes all collections + key material |
-| Per-app data wipe | ✅ Delete individual app data (e.g., all passwords only) |
-| XSS protection | ✅ React escaping + rehype-sanitize for markdown content |
+| Per-app data wipe | ✅ With confirmation prompt |
+| XSS protection | ✅ React escaping + rehype-sanitize |
 | CSRF | ✅ N/A — Firebase Auth tokens, no cookies |
-| Content Security Policy | ✅ Configured in `firebase.json` |
+| Content Security Policy | ✅ Full CSP in `firebase.json` |
 | X-Content-Type-Options | ✅ `nosniff` |
-| X-Frame-Options | ✅ `DENY` — prevents clickjacking |
+| X-Frame-Options | ✅ `DENY` |
 | Referrer-Policy | ✅ `strict-origin-when-cross-origin` |
 | Permissions-Policy | ✅ `camera=(), microphone=(), geolocation=()` |
-| Firebase App Check | ✅ ReCAPTCHA v3 — prevents unauthorized API access |
-| Service Worker | ✅ Clean — no CSP override, network-first for navigation |
-
-### Recommendations
-- ✅ **Subresource Integrity (SRI)**: Reviewed. All assets (React, Firebase, Lucide) are bundled via Vite directly into the dist payload. No external CDNs are used at runtime, making SRI natively fulfilled.
+| Firebase App Check | ✅ ReCAPTCHA v3 |
 
 ---
 
@@ -249,48 +246,53 @@ https://app.example.com/#view?id=DOC_ID&k=AES_KEY_BASE64
 
 | Feature | Security Model |
 |---------|---------------|
-| Full vault backup (JSON) | Data decrypted client-side, exported as plaintext JSON. File never touches server |
-| Per-app export (JSON/CSV/VCF/HTML) | Same — decrypted client-side before download |
-| Import (all formats) | File read client-side, data re-encrypted with user's master key before storage |
-| Per-app delete | Requires typing app name in CAPS to confirm. Deletes including subcollections |
+| Full vault backup | Decrypted client-side → plaintext JSON download |
+| Per-app export | Same — client-side decryption → download |
+| Import | Client-side parse → re-encrypt with master key → store |
+| Per-app delete | Requires typing app name in CAPS to confirm |
 
-### Assessment
-- ✅ Exports are decrypted **client-side only** — no server roundtrip for plaintext data
-- ✅ Imports re-encrypt data with the user's master key
-- ⚠️ Exported files contain **plaintext sensitive data** — users should be warned to store exports securely
-- ⚠️ CSV password exports contain plaintext passwords — standard (Google Passwords does the same)
+> ⚠️ Exported files contain **plaintext sensitive data** — users should be warned.
 
 ---
 
-## 9. Summary
-
-### What Sanctum Does Well
-1. **True zero-knowledge** — all encryption/decryption happens client-side
-2. **Argon2id** — memory-hard KDF (64 MB), resistant to GPU/ASIC attacks
-3. **Auto-migration** — legacy PBKDF2 users seamlessly upgraded to Argon2id
-4. **Strong primitives** — AES-256-GCM, RSA-2048-OAEP, ECDH P-256
-5. **Defense in depth** — auto-lock, lock-on-hidden, device tracking, activity logging
-6. **Comprehensive CSP** — full Content-Security-Policy with all directives
-7. **App Check** — ReCAPTCHA v3 prevents unauthorized API access
-8. **Share links use URL fragments** — keys never reach the server
-9. **Each encryption operation uses a unique random IV**
-10. **Device tracking** — tracks registered browsers with capability to delete them
-11. **Server-side rate limiting** — `failedAttempts` tracks bad logins persistently in Firestore
-12. **Passkey Confirmation** — double-entry UI ensures typos don't lock new users out
-13. **Master Key Recovery** — Users can export their decrypted Master Key (as a Base64-encoded JWK) from Settings, giving them exactly one fallback method to restore access if their passkey is forgotten.
-
-### Areas for Improvement
-1. **Full Double Ratchet** → ratcheted key evolution for even stronger forward secrecy (v2.0 roadmap)
-
-### Risk Matrix
+## 9. Threat Model
 
 | Threat | Likelihood | Impact | Mitigation |
 |--------|-----------|--------|------------|
 | Server compromise | Medium | **None** — encrypted blobs only | Zero-knowledge architecture |
-| Weak passkey | Medium | High | Argon2id (64MB), 8-char min, strength meter |
-| Brute-force passkey | Low | High | Rate limiting + Argon2id memory-hardness |
+| Weak passkey | Medium | High | Argon2id (64MB) + 8-char min + strength meter |
+| Brute-force passkey | Low | High | Rate limiting (client + server) + Argon2id memory cost |
 | URL leak (share links) | Medium | Medium | Key in fragment; unique per share |
-| XSS injection | Low | High | React escaping; CSP; rehype-sanitize |
-| Compromised device | Medium | High | Auto-lock; lock-on-hidden; device tracking |
-| Firestore rules bypass | Low | Medium | Auth-gated; data still encrypted |
+| XSS injection | Low | High | React escaping + CSP + rehype-sanitize |
+| Compromised device | Medium | High | Auto-lock + lock-on-hidden + device tracking |
+| Firestore rules bypass | Low | Medium | Auth-gated + data still encrypted |
 | Exported backup leak | Medium | High | User responsibility; plaintext file |
+| Legacy storage path access | Medium | Medium | **Needs fix** — remove legacy rule |
+| Concurrent edit data loss | Low | Medium | **Needs fix** — Firestore transactions |
+| Stale shared doc accumulation | Low | Low | **Needs fix** — TTL + cleanup |
+
+---
+
+## 10. Summary
+
+### What Sanctum Does Well
+1. **True zero-knowledge** — all encryption/decryption client-side
+2. **Argon2id** — memory-hard KDF (64 MB)
+3. **Auto-migration** — PBKDF2 → Argon2id
+4. **Strong primitives** — AES-256-GCM, RSA-4096-OAEP, ECDH P-256
+5. **Defense in depth** — auto-lock, lock-on-hidden, device tracking, activity log
+6. **Per-document collaboration keys** — isolated AES-256 per shared document
+7. **ECDH forward secrecy** — per-message ephemeral key pairs
+8. **Share links use URL fragments** — keys never reach server
+9. **Unique random IV per operation**
+10. **Server-side rate limiting** — fail count persisted in Firestore
+11. **Key rotation on collaborator removal**
+12. **Comprehensive CSP** + App Check
+
+### Areas for Improvement
+1. Fix new-user KDF to use Argon2id (currently PBKDF2)
+2. Remove legacy storage rule vulnerability
+3. Firestore transactions for concurrent edit safety
+4. Encrypt activity log and device tracker metadata
+5. Add TTL for public shared notes
+6. Full Double Ratchet protocol (v2.0 roadmap)

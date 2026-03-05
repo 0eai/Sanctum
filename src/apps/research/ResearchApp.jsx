@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Plus, FolderPlus, Grid, List, Search, BookOpen, X, ChevronRight, Hash } from 'lucide-react';
+import { ChevronLeft, Plus, FolderPlus, Grid, List, Search, BookOpen, X, ChevronRight, Hash, Users, Folder } from 'lucide-react';
 import { Button, Modal, Input } from '../../components/ui';
 import MultiFab from '../../components/ui/MultiFab';
 import { listenToPapers, createFolder, updateFolder, deletePaper } from './services/research';
+import useCollaboration from '../../hooks/useCollaboration';
+
+import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
+import WorkspacePanel from '../../components/ui/WorkspacePanel';
+import CollaborateModal from '../../components/ui/CollaborateModal';
+import SharedDocsView from '../../components/ui/SharedDocsView';
+
 import PaperEditor from './components/PaperEditor';
 import PaperCard from './components/PaperCard';
 
@@ -101,17 +108,24 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     const [moveModal, setMoveModal] = useState({ isOpen: false, item: null });
     const [deleteModal, setDeleteModal] = useState({ isOpen: false, item: null });
 
+    // Collaboration (all state + effects handled by the hook)
+    const collab = useCollaboration(user, cryptoKey, 'research');
+    const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+
+    // Data Listener
     useEffect(() => {
-        if (!user || !cryptoKey) return;
+        if (!user || (!cryptoKey && !collab.workspaceKey)) return;
+        if (activeWorkspace && !collab.workspaceKey) return;
+
         const unsubscribe = listenToPapers(user.uid, cryptoKey, (data) => {
             setPapers(data);
             setIsLoading(false);
-        });
+        }, ctx);
         return () => unsubscribe();
-    }, [user, cryptoKey]);
+    }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
     useEffect(() => {
-        if (isLoading) return;
+        if (isLoading && papers.length === 0 && sharedDocs.length === 0) return;
 
         const { resource, resourceId, action } = (route || {});
 
@@ -123,11 +137,11 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             if (resourceId === 'new') {
                 setEditingPaper({ parentId: currentFolder, initialPreview: false });
             } else {
-                const targetPaper = papers.find(p => p.id === resourceId);
+                const targetPaper = papers.find(p => p.id === resourceId) || sharedDocs.find(p => p.id === resourceId);
                 if (targetPaper) {
                     setEditingPaper({ ...targetPaper, initialPreview: action !== 'edit' });
                     setCurrentFolder(targetPaper.parentId || null);
-                } else if (papers.length > 0) {
+                } else if (papers.length > 0 || sharedDocs.length > 0) {
                     // Not found, go home
                     setCurrentFolder(null);
                     setEditingPaper(null);
@@ -162,16 +176,16 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     // --- Actions ---
     const handleCreateFolder = async (name) => {
         if (folderModal.editingId) {
-            await updateFolder(user.uid, cryptoKey, folderModal.editingId, name, undefined);
+            await updateFolder(user.uid, cryptoKey, folderModal.editingId, name, undefined, ctx);
         } else {
-            await createFolder(user.uid, cryptoKey, name, currentFolder);
+            await createFolder(user.uid, cryptoKey, name, currentFolder, ctx);
         }
     };
 
     const handleMoveItem = async (newParentId) => {
         if (!moveModal.item) return;
         if (moveModal.item.type === 'folder') {
-            await updateFolder(user.uid, cryptoKey, moveModal.item.id, moveModal.item.title, newParentId);
+            await updateFolder(user.uid, cryptoKey, moveModal.item.id, moveModal.item.title, newParentId, ctx);
         } else {
             // we need a lightweight update utility for papers, or we can use savePaper with the item directly
             // For now, we'll re-save it with the new parentId
@@ -182,14 +196,14 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             // Actually, we need to pass the full unencrypted payload to `savePaper` to avoid erasing fields.
             const fullPayload = { ...moveModal.item, parentId: newParentId };
             const { savePaper } = await import('./services/research');
-            await savePaper(user.uid, cryptoKey, fullPayload, newParentId);
+            await savePaper(user.uid, cryptoKey, fullPayload, newParentId, ctx);
         }
     };
 
     const handleDeleteConfirm = async () => {
         if (!deleteModal.item) return;
         const isFolder = deleteModal.item.type === 'folder';
-        await deletePaper(user.uid, deleteModal.item.id, isFolder, papers);
+        await deletePaper(user.uid, deleteModal.item.id, isFolder, papers, ctx);
         setDeleteModal({ isOpen: false, item: null });
     };
 
@@ -255,12 +269,16 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
         return (
             <PaperEditor
                 user={user}
-                cryptoKey={cryptoKey}
+                personalKey={cryptoKey}
+                cryptoKey={editingPaper.isSharedDoc && !activeWorkspace ? editingPaper.docKey : (ctx?.key || cryptoKey)}
+                ctx={editingPaper.isSharedDoc && !activeWorkspace ? null : ctx}
                 paper={editingPaper}
                 papers={papers}
                 onClose={handleCloseEditor}
                 onOpenApp={onOpenApp}
                 navigate={navigate}
+                onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
+                readOnly={editingPaper.isSharedDoc && editingPaper.role === 'viewer'}
             />
         );
     }
@@ -280,9 +298,20 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                                 }
                                 else onExit();
                             }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                            <h1 className="text-xl font-bold">Research Vault</h1>
+                            <WorkspaceSwitcher
+                                {...collab.switcherProps}
+                                onSelect={(ws) => {
+                                    collab.switchWorkspace(ws);
+                                    navigate('#research');
+                                }}
+                            />
                         </div>
                         <div className="flex gap-1">
+                            {activeWorkspace && (
+                                <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                                    <Users size={20} />
+                                </button>
+                            )}
                             <button onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
                                 {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
                             </button>
@@ -322,6 +351,25 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             <main className="flex-1 overflow-y-auto scroll-smooth p-4">
                 <div className="max-w-3xl mx-auto pb-32">
 
+                    {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && (
+                        <div className="mb-8">
+                            <SharedDocsView
+                                sharedDocs={sharedDocs}
+                                appType="research"
+                                onOpenDoc={(doc) => navigate(`#research/paper/${doc.id}`)}
+                            />
+                        </div>
+                    )}
+
+                    {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && displayedItems.length > 0 && (
+                        <div className="flex items-center gap-2 px-1 mb-3">
+                            <Folder size={14} className="text-gray-400" />
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                                Personal Vault
+                            </span>
+                        </div>
+                    )}
+
                     {isLoading ? (
                         <div className="flex justify-center py-20">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -356,6 +404,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                                     onClick={() => handleEditPaper(item)}
                                     onMove={() => setMoveModal({ isOpen: true, item })}
                                     onDelete={() => setDeleteModal({ isOpen: true, item })}
+                                    onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
                                 />
                             ))}
                         </div>
@@ -387,6 +436,47 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                 onClose={() => setDeleteModal({ isOpen: false, item: null })}
                 onConfirm={handleDeleteConfirm}
             />
+
+            {/* Collaboration Modals */}
+            {collab.isWorkspacePanelOpen && activeWorkspace && (
+                <WorkspacePanel
+                    {...collab.workspacePanelProps}
+                    onDelete={async () => {
+                        await collab.deleteActiveWorkspace();
+                        navigate('#research');
+                    }}
+                />
+            )}
+
+            {collab.collaborateModalItem && (
+                <CollaborateModal
+                    isOpen={!!collab.collaborateModalItem}
+                    docId={collab.collaborateModalItem.id}
+                    docTitle={collab.collaborateModalItem.title || 'Untitled'}
+                    fullDocData={collab.collaborateModalItem}
+                    shareId={collab.collaborateModalItem.sharedId || null}
+                    docKey={collab.collaborateModalItem.docKey || null}
+                    appType="research"
+                    currentUser={user}
+                    privateKey={privateKey}
+                    cryptoKey={cryptoKey}
+                    onClose={() => collab.closeCollaborateModal()}
+                    onShareCreated={async (newShareId) => {
+                        if (collab.collaborateModalItem) {
+                            const { savePaper } = await import('./services/research');
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, null, ctx);
+                            setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+                        }
+                    }}
+                    onShareDeleted={async () => {
+                        if (collab.collaborateModalItem) {
+                            const { savePaper } = await import('./services/research');
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, null, ctx);
+                            setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+                        }
+                    }}
+                />
+            )}
         </div>
     );
 };

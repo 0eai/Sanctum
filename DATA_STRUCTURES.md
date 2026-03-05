@@ -1,6 +1,6 @@
-# Data Structures — Sanctum v1.0.4
+# Data Structures — Sanctum v2.0
 
-This document maps every Firestore collection and document schema, showing both the **encrypted** (as stored) and **decrypted** (application) views.
+This document maps every Firestore collection, document schema, Firebase Storage structure, and in-memory data model.
 
 ---
 
@@ -15,7 +15,12 @@ All encrypted fields follow the same blob format:
 }
 ```
 
-When a document is stored, the `iv` and `data` fields are spread directly onto the document alongside unencrypted metadata fields.
+When stored, `iv` and `data` are spread directly onto the document alongside unencrypted metadata fields.
+
+**File encryption format** (Firebase Storage):
+```
+[12-byte IV][AES-256-GCM ciphertext]  →  single binary blob
+```
 
 ---
 
@@ -27,9 +32,11 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
 |-------|------|-----------|-------------|
 | `encryptionSalt` | string | ❌ | 16-byte hex salt for key derivation |
 | `encryptedMasterKey` | `{iv, data}` | ✅ (wrapper key) | AES-256 master key JWK, encrypted with derived wrapper key |
-| `encryptedValidator` | `{iv, data}` | ✅ (master key) | `{ check: "VALID" }` encrypted with master key — used to verify passkey correctness |
+| `encryptedValidator` | `{iv, data}` | ✅ (master key) | `{ check: "VALID" }` encrypted with master key — verifies passkey correctness |
 | `kdf` | string | ❌ | Key derivation function: `"argon2id"` (default) or `"pbkdf2"` (legacy) |
-| `iterations` | number | ❌ | PBKDF2 iteration count (legacy users only, default 600000) |
+| `iterations` | number | ❌ | PBKDF2 iteration count (legacy users only, default 600,000) |
+| `failedAttempts` | number | ❌ | Server-side failed unlock counter |
+| `lockoutUntil` | timestamp | ❌ | Server-side lockout expiry |
 
 ---
 
@@ -54,7 +61,9 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
   "title": "My Note",
   "content": "Note body text...",
   "tags": ["tag1", "tag2"],
-  "attachments": [{ "name": "file.pdf", "type": "application/pdf", "data": "base64..." }],
+  "attachments": [
+    { "name": "file.pdf", "type": "application/pdf", "driveFileId": "users/{uid}/notes/{uuid}" }
+  ],
   "dueDate": "2026-03-01T09:00:00.000Z",
   "repeat": "none|daily|weekly|monthly|yearly",
   "sharedId": "firestore-doc-id-or-null",
@@ -90,7 +99,7 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
   "title": "Document Title",
   "content": "# Heading\n\nMarkdown content...",
   "tags": ["tag1"],
-  "attachments": [{ "name": "image.png", "type": "image/png", "data": "base64..." }],
+  "attachments": [{ "name": "image.png", "type": "image/png", "driveFileId": "users/{uid}/markdown/{uuid}" }],
   "dueDate": "2026-03-01T00:00:00.000Z",
   "repeat": "none",
   "sharedId": "firestore-doc-id-or-null",
@@ -110,7 +119,7 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
 | `iv` | string | — | AES-GCM IV |
 | `data` | string | — | Encrypted payload |
 | `isPinned` | boolean | ❌ | Starred status |
-| `completed` | boolean | ❌ | Completion status (for filtering) |
+| `completed` | boolean | ❌ | Completion status |
 | `order` | number | ❌ | Sort order |
 | `createdAt` | timestamp | ❌ | |
 | `updatedAt` | timestamp | ❌ | |
@@ -124,6 +133,8 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
   "dueDate": "2026-03-01T09:00:00.000Z",
   "deadline": null,
   "repeat": "none|daily|weekly|monthly|yearly",
+  "sharedId": "shareId-or-null",
+  "shareUrlKey": "key-or-null",
   "subtasks": [
     { "text": "Subtask 1", "completed": false },
     { "text": "Subtask 2", "completed": true }
@@ -132,15 +143,7 @@ When a document is stored, the `iv` and `data` fields are spread directly onto t
 ```
 
 ### Task Folders
-
 **Path:** `/artifacts/{appId}/users/{userId}/task_folders/{folderId}`
-
-```json
-{
-  "iv": "...",
-  "data": "..."
-}
-```
 
 Decrypted: `{ "name": "Work" }`
 
@@ -148,29 +151,24 @@ Decrypted: `{ "name": "Work" }`
 
 ## 5. Checklists
 
-### Lists
-
-**Path:** `/artifacts/{appId}/users/{userId}/checklists/{listId}`
+### Lists — `/artifacts/{appId}/users/{userId}/checklists/{listId}`
 
 | Field | Type | Encrypted | Description |
 |-------|------|-----------|-------------|
 | `iv` | string | — | AES-GCM IV |
 | `data` | string | — | Encrypted payload |
-| `itemCount` | number | ❌ | Total items (aggregate) |
-| `completedCount` | number | ❌ | Completed items (aggregate) |
+| `itemCount` | number | ❌ | Total items |
+| `completedCount` | number | ❌ | Completed items |
 | `order` | number | ❌ | Sort order |
 | `createdAt` | timestamp | ❌ | |
 
-Decrypted: `{ "title": "Groceries", "dueDate": "...", "repeat": "weekly" }`
+Decrypted: `{ "title": "Groceries", "dueDate": "...", "repeat": "weekly", "sharedId": null }`
 
-### Items (subcollection)
-
-**Path:** `/artifacts/{appId}/users/{userId}/checklists/{listId}/items/{itemId}`
+### Items (subcollection) — `checklists/{listId}/items/{itemId}`
 
 | Field | Type | Encrypted | Description |
 |-------|------|-----------|-------------|
-| `iv` | string | — | AES-GCM IV |
-| `data` | string | — | Encrypted payload |
+| `iv`, `data` | string | — | Encrypted payload |
 | `isCompleted` | boolean | ❌ | Completion status |
 | `order` | number | ❌ | Sort order |
 | `createdAt` | timestamp | ❌ | |
@@ -183,14 +181,7 @@ Decrypted: `{ "text": "Milk", "dueDate": "...", "repeat": "none" }`
 
 **Path:** `/artifacts/{appId}/users/{userId}/passwords/{itemId}`
 
-### Stored (Firestore)
-| Field | Type | Encrypted | Description |
-|-------|------|-----------|-------------|
-| `iv` | string | — | AES-GCM IV |
-| `data` | string | — | Encrypted payload |
-| `createdAt` | timestamp | ❌ | |
-
-### Decrypted Payload (Password Entry)
+### Decrypted Payload (Entry)
 ```json
 {
   "type": "password",
@@ -199,9 +190,7 @@ Decrypted: `{ "text": "Milk", "dueDate": "...", "repeat": "none" }`
   "password": "s3cureP@ss!",
   "url": "https://github.com",
   "notes": "Personal account",
-  "history": [
-    { "password": "oldP@ss", "changedAt": "2026-01-15T..." }
-  ],
+  "history": [{ "password": "oldP@ss", "changedAt": "2026-01-15T..." }],
   "parentId": "folder-id-or-null",
   "updatedAt": "2026-02-25T..."
 }
@@ -209,11 +198,7 @@ Decrypted: `{ "text": "Milk", "dueDate": "...", "repeat": "none" }`
 
 ### Decrypted Payload (Folder)
 ```json
-{
-  "type": "folder",
-  "title": "Social Media",
-  "parentId": null
-}
+{ "type": "folder", "title": "Social Media", "parentId": null }
 ```
 
 ---
@@ -222,7 +207,6 @@ Decrypted: `{ "text": "Milk", "dueDate": "...", "repeat": "none" }`
 
 **Path:** `/artifacts/{appId}/users/{userId}/authenticator/{entryId}`
 
-Decrypted:
 ```json
 {
   "service": "GitHub",
@@ -240,13 +224,10 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/contacts/{contactId}`
 
-Decrypted:
 ```json
 {
-  "firstName": "John",
-  "lastName": "Doe",
-  "company": "Acme Inc",
-  "jobTitle": "Engineer",
+  "firstName": "John", "lastName": "Doe",
+  "company": "Acme Inc", "jobTitle": "Engineer",
   "birthday": "1990-01-15",
   "photo": "data:image/jpeg;base64,...",
   "isFavorite": true,
@@ -266,14 +247,15 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/bookmarks/{bookmarkId}`
 
-Decrypted:
 ```json
 {
   "type": "bookmark",
   "title": "Example Site",
   "url": "https://example.com",
   "description": "...",
-  "parentId": "folder-id-or-null"
+  "parentId": "folder-id-or-null",
+  "sharedId": null,
+  "shareUrlKey": null
 }
 ```
 
@@ -283,7 +265,6 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/finance/{entryId}`
 
-Decrypted:
 ```json
 {
   "type": "expense|income",
@@ -301,7 +282,6 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/banking/{accountId}`
 
-Decrypted:
 ```json
 {
   "accountName": "Main Checking",
@@ -319,7 +299,6 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/reminders/{reminderId}`
 
-Decrypted:
 ```json
 {
   "title": "Doctor appointment",
@@ -336,171 +315,244 @@ Decrypted:
 
 **Path:** `/artifacts/{appId}/users/{userId}/counters/{counterId}`
 
-Decrypted:
+```json
+{ "title": "Push-ups", "count": 42, "step": 1 }
+```
+
+---
+
+## 14. Research Papers
+
+**Path:** `/artifacts/{appId}/users/{userId}/research/{paperId}`
+
+### Stored (Firestore)
+| Field | Type | Encrypted | Description |
+|-------|------|-----------|-------------|
+| `iv`, `data` | string | — | Encrypted payload |
+| `type` | string | ❌ | `"paper"` or `"folder"` |
+| `parentId` | string\|null | ❌ | Parent folder ID |
+| `createdAt`, `updatedAt` | timestamp | ❌ | |
+
+### Decrypted Payload
 ```json
 {
-  "title": "Push-ups",
-  "count": 42,
-  "step": 1
+  "title": "Paper Title",
+  "authors": "Author 1, Author 2",
+  "year": "2025",
+  "venue": "Conference Name",
+  "url": "https://...",
+  "bibtex": "@article{...}",
+  "isPrivate": false,
+  "hasPdf": true,
+  "pdfPath": null,
+  "pdfWrappingKey": null,
+  "pdfHash": "content-hash-string",
+  "driveFileId": "users/{uid}/research/{uuid}",
+  "isEncrypted": false,
+  "aiSummary": "AI-generated summary...",
+  "tags": ["ML", "NLP"],
+  "addedAt": "2026-02-25T...",
+  "sharedId": null,
+  "shareUrlKey": null
 }
 ```
 
 ---
 
-## 14. Shared Notes (Public)
+## 15. Shared Notes (Public Links)
 
 **Path:** `/shared_notes/{noteId}`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `data` | `{iv, data}` | Encrypted payload (AES-256-GCM with share-specific key) |
+| `iv`, `data` | `{iv, data}` | Encrypted payload (AES-256-GCM with share-specific key) |
+| `createdBy` | string | Owner's UID |
 | `createdAt` | timestamp | Creation time |
-
-### Decrypted (by recipient with URL key)
-```json
-{
-  "sharedType": "note|markdown|task|checklist",
-  "title": "Document Title",
-  "content": "Body text or markdown...",
-  "tags": ["tag1"],
-  "attachments": [...],
-  "date": "2026-02-25T...",
-  
-  // Task-specific:
-  "notes": "Task notes",
-  "subtasks": [{ "text": "...", "completed": false }],
-  "dueDate": "...",
-  
-  // Checklist-specific:
-  "items": [{ "text": "...", "completed": false }],
-  "progress": 75
-}
-```
 
 ---
 
-## 15. SecureShare — Public Keys
+## 16. SecureShare: Public Keys
 
 **Path:** `/artifacts/{appId}/public_keys/{userId}`
 
 | Field | Type | Encrypted | Description |
 |-------|------|-----------|-------------|
-| `publicKey` | string | ❌ | RSA-2048 SPKI public key (base64) |
+| `publicKey` | string | ❌ | RSA-4096 SPKI public key (base64) |
 | `displayName` | string | ❌ | User's display name |
 | `email` | string | ❌ | User's email |
 | `photoURL` | string | ❌ | Profile photo URL |
-| `encryptedPrivateKey` | `{iv, data}` | ✅ (master key) | RSA-2048 PKCS#8 private key |
+| `encryptedPrivateKey` | `{iv, data}` | ✅ (master key) | RSA-4096 PKCS#8 private key |
+| `ecdhPublicKey` | string | ❌ | ECDH P-256 public key (base64) |
+| `encryptedEcdhPrivateKey` | `{iv, data}` | ✅ (master key) | ECDH P-256 private key |
 
 ---
 
-## 16. SecureShare — 1:1 Chats
-
-### Messages
+## 17. SecureShare: 1:1 Chats
 
 **Path:** `/artifacts/{appId}/chats/{chatId}/messages/{msgId}`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `senderId` | string | Sender's UID |
-| `senderCopy` | `{iv, data}` | Message encrypted with sender's RSA public key → AES → content |
-| `recipientCopy` | `{iv, data}` | Same message encrypted with recipient's RSA public key |
+| `iv`, `data` | string | Encrypted message content |
+| `ephemeralPublicKey` | string | ECDH ephemeral public key for forward secrecy |
+| `senderCopy` | `{iv, data}` | RSA fallback: message encrypted for sender |
+| `recipientCopy` | `{iv, data}` | RSA fallback: message encrypted for recipient |
 | `timestamp` | timestamp | Server timestamp |
 | `expiresAt` | timestamp\|null | Self-destruct time |
 | `readBy` | map | `{ [uid]: timestamp }` — read receipts |
-| `artifact` | object\|null | Shared artifact metadata (app items) |
-
-### Decrypted Message
-The AES key is RSA-encrypted per participant. The AES-decrypted content:
-```json
-{
-  "text": "Hello!",
-  "artifact": {
-    "type": "note|task|...",
-    "title": "...",
-    "data": { ... }
-  }
-}
-```
+| `artifact` | object\|null | Shared artifact metadata |
 
 ---
 
-## 17. SecureShare — Group Chats
+## 18. SecureShare: Group Chats
 
-### Group Document
-
-**Path:** `/artifacts/{appId}/groups/{groupId}`
+### Group Document — `/artifacts/{appId}/groups/{groupId}`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Group name |
 | `createdBy` | string | Creator's UID |
-| `memberUids` | string[] | Member UID array (for Firestore rules) |
+| `memberUids` | string[] | Member UID array |
 | `members` | map | `{ [uid]: { displayName, email, photoURL, encryptedGroupKey } }` |
 | `createdAt` | timestamp | |
 
-Each member's `encryptedGroupKey` is the shared AES-256 group key, RSA-encrypted with that member's public key.
-
-### Group Messages
-
-**Path:** `/artifacts/{appId}/groups/{groupId}/messages/{msgId}`
+### Group Messages — `/groups/{groupId}/messages/{msgId}`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `senderId` | string | Sender UID |
-| `senderName` | string | Display name at time of send |
-| `iv` | string | AES-GCM IV |
-| `data` | string | Message encrypted with shared group AES key |
+| `senderId`, `senderName` | string | Sender info |
+| `iv`, `data` | string | Message encrypted with shared AES key |
 | `timestamp` | timestamp | |
 | `expiresAt` | timestamp\|null | Self-destruct |
 | `readBy` | map | Read receipts |
 
-Decrypted: `{ "text": "Group message", "artifact": {...} }`
+---
+
+## 19. Per-Document Sharing
+
+**Path:** `/artifacts/{appId}/shared_docs/{shareId}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `iv`, `data` | string | Document encrypted with per-doc AES-256 key |
+| `appType` | string | `notes\|markdown\|tasks\|research\|bookmarks\|checklists` |
+| `docType` | string | `note\|folder\|task\|paper\|bookmark\|checklist` |
+| `ownerUid` | string | Owner's UID |
+| `memberUids` | string[] | Member UIDs for Firestore rules |
+| `sharedFolderId` | string\|null | Group link for batch-shared folders |
+| `parentShareId` | string\|null | Parent folder's shareId |
+| `isPinned` | boolean | |
+| `createdAt`, `updatedAt` | timestamp | |
+
+### Members — `/shared_docs/{shareId}/members/{uid}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `encryptedDocKey` | string | AES-256 key, RSA-OAEP encrypted for this member |
+| `role` | string | `owner\|editor\|viewer` |
+| `joinedAt` | timestamp | |
 
 ---
 
-## 18. Activity Log
+## 20. Workspace Sharing
+
+**Path:** `/artifacts/{appId}/workspaces/{wsId}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Workspace display name |
+| `createdBy` | string | Creator's UID |
+| `memberUids` | string[] | Member UIDs |
+| `createdAt` | timestamp | |
+
+### Members — `/workspaces/{wsId}/members/{uid}`
+```json
+{ "encryptedWorkspaceKey": "RSA-OAEP encrypted AES-256 key", "role": "owner|editor|viewer", "joinedAt": "Timestamp" }
+```
+
+### Documents — `/workspaces/{wsId}/{collection}/{docId}`
+Same schema as personal vault. Collections: `notes`, `markdown`, `tasks`, `task_folders`, `research`, `bookmarks`, `checklists`.
+
+---
+
+## 21. Activity Log
 
 **Path:** `/artifacts/{appId}/users/{userId}/activity_log/{eventId}`
 
-| Field | Type | Encrypted | Description |
-|-------|------|-----------|-------------|
-| `action` | string | ❌ | Event description (e.g., "Vault Unlocked") |
-| `type` | string | ❌ | `"success"`, `"danger"`, `"info"` |
-| `icon` | string | ❌ | Lucide icon name |
-| `createdAt` | timestamp | ❌ | |
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | string | Event description (e.g., "Vault Unlocked") |
+| `type` | string | `"success"`, `"danger"`, `"info"` |
+| `icon` | string | Lucide icon name |
+| `createdAt` | timestamp | |
 
-> **Note:** Activity log entries are **not encrypted** — they contain only action labels, not content data.
+> ⚠️ Activity log entries are **not encrypted** — they contain only action labels, not content data.
 
 ---
 
-## 19. Device Tracker
+## 22. Device Tracker
 
 **Path:** `/artifacts/{appId}/users/{userId}/devices/{deviceId}`
 
-| Field | Type | Encrypted | Description |
-|-------|------|-----------|-------------|
-| `deviceId` | string | ❌ | `dev_{timestamp}_{random}` |
-| `deviceName` | string | ❌ | "Mac", "Windows PC", etc. |
-| `os` | string | ❌ | "macOS 14.2", "Windows", etc. |
-| `browser` | string | ❌ | "Chrome 120", "Safari 17" |
-| `deviceType` | string | ❌ | "desktop", "mobile" |
-| `userAgent` | string | ❌ | Truncated to 200 chars |
-| `lastActive` | timestamp | ❌ | |
+| Field | Type | Description |
+|-------|------|-------------|
+| `deviceId` | string | `dev_{timestamp}_{random}` |
+| `deviceName` | string | "Mac", "Windows PC", etc. |
+| `os`, `browser`, `deviceType` | string | Platform info |
+| `userAgent` | string | Truncated to 200 chars |
+| `lastActive` | timestamp | |
 
-> **Note:** Device data is **not encrypted** — used for session management UI. Contains no sensitive content.
+> ⚠️ Device data is **not encrypted** — used for session management.
 
 ---
 
-## Collection Hierarchy Summary
+## 23. Transfer App
+
+**Path:** `/artifacts/{appId}/global_transfers/{transferId}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| Room/transfer metadata | various | Encrypted file transfer sessions |
+
+---
+
+## Firebase Storage Paths
+
+```
+artifacts/{appId}/
+├── users/{userId}/
+│   ├── notes/{uuid}              # Encrypted note attachments
+│   ├── markdown/{uuid}           # Encrypted markdown attachments
+│   ├── research/{uuid}           # Research PDFs (encrypted or plain)
+│   ├── tasks/{uuid}              # Task attachments
+│   ├── bookmarks/{uuid}          # Bookmark attachments
+│   └── misc/{uuid}               # Other files
+│
+├── shared_docs/{shareId}/
+│   └── {uuid}                    # Re-encrypted attachments for sharing
+│
+├── workspaces/{workspaceId}/
+│   └── {collection}/{uuid}       # Workspace file storage
+│
+├── secureshare/{chatId}/
+│   └── {uuid}                    # E2E encrypted chat files
+│
+└── {folder}/{uuid}               # Legacy (pre-migration) files
+```
+
+---
+
+## Collection Hierarchy (Complete)
 
 ```
 firestore/
-├── users/{userId}                              # Encryption keys
+├── users/{userId}                              # Encryption keys + fail counters
 │
 ├── shared_notes/{noteId}                       # Public encrypted shares
 │
 └── artifacts/{appId}/
-    ├── public_keys/{userId}                    # RSA public keys + encrypted private key
+    ├── public_keys/{userId}                    # RSA + ECDH public keys
     │
     ├── users/{userId}/
     │   ├── notes/{noteId}                      # Notes & folders
@@ -517,46 +569,42 @@ firestore/
     │   ├── banking/{accountId}                 # Banking data
     │   ├── reminders/{reminderId}              # Reminders
     │   ├── counters/{counterId}                # Counters
+    │   ├── research/{paperId}                  # Research papers & folders
     │   ├── devices/{deviceId}                  # Device sessions
     │   └── activity_log/{eventId}              # Audit trail
     │
     ├── chats/{chatId}/
     │   └── messages/{msgId}                    # 1:1 encrypted messages
     │
-    └── groups/{groupId}/
-        └── messages/{msgId}                    # Group encrypted messages
+    ├── groups/{groupId}/
+    │   ├── messages/{msgId}                    # Group encrypted messages
+    │   └── group_members/{memberId}            # Group members
+    │
+    ├── shared_docs/{shareId}/
+    │   └── members/{uid}                       # Per-doc collaboration keys
+    │
+    ├── workspaces/{wsId}/
+    │   ├── members/{uid}                       # Workspace member keys
+    │   └── {collection}/{docId}                # Workspace documents
+    │
+    └── global_transfers/{transferId}           # File transfer rooms
 ```
 
 ---
 
 ## Import / Export Formats
 
-All import/export is centralized in **Settings → Data Tab**.
-
 | App | Export Formats | Import Formats |
 |-----|---------------|----------------|
 | Notes | JSON | JSON |
+| Markdown | JSON | JSON |
 | Tasks | JSON | JSON |
-| Contacts | JSON, CSV (Google format), VCF (vCard 3.0) | JSON, CSV (Google format), VCF (vCard 3.0) |
+| Contacts | JSON, CSV (Google), VCF (vCard 3.0) | JSON, CSV (Google), VCF (vCard 3.0) |
 | Passwords | JSON, CSV (Google Passwords) | JSON, CSV (Google Passwords) |
-| Bookmarks | JSON, HTML (Netscape/Chrome/Firefox/Brave) | JSON, HTML (Netscape/Chrome/Firefox/Brave) |
+| Bookmarks | JSON, HTML (Chrome/Firefox/Brave) | JSON, HTML (Chrome/Firefox/Brave) |
 | Finance | JSON | JSON |
 | Banking | JSON | JSON |
 | Checklists | JSON | JSON |
 | Counters | JSON | JSON |
+| Research | JSON | JSON |
 | **Full Backup** | JSON (all collections) | JSON (all collections) |
-
-### JSON Export Format
-
-Each per-app JSON export uses the Sanctum backup format:
-```json
-{
-  "collection_name": [
-    { "_id": "doc-id", "_createdAt": "ISO-8601", ...decrypted_fields }
-  ]
-}
-```
-
-### CSV Format (Contacts)
-
-Google Contacts CSV format with dynamic column expansion for multi-value fields (phones, emails, addresses, websites, custom fields).

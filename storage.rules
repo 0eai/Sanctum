@@ -1,14 +1,50 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /artifacts/{appId}/users/{userId}/{allPaths=**} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId && request.resource.size < 50 * 1024 * 1024;
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    match /artifacts/{appId}/{folder}/{allPaths=**} {
-      allow read: if request.auth != null && folder in ['misc', 'secureshare', 'notes', 'markdown', 'research'];
-      allow write: if request.auth != null && folder in ['misc', 'secureshare', 'notes', 'markdown', 'research'] && request.resource.size < 50 * 1024 * 1024;
+    function isUnderSizeLimit() {
+      return request.resource.size < 50 * 1024 * 1024;
     }
+
+    match /artifacts/{appId} {
+      // 1. Personal Vaults (/users/{userId}/...)
+      match /users/{userId}/{allPaths=**} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow write: if isAuthenticated() && request.auth.uid == userId && isUnderSizeLimit();
+      }
+
+      // 2. Workspaces (/workspaces/{workspaceId}/...)
+      match /workspaces/{workspaceId}/{allPaths=**} {
+        allow read: if isAuthenticated() && 
+                    request.auth.uid in firestore.get(/databases/(default)/documents/artifacts/$(appId)/workspaces/$(workspaceId)).data.memberUids;
+        allow write: if isAuthenticated() && isUnderSizeLimit() &&
+                     request.auth.uid in firestore.get(/databases/(default)/documents/artifacts/$(appId)/workspaces/$(workspaceId)).data.memberUids;
+      }
+
+      // 3. Shared Docs (/shared_docs/{shareId}/...)
+      // Files are AES-encrypted with per-doc keys — only collaborators with the
+      // RSA-wrapped key can decrypt. Storage-level read access is safe to broaden.
+      match /shared_docs/{shareId}/{allPaths=**} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && isUnderSizeLimit();
+      }
+
+      // 4. SecureShare Temporary Files (/secureshare/{chatId}/...)
+      match /secureshare/{chatId}/{allPaths=**} {
+        allow read, write: if isAuthenticated() && isUnderSizeLimit(); // Can add membership checks if secureshare chats are stored in firestore
+      }
+
+      // 5. Legacy Generic Modules (Fallback for old files only)
+      match /{folder}/{allPaths=**} {
+        allow read: if isAuthenticated() && folder in ['misc', 'notes', 'markdown', 'research', 'tasks', 'bookmarks', 'checklists'];
+        allow write: if isAuthenticated() && isUnderSizeLimit() && folder in ['misc', 'notes', 'markdown', 'research', 'tasks', 'bookmarks', 'checklists'];
+      }
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

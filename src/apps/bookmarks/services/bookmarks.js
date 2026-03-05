@@ -6,25 +6,50 @@ import { db, appId } from '../../../lib/firebase';
 import { encryptData, decryptData } from '../../../lib/crypto';
 import { normalizeUrl } from '../../../lib/bookmarkUtils';
 
+// --- Workspace Context Helper ---
+const getBmCol = (userId, ctx) =>
+  ctx?.workspaceId
+    ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'bookmarks')
+    : collection(db, 'artifacts', appId, 'users', userId, 'bookmarks');
+
+const getBmDoc = (userId, docId, ctx) =>
+  ctx?.workspaceId
+    ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'bookmarks', docId)
+    : doc(db, 'artifacts', appId, 'users', userId, 'bookmarks', docId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
 // --- Listeners ---
 
-export const listenToBookmarks = (userId, cryptoKey, callback) => {
+export const listenToBookmarks = (userId, cryptoKey, callback, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'bookmarks'),
+    getBmCol(userId, ctx),
     orderBy('createdAt', 'desc')
   );
 
   return onSnapshot(q, async (snapshot) => {
     const data = await Promise.all(snapshot.docs.map(async doc => {
       const raw = doc.data();
-      const decrypted = await decryptData(raw, cryptoKey);
-      return {
-        id: doc.id,
-        ...raw,
-        ...decrypted,
-        type: raw.type || 'bookmark',
-        parentId: raw.parentId || null
-      };
+      try {
+        const decrypted = await decryptData(raw, key);
+        return {
+          id: doc.id,
+          ...raw,
+          ...(decrypted || {}),
+          type: raw.type || 'bookmark',
+          parentId: raw.parentId || null
+        };
+      } catch (error) {
+        console.warn('Failed to decrypt bookmark doc', doc.id, error.message || error);
+        return {
+          id: doc.id,
+          title: 'Encrypted Data (Decryption Failed)',
+          url: '',
+          type: raw.type || 'bookmark',
+          parentId: raw.parentId || null
+        };
+      }
     }));
     callback(data);
   });
@@ -32,21 +57,27 @@ export const listenToBookmarks = (userId, cryptoKey, callback) => {
 
 // --- Actions ---
 
-export const saveBookmarkItem = async (userId, cryptoKey, itemData) => {
-  const payload = { title: itemData.title, type: itemData.type };
+export const saveBookmarkItem = async (userId, cryptoKey, itemData, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const payload = {
+    title: itemData.title,
+    type: itemData.type,
+    sharedId: itemData.sharedId || null,
+    shareUrlKey: itemData.shareUrlKey || null
+  };
   payload.parentId = itemData.parentId;
 
   if (itemData.type === 'bookmark') payload.url = normalizeUrl(itemData.url);
 
-  const encrypted = await encryptData(payload, cryptoKey);
+  const encrypted = await encryptData(payload, key);
 
   if (itemData.id) {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'bookmarks', itemData.id), {
+    await updateDoc(getBmDoc(userId, itemData.id, ctx), {
       ...encrypted,
       updatedAt: serverTimestamp()
     });
   } else {
-    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'bookmarks'), {
+    await addDoc(getBmCol(userId, ctx), {
       ...encrypted,
       type: itemData.type,
       parentId: itemData.parentId,
@@ -55,17 +86,17 @@ export const saveBookmarkItem = async (userId, cryptoKey, itemData) => {
   }
 };
 
-export const deleteBookmarkItem = async (userId, item, allItems) => {
+export const deleteBookmarkItem = async (userId, item, allItems, ctx = null) => {
   if (item.type === 'folder') {
     const batch = writeBatch(db);
     const children = allItems.filter(i => i.parentId === item.id);
     children.forEach(child => {
-      batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'bookmarks', child.id));
+      batch.delete(getBmDoc(userId, child.id, ctx));
     });
-    batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'bookmarks', item.id));
+    batch.delete(getBmDoc(userId, item.id, ctx));
     await batch.commit();
   } else {
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'bookmarks', item.id));
+    await deleteDoc(getBmDoc(userId, item.id, ctx));
   }
 };
 

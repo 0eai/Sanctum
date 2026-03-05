@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronLeft, Plus, Search, FileText, Settings, X, Star, FileCode,
-  FolderPlus, Folder, ChevronRight, Home, Link, Globe, Check, CloudOff
+  FolderPlus, Folder, ChevronRight, Home, Link, Globe, Check, CloudOff, Users
 } from 'lucide-react';
 
 import { Modal, Button, LoadingSpinner, Input } from '../../components/ui';
@@ -14,6 +14,12 @@ import {
   exportMarkdownDocs, importMarkdownDocs
 } from './services/markdown';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
+
+import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
+import WorkspacePanel from '../../components/ui/WorkspacePanel';
+import CollaborateModal from '../../components/ui/CollaborateModal';
+import SharedDocsView from '../../components/ui/SharedDocsView';
+import useCollaboration from '../../hooks/useCollaboration';
 
 import MarkdownEditor from './components/MarkdownEditor';
 import MarkdownCard from './components/MarkdownCard';
@@ -27,6 +33,10 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [folderPath, setFolderPath] = useState([{ id: null, title: 'Markdown' }]);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Collaboration (all state + effects handled by the hook)
+  const collab = useCollaboration(user, cryptoKey, 'markdown');
+  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
 
   // Editor State
   const [editorDoc, setEditorDoc] = useState(null);
@@ -44,18 +54,20 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // --- Listeners ---
+  // --- Data Listener ---
   useEffect(() => {
-    if (!user || !cryptoKey) return;
+    if (!user || (!cryptoKey && !collab.workspaceKey)) return;
+    if (activeWorkspace && !collab.workspaceKey) return;
+
     const unsub = listenToMarkdownDocs(user.uid, cryptoKey, (data) => {
       setDocs(data);
       setLoading(false);
-    });
+    }, ctx);
     return () => unsub();
-  }, [user, cryptoKey]);
+  }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   useEffect(() => {
-    if (loading || docs.length === 0) return;
+    if (loading && docs.length === 0 && sharedDocs.length === 0) return;
 
     const { resource, resourceId, action } = route;
 
@@ -72,7 +84,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       }
 
       // --- EXISTING DOC ---
-      const targetDoc = docs.find(d => d.id === resourceId);
+      const targetDoc = docs.find(d => d.id === resourceId) || sharedDocs.find(d => d.id === resourceId);
       if (targetDoc) {
         setEditorDoc({ ...targetDoc, initialPreview: action !== 'edit' });
         setCurrentFolderId(targetDoc.parentId || null);
@@ -105,13 +117,13 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleSave = async (docData) => {
     if (!docData.title?.trim() && !docData.content?.trim()) {
-      if (docData.id) await deleteMarkdownItem(user.uid, docData, docs);
+      if (docData.id) await deleteMarkdownItem(user.uid, docData, docs, ctx);
       return;
     }
 
     setSaveStatus('saving');
     try {
-      const id = await saveMarkdownDoc(user.uid, cryptoKey, docData, currentFolderId);
+      const id = await saveMarkdownDoc(user.uid, cryptoKey, docData, currentFolderId, ctx);
 
       if (!docData.id) {
         setEditorDoc(prev => ({ ...prev, id }));
@@ -134,9 +146,9 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!title) return;
 
     if (folderModalMode === 'create') {
-      await createFolder(user.uid, cryptoKey, title, currentFolderId);
+      await createFolder(user.uid, cryptoKey, title, currentFolderId, ctx);
     } else {
-      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
+      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title, ctx);
     }
     setIsFolderModalOpen(false);
     setFolderToEdit(null);
@@ -145,10 +157,10 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const handleMove = async (targetFolderId) => {
     if (itemToMove.type === 'folder') {
       // Move folder: update its parentId via updateFolder
-      await updateFolder(user.uid, cryptoKey, itemToMove.id, itemToMove.title, targetFolderId);
+      await updateFolder(user.uid, cryptoKey, itemToMove.id, itemToMove.title, targetFolderId, ctx);
     } else {
       // Move doc: re-save with new parentId (saveMarkdownDoc handles encryption)
-      await saveMarkdownDoc(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId);
+      await saveMarkdownDoc(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId, ctx);
     }
 
     setIsMoveModalOpen(false);
@@ -157,7 +169,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    await deleteMarkdownItem(user.uid, deleteConfirm, docs);
+    await deleteMarkdownItem(user.uid, deleteConfirm, docs, ctx);
     setDeleteConfirm(null);
   };
 
@@ -258,8 +270,10 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         }}
         saveStatus={saveStatus}
         navigate={navigate}
-        cryptoKey={cryptoKey}
+        cryptoKey={editorDoc.isSharedDoc && !activeWorkspace ? editorDoc.docKey : (ctx?.key || cryptoKey)}
         user={user}
+        onCollaborate={!ctx ? ((e, item) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
+        readOnly={editorDoc.isSharedDoc && editorDoc.role === 'viewer'}
       />
     );
   }
@@ -275,9 +289,20 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
                 else onExit();
               }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-              <h1 className="text-xl font-bold">Markdown</h1>
+              <WorkspaceSwitcher
+                {...collab.switcherProps}
+                onSelect={(ws) => {
+                  collab.switchWorkspace(ws);
+                  navigate('#markdown');
+                }}
+              />
             </div>
             <div className="flex gap-1">
+              {activeWorkspace && (
+                <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                  <Users size={20} />
+                </button>
+              )}
               <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
                 <Settings size={20} />
               </button>
@@ -310,6 +335,26 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <main className="flex-1 overflow-y-auto scroll-smooth p-4">
         <div className="max-w-3xl mx-auto pb-32">
+
+          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
+            <div className="mb-8">
+              <SharedDocsView
+                sharedDocs={sharedDocs}
+                appType="markdown"
+                onOpenDoc={(doc) => navigate(`#markdown/doc/${doc.id}`)}
+              />
+            </div>
+          )}
+
+          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
+            <div className="flex items-center gap-2 px-1 mb-3">
+              <Folder size={14} className="text-gray-400" />
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Personal Vault
+              </span>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex justify-center py-20"><LoadingSpinner /></div>
           ) : displayedItems.length === 0 ? (
@@ -330,13 +375,14 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                   }
                   onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
                   onDelete={(i) => setDeleteConfirm(i)}
-                  onShare={(i) => {
+                  onShare={!ctx ? ((i) => {
                     if (i.sharedId) {
                       setShareModal({ isOpen: true, item: i, link: buildShareUrl(i.sharedId, i.shareUrlKey) });
                     } else {
                       handleShare(i);
                     }
-                  }}
+                  }) : null}
+                  onCollaborate={!ctx ? ((i) => collab.openCollaborateModal(i)) : null}
                 />
               ))}
             </div>
@@ -390,6 +436,45 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           </div>
         </div>
       </Modal>
+
+      {/* Collaboration Modals */}
+      {collab.isWorkspacePanelOpen && activeWorkspace && (
+        <WorkspacePanel
+          {...collab.workspacePanelProps}
+          onDelete={async () => {
+            await collab.deleteActiveWorkspace();
+            navigate('#markdown');
+          }}
+        />
+      )}
+
+      {collab.collaborateModalItem && (
+        <CollaborateModal
+          isOpen={!!collab.collaborateModalItem}
+          docId={collab.collaborateModalItem.id}
+          docTitle={collab.collaborateModalItem.title || 'Untitled'}
+          fullDocData={collab.collaborateModalItem}
+          shareId={collab.collaborateModalItem.sharedId || null}
+          docKey={collab.collaborateModalItem.docKey || null}
+          appType="markdown"
+          currentUser={user}
+          privateKey={privateKey}
+          cryptoKey={cryptoKey}
+          onClose={() => collab.closeCollaborateModal()}
+          onShareCreated={async (newShareId) => {
+            if (collab.collaborateModalItem) {
+              await saveMarkdownDoc(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, null, ctx);
+              setDocs(docs.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+            }
+          }}
+          onShareDeleted={async () => {
+            if (collab.collaborateModalItem) {
+              await saveMarkdownDoc(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, null, ctx);
+              setDocs(docs.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

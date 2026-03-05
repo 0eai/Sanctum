@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home,
-  Link, Globe, Check, CloudOff
+  Link, Globe, Check, CloudOff, Users
 } from 'lucide-react';
 
 import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
@@ -14,6 +14,12 @@ import {
   exportTasks, importTasks
 } from './services/tasks';
 import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
+
+import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
+import WorkspacePanel from '../../components/ui/WorkspacePanel';
+import CollaborateModal from '../../components/ui/CollaborateModal';
+import SharedDocsView from '../../components/ui/SharedDocsView';
+import useCollaboration from '../../hooks/useCollaboration';
 
 import TaskCard from './components/TaskCard';
 import TaskEditor from './components/TaskEditor';
@@ -41,6 +47,10 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [shareTTL, setShareTTL] = useState(0);
   const [processing, setProcessing] = useState(false);
 
+  // Collaboration (all state + effects handled by the hook)
+  const collab = useCollaboration(user, cryptoKey, 'tasks');
+  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+
   // --- URL-Driven State ---
   // Determine current tab based on the URL path
   let currentTab = 'inbox';
@@ -57,8 +67,8 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // If the URL has ?edit=id, find the task in our loaded data
   const editorTask = useMemo(() => {
     if (!editTaskId) return null;
-    return tasks.find(t => t.id === editTaskId) || null;
-  }, [editTaskId, tasks]);
+    return tasks.find(t => t.id === editTaskId) || sharedDocs.find(t => t.id === editTaskId) || null;
+  }, [editTaskId, tasks, sharedDocs]);
 
   // Helper for generating the current base path
   const currentBasePath = route.resource === 'folder' ? `#tasks/folder/${currentTab}` : `#tasks/${currentTab}`;
@@ -68,16 +78,18 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [touchEnd, setTouchEnd] = useState(null);
   const MIN_SWIPE_DISTANCE = 50;
 
-  // --- Listeners ---
+  // --- Data Listeners ---
   useEffect(() => {
-    if (!user || !cryptoKey) return;
-    const unsubFolders = listenToTaskFolders(user.uid, cryptoKey, setFolders);
+    if (!user || (!cryptoKey && !collab.workspaceKey)) return;
+    if (activeWorkspace && !collab.workspaceKey) return;
+
+    const unsubFolders = listenToTaskFolders(user.uid, cryptoKey, setFolders, ctx);
     const unsubTasks = listenToTasks(user.uid, cryptoKey, (data) => {
       setTasks(data);
       setLoading(false);
-    });
+    }, ctx);
     return () => { unsubFolders(); unsubTasks(); };
-  }, [user, cryptoKey]);
+  }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   // --- UI Sync ---
   // Scroll tab bar automatically
@@ -132,7 +144,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     e.preventDefault();
     const name = e.target.name.value.trim();
     if (!name) return;
-    const id = await saveTaskFolder(user.uid, cryptoKey, name);
+    const id = await saveTaskFolder(user.uid, cryptoKey, name, ctx);
     setIsFolderModalOpen(false);
     navigate(`#tasks/folder/${id}`); // FIXED: Push to new folder
   };
@@ -154,7 +166,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     try {
       // Immediately save the ghost task and push its ID to the URL so the editor opens
-      const newId = await saveTask(user.uid, cryptoKey, newTask);
+      const newId = await saveTask(user.uid, cryptoKey, newTask, ctx);
       navigate(`${targetPath}?edit=${newId}`);
     } catch (e) {
       console.error("Failed to create task", e);
@@ -162,7 +174,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleSaveTask = async (taskData) => {
-    await saveTask(user.uid, cryptoKey, taskData);
+    await saveTask(user.uid, cryptoKey, taskData, ctx);
   };
 
   const handleCloseEditor = async (finalTaskData) => {
@@ -174,7 +186,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     if (title === '') {
       try {
-        await deleteTaskEntity(user.uid, { type: 'task', id: finalTaskData.id }, tasks);
+        await deleteTaskEntity(user.uid, { type: 'task', id: finalTaskData.id }, tasks, ctx);
       } catch (error) {
         console.error("Cleanup failed", error);
       }
@@ -182,13 +194,13 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleToggleTask = async (task) => {
-    const didRepeat = await toggleTaskCompletion(user.uid, cryptoKey, task);
+    const didRepeat = await toggleTaskCompletion(user.uid, cryptoKey, task, ctx);
     if (didRepeat) alert("Task repeated!");
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    await deleteTaskEntity(user.uid, deleteConfirm, tasks);
+    await deleteTaskEntity(user.uid, deleteConfirm, tasks, ctx);
 
     // If we just deleted the folder we are currently viewing, go to Inbox
     if (deleteConfirm.type === 'folder' && currentTab === deleteConfirm.id) {
@@ -200,7 +212,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleItemMove = async (targetFolderId) => {
     if (!itemToMove) return;
-    await saveTask(user.uid, cryptoKey, { ...itemToMove, folderId: targetFolderId });
+    await saveTask(user.uid, cryptoKey, { ...itemToMove, folderId: targetFolderId }, ctx);
     setIsMoveModalOpen(false);
     setItemToMove(null);
   };
@@ -211,7 +223,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
     if (targetIndex < 0 || targetIndex >= list.length) return;
 
-    await reorderTasks(user.uid, list[index], list[targetIndex]);
+    await reorderTasks(user.uid, list[index], list[targetIndex], ctx);
   };
 
   // --- Sharing Handlers ---
@@ -291,7 +303,10 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             setItemToMove(item);
             setIsMoveModalOpen(true);
           }}
-          onShare={(task) => handleShareTask(task)}
+          onShare={!ctx && !editorTask.isSharedDoc ? (task) => handleShareTask(task) : null}
+          onCollaborate={!ctx ? ((task) => collab.openCollaborateModal(task)) : null}
+          cryptoKey={editorTask.isSharedDoc && !activeWorkspace ? editorTask.docKey : (ctx?.key || cryptoKey)}
+          readOnly={editorTask.isSharedDoc && editorTask.role === 'viewer'}
         />
       ) : (
         /* LIST VIEW */
@@ -302,12 +317,25 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 <div className="flex items-center gap-2">
                   {/* FIXED: Back button logic */}
                   <button onClick={() => currentTab === 'inbox' ? onExit() : navigate('#tasks/inbox')} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                  <h1 className="text-xl font-bold flex items-center gap-2">Tasks</h1>
+                  <WorkspaceSwitcher
+                    {...collab.switcherProps}
+                    onSelect={(ws) => {
+                      collab.switchWorkspace(ws);
+                      navigate('#tasks/inbox');
+                    }}
+                  />
                 </div>
                 {/* FIXED: Push ?modal=settings to URL */}
-                <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                  <Settings size={20} />
-                </button>
+                <div className="flex items-center gap-1">
+                  {activeWorkspace && (
+                    <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                      <Users size={20} />
+                    </button>
+                  )}
+                  <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                    <Settings size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="relative">
@@ -358,6 +386,25 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             onTouchEnd={handleTouchEnd}
           >
             <div className="max-w-3xl mx-auto pb-32 space-y-4">
+
+              {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (
+                <div className="mb-8">
+                  <SharedDocsView
+                    sharedDocs={sharedDocs}
+                    appType="tasks"
+                    onOpenDoc={(doc) => navigate(`${currentBasePath}?edit=${doc.id}`)}
+                  />
+                </div>
+              )}
+
+              {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (displayedItems.active.length > 0 || displayedItems.completed.length > 0) && (
+                <div className="flex items-center gap-2 px-1 mb-2">
+                  <Folder size={14} className="text-gray-400" />
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Personal Vault
+                  </span>
+                </div>
+              )}
 
               {loading && <div className="flex justify-center py-10"><LoadingSpinner /></div>}
 
@@ -477,6 +524,45 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           </div>
         </div>
       </Modal>
+
+      {/* Collaboration Modals */}
+      {collab.isWorkspacePanelOpen && activeWorkspace && (
+        <WorkspacePanel
+          {...collab.workspacePanelProps}
+          onDelete={async () => {
+            await collab.deleteActiveWorkspace();
+            navigate('#tasks');
+          }}
+        />
+      )}
+
+      {collab.collaborateModalItem && (
+        <CollaborateModal
+          isOpen={!!collab.collaborateModalItem}
+          docId={collab.collaborateModalItem.id}
+          docTitle={collab.collaborateModalItem.title || 'Untitled'}
+          fullDocData={collab.collaborateModalItem}
+          shareId={collab.collaborateModalItem.sharedId || null}
+          docKey={collab.collaborateModalItem.docKey || null}
+          appType="tasks"
+          currentUser={user}
+          privateKey={privateKey}
+          cryptoKey={cryptoKey}
+          onClose={() => collab.closeCollaborateModal()}
+          onShareCreated={async (newShareId) => {
+            if (collab.collaborateModalItem) {
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, ctx);
+              setTasks(tasks.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+            }
+          }}
+          onShareDeleted={async () => {
+            if (collab.collaborateModalItem) {
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, ctx);
+              setTasks(tasks.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+            }
+          }}
+        />
+      )}
 
     </div>
   );

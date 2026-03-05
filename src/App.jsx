@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import {
   GoogleAuthProvider, signInWithPopup, signInWithCustomToken, onAuthStateChanged
 } from 'firebase/auth';
@@ -12,37 +12,19 @@ import { syncUserProfile } from './services/profile';
 import { logActivity } from './services/activityLog';
 import { registerDevice, updateDeviceActivity } from './services/deviceTracker';
 
+import { useVault } from './context/VaultContext';
 import { useHashRoute } from './hooks/useHashRoute';
 
 // System Components
 import LockScreen from './components/system/LockScreen';
 import Launcher from './components/system/Launcher';
 
-// App Modules - Lazy Loaded
-const ChecklistApp = React.lazy(() => import('./apps/checklist/Checklist'));
-const CounterApp = React.lazy(() => import('./apps/counter/Counter'));
-const BookmarksApp = React.lazy(() => import('./apps/bookmarks/Bookmarks'));
-const NotesApp = React.lazy(() => import('./apps/notes/Notes'));
-const TasksApp = React.lazy(() => import('./apps/tasks/Tasks'));
-const PasswordsApp = React.lazy(() => import('./apps/passwords/Passwords'));
-const AlertsApp = React.lazy(() => import('./apps/alerts/Alerts'));
-const BankingApp = React.lazy(() => import('./apps/banking/Banking'));
-const FinanceApp = React.lazy(() => import('./apps/finance/Finance'));
-const SettingsApp = React.lazy(() => import('./apps/settings/Settings'));
-const SharedNote = React.lazy(() => import('./apps/SharedNote'));
-const MarkdownApp = React.lazy(() => import('./apps/markdown/Markdown'));
-const RemindersApp = React.lazy(() => import('./apps/reminders/Reminders'));
-const ContactsApp = React.lazy(() => import('./apps/contacts/Contacts'));
-const AuthenticatorApp = React.lazy(() => import('./apps/authenticator/Authenticator'));
-const SecureShareApp = React.lazy(() => import('./apps/secureshare/SecureShare'));
-const ResearchApp = React.lazy(() => import('./apps/research/ResearchApp'));
+// App Registry (replaces 17 individual lazy imports)
+import appRegistry, { SharedNote } from './AppRegistry';
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [cryptoKey, setCryptoKey] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [lockMessage, setLockMessage] = useState("");
-  const [enabledApps, setEnabledApps] = useState(null);
+  const { user, cryptoKey, loading, lockReason, setAuthUser, unlockVault, lockVault, setCryptoKey } = useVault();
+  const [enabledApps, setEnabledApps] = React.useState(null);
 
   // --- 1. Router Hook ---
   const { route, navigate } = useHashRoute();
@@ -64,8 +46,7 @@ export default function App() {
       if (timeout) {
         timer = setTimeout(() => {
           logActivity(user.uid, 'Vault Auto-Locked', 'info', 'Lock');
-          setLockMessage('Session expired due to inactivity.');
-          setCryptoKey(null);
+          lockVault('Session expired due to inactivity.');
         }, timeout);
       }
     };
@@ -80,7 +61,7 @@ export default function App() {
       if (timer) clearTimeout(timer);
       events.forEach(e => window.removeEventListener(e, resetTimer));
     };
-  }, [cryptoKey, user]);
+  }, [cryptoKey, user, lockVault]);
 
   // --- Lock when Tab Hidden (Extension Defense) ---
   useEffect(() => {
@@ -90,14 +71,13 @@ export default function App() {
       const isLockOnHiddenEnabled = localStorage.getItem('sanctum_lock_on_hidden') === 'true';
       if (isLockOnHiddenEnabled && document.visibilityState === 'hidden') {
         logActivity(user.uid, 'Vault Auto-Locked (Hidden)', 'info', 'Lock');
-        setLockMessage('Locked for your security because the tab was hidden.');
-        setCryptoKey(null);
+        lockVault('Locked for your security because the tab was hidden.');
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [cryptoKey, user]);
+  }, [cryptoKey, user, lockVault]);
 
   // --- Periodic device activity update (every 5 min while vault open) ---
   useEffect(() => {
@@ -115,18 +95,16 @@ export default function App() {
     initAuth();
 
     return onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      setLoading(false);
+      setAuthUser(u);
       if (u) {
         syncUserProfile(u); // Fire-and-forget profile sync
         const prefs = await fetchAppPreferences(u.uid);
         setEnabledApps(prefs);
       } else {
-        setCryptoKey(null);
         setEnabledApps(null);
       }
     });
-  }, []);
+  }, [setAuthUser]);
 
   // --- Handlers ---
   const launchApp = (appId) => {
@@ -138,8 +116,7 @@ export default function App() {
   };
 
   const handleUnlock = (key) => {
-    setLockMessage("");
-    setCryptoKey(key);
+    unlockVault(key);
     logActivity(user.uid, 'Vault Unlocked', 'success', 'Lock');
     registerDevice(user.uid);
   };
@@ -172,31 +149,21 @@ export default function App() {
   }
 
   if (!cryptoKey) {
-    return <LockScreen user={user} onUnlock={handleUnlock} initialMessage={lockMessage} />;
+    return <LockScreen user={user} onUnlock={handleUnlock} initialMessage={lockReason} />;
   }
 
-  // Pass route and navigate down to apps so they can handle sub-routing
+  // --- App Routing via Registry (replaces 17-case switch) ---
   const props = { user, cryptoKey, onExit: exitApp, route, navigate };
 
+  const AppComponent = appRegistry[route.appId];
   let AppRenderer;
-  switch (route.appId) {
-    case 'alerts': AppRenderer = <AlertsApp {...props} />; break;
-    case 'banking': AppRenderer = <BankingApp {...props} />; break;
-    case 'finance': AppRenderer = <FinanceApp {...props} />; break;
-    case 'checklist': AppRenderer = <ChecklistApp {...props} />; break;
-    case 'tasks': AppRenderer = <TasksApp {...props} />; break;
-    case 'reminders': AppRenderer = <RemindersApp {...props} />; break;
-    case 'passwords': AppRenderer = <PasswordsApp {...props} />; break;
-    case 'counter': AppRenderer = <CounterApp {...props} />; break;
-    case 'bookmarks': AppRenderer = <BookmarksApp {...props} />; break;
-    case 'notes': AppRenderer = <NotesApp {...props} />; break;
-    case 'markdown': AppRenderer = <MarkdownApp {...props} />; break;
-    case 'contacts': AppRenderer = <ContactsApp {...props} />; break;
-    case 'authenticator': AppRenderer = <AuthenticatorApp {...props} />; break;
-    case 'secureshare': AppRenderer = <SecureShareApp {...props} />; break;
-    case 'research': AppRenderer = <ResearchApp {...props} onOpenApp={(appId) => navigate(`#${appId}`)} />; break;
-    case 'settings': AppRenderer = <SettingsApp {...props} />; break;
-    default: AppRenderer = <Launcher user={user} onLaunch={launchApp} onLock={() => setCryptoKey(null)} enabledApps={enabledApps} />; break;
+
+  if (AppComponent) {
+    // Special case: research app needs onOpenApp
+    const extraProps = route.appId === 'research' ? { onOpenApp: (id) => navigate(`#${id}`) } : {};
+    AppRenderer = <AppComponent {...props} {...extraProps} />;
+  } else {
+    AppRenderer = <Launcher user={user} onLaunch={launchApp} onLock={() => lockVault()} enabledApps={enabledApps} />;
   }
 
   return (

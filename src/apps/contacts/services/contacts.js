@@ -1,64 +1,34 @@
 // src/services/contacts.js
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../../lib/firebase';
-import { encryptData, decryptData } from '../../../lib/crypto';
+import { decryptData } from '../../../lib/crypto';
+import createEncryptedCRUD from '../../../services/createEncryptedCRUD';
 
-export const listenToContacts = (uid, cryptoKey, callback) => {
-    const q = query(collection(db, 'artifacts', appId, 'users', uid, 'contacts'));
+const crud = createEncryptedCRUD('contacts', {
+    transformDecrypted: (raw, decrypted) => ({ ...raw, ...decrypted })
+});
 
-    return onSnapshot(q, async (snapshot) => {
-        const data = await Promise.all(snapshot.docs.map(async d => {
-            const raw = d.data();
-            const decrypted = await decryptData(raw, cryptoKey);
-            return { id: d.id, ...raw, ...decrypted };
-        }));
-
+export const listenToContacts = (uid, cryptoKey, callback) =>
+    crud.listen(uid, cryptoKey, (data) => {
         data.sort((a, b) => (a.firstName || '').localeCompare(b.firstName || ''));
         callback(data);
     });
-};
 
-export const saveContact = async (uid, cryptoKey, contactData) => {
-    const id = contactData.id || doc(collection(db, 'artifacts', appId, 'users', uid, 'contacts')).id;
+export const saveContact = async (uid, cryptoKey, contactData) =>
+    crud.save(uid, cryptoKey, contactData);
 
-    const payload = { ...contactData };
-    delete payload.id;
+export const deleteContact = async (uid, id) =>
+    crud.remove(uid, id);
 
-    const now = new Date().toISOString();
-    if (!contactData.id) payload.createdAt = now;
-    payload.updatedAt = now;
+export const exportContacts = async (uid, cryptoKey) =>
+    crud.exportAll(uid, cryptoKey);
 
-    const encrypted = await encryptData(payload, cryptoKey);
-
-    await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'contacts', id), {
-        ...encrypted,
-        updatedAt: now,
-        createdAt: contactData.id ? contactData.createdAt : now
+export const importContacts = async (uid, cryptoKey, jsonData) =>
+    crud.importAll(uid, cryptoKey, jsonData, null, (item) => {
+        if (!(item.firstName || item.lastName || item.company)) return null;
+        const { id, ...rest } = item;
+        return rest;
     });
-
-    return id;
-};
-
-export const deleteContact = async (uid, id) => {
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', uid, 'contacts', id));
-};
-
-// --- Legacy JSON Fallbacks ---
-export const exportContacts = async (uid, cryptoKey) => {
-    return new Promise((resolve) => listenToContacts(uid, cryptoKey, resolve)());
-};
-
-export const importContacts = async (uid, cryptoKey, jsonData) => {
-    let count = 0;
-    if (!Array.isArray(jsonData)) return count;
-    for (const item of jsonData) {
-        if (item.firstName || item.lastName || item.company) {
-            await saveContact(uid, cryptoKey, { ...item, id: null });
-            count++;
-        }
-    }
-    return count;
-};
 
 
 // --- GOOGLE CONTACTS CSV INTEGRATION ---

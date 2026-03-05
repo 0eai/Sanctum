@@ -2,11 +2,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronLeft, Plus, FolderPlus, Home, ChevronRight, LayoutGrid, List,
-  Loader, Link, Globe, Check, CloudOff, Folder
+  Loader, Link, Globe, Check, CloudOff, Folder, Users
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
 import MultiFab from '../../components/ui/MultiFab';
+
+import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
+import WorkspacePanel from '../../components/ui/WorkspacePanel';
+import CollaborateModal from '../../components/ui/CollaborateModal';
+import SharedDocsView from '../../components/ui/SharedDocsView';
+import useCollaboration from '../../hooks/useCollaboration';
 
 import {
   listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem,
@@ -28,6 +34,10 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState('grid');
 
+  // Collaboration (all state + effects handled by the hook)
+  const collab = useCollaboration(user, cryptoKey, 'notes');
+  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+
   // Modal & Editor State
   const [editorState, setEditorState] = useState(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
@@ -39,18 +49,21 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [shareModal, setShareModal] = useState(null);
   const [shareTTL, setShareTTL] = useState(0);
   const [processing, setProcessing] = useState(false);
-  // Helper to get the current base path for opening/closing modals without losing folder context
   const currentBasePath = route.resourceId ? `#notes/${route.resource}/${route.resourceId}` : `#notes`;
 
-  // --- 1. Listeners ---
+  // --- 1. Data listener ---
+
   useEffect(() => {
-    if (!user || !cryptoKey) return;
+    if (!user || (!cryptoKey && !collab.workspaceKey)) return;
+    if (activeWorkspace && !collab.workspaceKey) return;
+    setLoading(true);
+
     const unsub = listenToNotes(user.uid, cryptoKey, (data) => {
       setItems(data);
       setLoading(false);
-    });
+    }, ctx);
     return () => unsub();
-  }, [user, cryptoKey]);
+  }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   // --- 2. URL Route Sync ---
   // FIXED: Sync internal state strictly to the URL route object
@@ -78,7 +91,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         return;
       }
 
-      const targetNote = items.find(i => i.id === resourceId);
+      const targetNote = items.find(i => i.id === resourceId) || sharedDocs.find(d => d.id === resourceId);
       if (targetNote) {
         setEditorState(targetNote);
         setCurrentFolderId(targetNote.parentId || null);
@@ -137,12 +150,12 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // --- 4. Handlers ---
   const handleSaveNote = async (noteData) => {
     if (!noteData.title.trim() && !noteData.content.trim() && noteData.attachments.length === 0) {
-      if (noteData.id) await deleteNoteItem(user.uid, noteData, items);
+      if (noteData.id) await deleteNoteItem(user.uid, noteData, items, ctx);
       return;
     }
     setSaveStatus('saving');
     try {
-      const id = await saveNote(user.uid, cryptoKey, noteData, currentFolderId);
+      const id = await saveNote(user.uid, cryptoKey, noteData, currentFolderId, ctx);
 
       // Silently update the URL from 'new' to the actual ID so refreshes work
       if (!noteData.id) {
@@ -163,21 +176,21 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     e.preventDefault();
     const title = e.target.title.value;
     if (folderModalMode === 'create') {
-      await createFolder(user.uid, cryptoKey, title, currentFolderId);
+      await createFolder(user.uid, cryptoKey, title, currentFolderId, ctx);
     } else {
-      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title);
+      await updateFolder(user.uid, cryptoKey, folderToEdit.id, title, ctx);
     }
     setIsFolderModalOpen(false);
   };
 
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
-    await deleteNoteItem(user.uid, deleteConfirmation, items);
+    await deleteNoteItem(user.uid, deleteConfirmation, items, ctx);
     setDeleteConfirmation(null);
   };
 
   const handleMove = async (targetFolderId) => {
-    await saveNote(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId);
+    await saveNote(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId, ctx);
     setIsMoveModalOpen(false);
     setItemToMove(null);
   };
@@ -239,14 +252,16 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       {editorState ? (
         <NoteEditor
           note={editorState}
-          cryptoKey={cryptoKey}
+          cryptoKey={editorState.isSharedDoc && !activeWorkspace ? editorState.docKey : (ctx?.key || cryptoKey)} /* If it's a shared doc from SharedDocsView, use docKey */
           onSave={handleSaveNote}
           onBack={handleBack}
-          onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned)}
-          onShare={(e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
+          onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned, ctx)}
+          onShare={!ctx && !editorState.isSharedDoc ? ((e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
+          onCollaborate={!ctx ? ((e, item) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
           saveStatus={saveStatus}
           user={user}
           navigate={navigate}
+          readOnly={editorState.isSharedDoc && editorState.role === 'viewer'}
         />
       ) : (
         <>
@@ -255,10 +270,21 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <button onClick={handleBack} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                  <h1 className="text-xl font-bold">Notes</h1>
+                  <WorkspaceSwitcher
+                    {...collab.switcherProps}
+                    onSelect={(ws) => {
+                      collab.switchWorkspace(ws);
+                      navigate('#notes');
+                    }}
+                  />
                 </div>
 
                 <div className="flex items-center gap-1">
+                  {activeWorkspace && (
+                    <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                      <Users size={20} />
+                    </button>
+                  )}
                   <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
                     {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
                   </button>
@@ -281,6 +307,26 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
           <main className="flex-1 overflow-y-auto scroll-smooth p-4">
             <div className="max-w-3xl mx-auto pb-32">
+
+              {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
+                <div className="mb-8">
+                  <SharedDocsView
+                    sharedDocs={sharedDocs}
+                    appType="notes"
+                    onOpenDoc={(doc) => navigate(`#notes/doc/${doc.id}/edit`)}
+                  />
+                </div>
+              )}
+
+              {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
+                <div className="flex items-center gap-2 px-1 mb-3">
+                  <Folder size={14} className="text-gray-400" />
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Personal Vault
+                  </span>
+                </div>
+              )}
+
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2"><Loader className="animate-spin" /> <p>Loading...</p></div>
               ) : displayedItems.length === 0 ? (
@@ -294,13 +340,15 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                       viewMode={viewMode}
                       onOpen={() => navigate(`#notes/doc/${item.id}/edit`)} // FIXED: Drive by URL
                       onFolderOpen={() => navigate(`#notes/folder/${item.id}`)} // FIXED: Drive by URL
-                      onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned); }}
+                      onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned, ctx); }}
                       onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
                       onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
                       onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
-                      onShare={(e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }}
-                      onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item); }}
+                      onShare={!ctx ? ((e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
+                      onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item, ctx); }}
+                      onCollaborate={!ctx ? ((e) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
                       folderCounts={folderCounts}
+                      readOnly={item.isSharedDoc && item.role === 'viewer'}
                     />
                   ))}
                 </div>
@@ -364,6 +412,43 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           </div>
         </div>
       </Modal>
+
+      {/* Collaboration Modals */}
+      {collab.isWorkspacePanelOpen && activeWorkspace && (
+        <WorkspacePanel
+          {...collab.workspacePanelProps}
+          onDelete={async () => {
+            await collab.deleteActiveWorkspace();
+            navigate('#notes');
+          }}
+        />
+      )}
+
+      {collab.collaborateModalItem && (
+        <CollaborateModal
+          isOpen={!!collab.collaborateModalItem}
+          docId={collab.collaborateModalItem.id}
+          docTitle={collab.collaborateModalItem.title || 'Untitled'}
+          fullDocData={collab.collaborateModalItem}
+          shareId={collab.collaborateModalItem.sharedId || null}
+          docKey={collab.collaborateModalItem.docKey || null}
+          appType="notes"
+          currentUser={user}
+          privateKey={privateKey}
+          cryptoKey={cryptoKey}
+          onClose={() => collab.closeCollaborateModal()}
+          onShareCreated={async (newShareId) => {
+            if (collab.collaborateModalItem) {
+              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: newShareId });
+            }
+          }}
+          onShareDeleted={async () => {
+            if (collab.collaborateModalItem) {
+              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: null });
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

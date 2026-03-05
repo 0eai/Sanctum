@@ -11,30 +11,62 @@ import { getNextDate } from '../../../lib/dateUtils';
 import { DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
 import { deleteFirebaseFile } from '../../../services/firebaseStorage';
 
+// --- Workspace Context Helper ---
+// ctx = { workspaceId, key } — when provided, routes to workspace path
+const getNotesCol = (userId, ctx) =>
+  ctx?.workspaceId
+    ? collection(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'notes')
+    : collection(db, 'artifacts', appId, 'users', userId, 'notes');
+
+const getNoteDoc = (userId, noteId, ctx) =>
+  ctx?.workspaceId
+    ? doc(db, 'artifacts', appId, 'workspaces', ctx.workspaceId, 'notes', noteId)
+    : doc(db, 'artifacts', appId, 'users', userId, 'notes', noteId);
+
+const getKey = (cryptoKey, ctx) => ctx?.key || cryptoKey;
+
 // --- Listeners ---
 
-export const listenToNotes = (userId, cryptoKey, callback) => {
+
+export const listenToNotes = (userId, cryptoKey, callback, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   const q = query(
-    collection(db, 'artifacts', appId, 'users', userId, 'notes'),
+    getNotesCol(userId, ctx),
     orderBy('updatedAt', 'desc')
   );
 
   return onSnapshot(q, async (snapshot) => {
     const data = await Promise.all(snapshot.docs.map(async doc => {
       const raw = doc.data();
-      const decrypted = await decryptData(raw, cryptoKey);
-      return {
-        id: doc.id,
-        ...raw,
-        ...decrypted,
-        tags: decrypted?.tags || [],
-        attachments: decrypted?.attachments || [],
-        dueDate: decrypted?.dueDate || null,
-        repeat: decrypted?.repeat || 'none',
-        isPinned: raw.isPinned || false,
-        type: raw.type || 'note',
-        updatedAt: raw.updatedAt?.toDate() || new Date()
-      };
+      try {
+        const decrypted = await decryptData(raw, key);
+        return {
+          id: doc.id,
+          ...raw,
+          ...(decrypted || {}),
+          tags: decrypted?.tags || [],
+          attachments: decrypted?.attachments || [],
+          dueDate: decrypted?.dueDate || null,
+          repeat: decrypted?.repeat || 'none',
+          isPinned: raw.isPinned || false,
+          type: raw.type || 'note',
+          updatedAt: raw.updatedAt?.toDate() || new Date()
+        };
+      } catch (error) {
+        console.warn('Failed to decrypt note doc', doc.id, error.message || error);
+        return {
+          id: doc.id,
+          title: 'Encrypted Data (Decryption Failed)',
+          content: '',
+          tags: [],
+          attachments: [],
+          dueDate: null,
+          repeat: 'none',
+          isPinned: raw.isPinned || false,
+          type: raw.type || 'note',
+          updatedAt: raw.updatedAt?.toDate() || new Date()
+        };
+      }
     }));
     callback(data);
   });
@@ -90,7 +122,8 @@ export const getOrCreateAiPromptsFolder = async (userId, cryptoKey) => {
 
 // --- CRUD Operations ---
 
-export const saveNote = async (userId, cryptoKey, noteData, parentId) => {
+export const saveNote = async (userId, cryptoKey, noteData, parentId, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   const payload = {
     title: noteData.title,
     content: noteData.content,
@@ -102,7 +135,7 @@ export const saveNote = async (userId, cryptoKey, noteData, parentId) => {
     repeat: noteData.repeat || 'none'
   };
 
-  const encrypted = await encryptData(payload, cryptoKey);
+  const encrypted = await encryptData(payload, key);
   const meta = {
     updatedAt: serverTimestamp(),
     isPinned: noteData.isPinned || false,
@@ -116,29 +149,31 @@ export const saveNote = async (userId, cryptoKey, noteData, parentId) => {
   }
 
   if (noteData.id) {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', noteData.id), { ...encrypted, ...meta });
+    await updateDoc(getNoteDoc(userId, noteData.id, ctx), { ...encrypted, ...meta });
     return noteData.id;
   } else {
-    const ref = await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'notes'), { ...encrypted, ...meta, createdAt: serverTimestamp() });
+    const ref = await addDoc(getNotesCol(userId, ctx), { ...encrypted, ...meta, createdAt: serverTimestamp() });
     return ref.id;
   }
 };
 
-export const createFolder = async (userId, cryptoKey, title, parentId) => {
-  const encrypted = await encryptData({ title }, cryptoKey);
-  await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'notes'), {
+export const createFolder = async (userId, cryptoKey, title, parentId, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const encrypted = await encryptData({ title }, key);
+  await addDoc(getNotesCol(userId, ctx), {
     ...encrypted, type: 'folder', parentId, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
   });
 };
 
-export const updateFolder = async (userId, cryptoKey, folderId, title) => {
-  const encrypted = await encryptData({ title }, cryptoKey);
-  await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', folderId), {
+export const updateFolder = async (userId, cryptoKey, folderId, title, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
+  const encrypted = await encryptData({ title }, key);
+  await updateDoc(getNoteDoc(userId, folderId, ctx), {
     ...encrypted, updatedAt: serverTimestamp()
   });
 };
 
-export const deleteNoteItem = async (userId, item, allItems) => {
+export const deleteNoteItem = async (userId, item, allItems, ctx = null) => {
   if (item.type === 'folder') {
     const batch = writeBatch(db);
     const children = allItems.filter(i => i.parentId === item.id);
@@ -150,10 +185,10 @@ export const deleteNoteItem = async (userId, item, allItems) => {
           if (att.driveFileId) await deleteFirebaseFile(att.driveFileId, 'notes');
         }
       }
-      batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'notes', c.id));
+      batch.delete(getNoteDoc(userId, c.id, ctx));
     }
 
-    batch.delete(doc(db, 'artifacts', appId, 'users', userId, 'notes', item.id));
+    batch.delete(getNoteDoc(userId, item.id, ctx));
     await batch.commit();
   } else {
     // Cleanup attachments for this note
@@ -162,24 +197,25 @@ export const deleteNoteItem = async (userId, item, allItems) => {
         if (att.driveFileId) await deleteFirebaseFile(att.driveFileId, 'notes');
       }
     }
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', item.id));
+    await deleteDoc(getNoteDoc(userId, item.id, ctx));
   }
 };
 
-export const togglePin = async (userId, itemId, currentStatus) => {
-  await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', itemId), {
+export const togglePin = async (userId, itemId, currentStatus, ctx = null) => {
+  await updateDoc(getNoteDoc(userId, itemId, ctx), {
     isPinned: !currentStatus
   });
 };
 
-export const rescheduleNote = async (userId, cryptoKey, note) => {
+export const rescheduleNote = async (userId, cryptoKey, note, ctx = null) => {
+  const key = getKey(cryptoKey, ctx);
   const nextDate = getNextDate(note.dueDate, note.repeat);
   const payload = { ...note, dueDate: nextDate };
   // Clean metadata before re-encrypting
   delete payload.id; delete payload.updatedAt; delete payload.createdAt; delete payload.type; delete payload.isPinned;
 
-  const encrypted = await encryptData(payload, cryptoKey);
-  await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'notes', note.id), {
+  const encrypted = await encryptData(payload, key);
+  await updateDoc(getNoteDoc(userId, note.id, ctx), {
     ...encrypted, updatedAt: serverTimestamp()
   });
 };
