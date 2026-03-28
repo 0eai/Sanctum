@@ -1,12 +1,12 @@
 // src/apps/tasks/Tasks.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  ChevronLeft, Search, Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home,
+  Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home,
   Link, Globe, Check, CloudOff, Users
 } from 'lucide-react';
 
 import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
-import Fab from '../../components/ui/Fab';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 import {
   listenToTaskFolders, listenToTasks, saveTaskFolder, saveTask,
@@ -30,7 +30,6 @@ const DEFAULT_TABS = [
   { id: 'inbox', name: 'My Tasks', icon: CheckSquare },
 ];
 
-// FIXED: Added route and navigate props
 const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [folders, setFolders] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -52,7 +51,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
 
   // --- URL-Driven State ---
-  // Determine current tab based on the URL path
   let currentTab = 'inbox';
   if (route.resource === 'folder' && route.resourceId) {
     currentTab = route.resourceId;
@@ -64,13 +62,11 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const isSettingsOpen = route.query?.modal === 'settings';
   const editTaskId = route.query?.edit;
 
-  // If the URL has ?edit=id, find the task in our loaded data
   const editorTask = useMemo(() => {
     if (!editTaskId) return null;
     return tasks.find(t => t.id === editTaskId) || sharedDocs.find(t => t.id === editTaskId) || null;
   }, [editTaskId, tasks, sharedDocs]);
 
-  // Helper for generating the current base path
   const currentBasePath = route.resource === 'folder' ? `#tasks/folder/${currentTab}` : `#tasks/${currentTab}`;
 
   // Swipe State
@@ -92,7 +88,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   // --- UI Sync ---
-  // Scroll tab bar automatically
   useEffect(() => {
     const tabElement = document.getElementById(`tab-${currentTab}`);
     if (tabElement) {
@@ -102,7 +97,21 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Derived State ---
   const allTabs = useMemo(() => {
-    return [...DEFAULT_TABS, ...folders];
+    const systemTabs = DEFAULT_TABS.map(t => ({
+      ...t,
+      label: t.name,
+    }));
+
+    const folderTabs = folders.map(f => ({
+      id: f.id,
+      label: f.name,
+      name: f.name,
+      icon: Folder,
+      truncate: true,
+      onDelete: () => setDeleteConfirm({ type: 'folder', id: f.id, title: f.name }),
+    }));
+
+    return [...systemTabs, { type: 'separator' }, ...folderTabs];
   }, [folders]);
 
   const displayedItems = useMemo(() => {
@@ -146,7 +155,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!name) return;
     const id = await saveTaskFolder(user.uid, cryptoKey, name, ctx);
     setIsFolderModalOpen(false);
-    navigate(`#tasks/folder/${id}`); // FIXED: Push to new folder
+    navigate(`#tasks/folder/${id}`);
   };
 
   const handleCreateNew = async () => {
@@ -165,7 +174,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     };
 
     try {
-      // Immediately save the ghost task and push its ID to the URL so the editor opens
       const newId = await saveTask(user.uid, cryptoKey, newTask, ctx);
       navigate(`${targetPath}?edit=${newId}`);
     } catch (e) {
@@ -178,7 +186,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   };
 
   const handleCloseEditor = async (finalTaskData) => {
-    // Close the editor by stripping the query parameter
     navigate(currentBasePath);
 
     if (!finalTaskData || !finalTaskData.id) return;
@@ -202,7 +209,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!deleteConfirm) return;
     await deleteTaskEntity(user.uid, deleteConfirm, tasks, ctx);
 
-    // If we just deleted the folder we are currently viewing, go to Inbox
     if (deleteConfirm.type === 'folder' && currentTab === deleteConfirm.id) {
       navigate(`#tasks/inbox`);
     }
@@ -266,30 +272,36 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const isRightSwipe = distance < -MIN_SWIPE_DISTANCE;
 
     if (isLeftSwipe || isRightSwipe) {
-      const currentIndex = allTabs.findIndex(t => t.id === currentTab);
+      // filter out the separator for swipe navigation
+      const swipeTabs = allTabs.filter(t => t.type !== 'separator');
+      const currentIndex = swipeTabs.findIndex(t => t.id === currentTab);
       if (currentIndex === -1) return;
 
       let nextIndex = currentIndex;
 
-      if (isLeftSwipe && currentIndex < allTabs.length - 1) {
+      if (isLeftSwipe && currentIndex < swipeTabs.length - 1) {
         nextIndex = currentIndex + 1;
       } else if (isRightSwipe && currentIndex > 0) {
         nextIndex = currentIndex - 1;
       }
 
       if (nextIndex !== currentIndex) {
-        const nextTab = allTabs[nextIndex];
+        const nextTab = swipeTabs[nextIndex];
         const isSystem = ['starred', 'reminders', 'inbox'].includes(nextTab.id);
         navigate(isSystem ? `#tasks/${nextTab.id}` : `#tasks/folder/${nextTab.id}`);
       }
     }
   };
 
+  const handleTabSelect = (tabId) => {
+    const isSystem = ['starred', 'reminders', 'inbox'].includes(tabId);
+    navigate(isSystem ? `#tasks/${tabId}` : `#tasks/folder/${tabId}`);
+  };
+
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
 
       {/* EDITOR VIEW */}
-      {/* FIXED: We only render the editor if we successfully found the task AND the URL has ?edit= */}
       {editTaskId && editorTask ? (
         <TaskEditor
           task={editorTask}
@@ -310,162 +322,119 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         />
       ) : (
         /* LIST VIEW */
-        <>
-          <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
-            <div className="max-w-4xl mx-auto px-4 pt-4 pb-0 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {/* FIXED: Back button logic */}
-                  <button onClick={() => currentTab === 'inbox' ? onExit() : navigate('#tasks/inbox')} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                  <WorkspaceSwitcher
-                    {...collab.switcherProps}
-                    onSelect={(ws) => {
-                      collab.switchWorkspace(ws);
-                      navigate('#tasks/inbox');
-                    }}
-                  />
-                </div>
-                {/* FIXED: Push ?modal=settings to URL */}
-                <div className="flex items-center gap-1">
-                  {activeWorkspace && (
-                    <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                      <Users size={20} />
-                    </button>
-                  )}
-                  <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-                    <Settings size={20} />
+        <StandardAppLayout
+          headerConfig={{
+            onBack: () => currentTab === 'inbox' ? onExit() : navigate('#tasks/inbox'),
+            workspaceConfig: {
+              switcherProps: collab.switcherProps,
+              activeWorkspace: activeWorkspace,
+              onSelect: (ws) => {
+                collab.switchWorkspace(ws);
+                navigate('#tasks/inbox');
+              },
+              onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
+            },
+            search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search tasks...' },
+            nav: {
+              type: 'tabs',
+              activeId: currentTab,
+              data: allTabs.filter(t => t.type !== 'separator'),
+              onSelect: handleTabSelect,
+              extraNode: (
+                <>
+                  <div className="w-px h-6 bg-blue-400/50 mx-1 flex-shrink-0" />
+                  <button onClick={() => setIsFolderModalOpen(true)} className="px-3 py-2.5 text-blue-200 hover:text-white">
+                    <Plus size={16} />
                   </button>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-                <input
-                  type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..."
-                  className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
-                />
-                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
-              </div>
-
-              {/* TAB BAR */}
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
-                {DEFAULT_TABS.map(tab => (
-                  <button
-                    key={tab.id}
-                    id={`tab-${tab.id}`}
-                    onClick={() => navigate(`#tasks/${tab.id}`)} // FIXED: Drive by URL
-                    className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap ${currentTab === tab.id ? 'bg-gray-50 text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                  >
-                    <tab.icon size={14} fill={tab.id === 'starred' && currentTab === 'starred' ? "currentColor" : "none"} /> {tab.name}
-                  </button>
-                ))}
-                <div className="w-px h-6 bg-blue-400/50 mx-1 flex-shrink-0" />
-                {folders.map(folder => (
-                  <button
-                    key={folder.id}
-                    id={`tab-${folder.id}`}
-                    onClick={() => navigate(`#tasks/folder/${folder.id}`)} // FIXED: Drive by URL
-                    className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium transition-colors whitespace-nowrap group ${currentTab === folder.id ? 'bg-gray-50 text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                  >
-                    <Folder size={14} fill={currentTab === folder.id ? "currentColor" : "none"} />
-                    <span className="max-w-[100px] truncate">{folder.name}</span>
-                    {currentTab === folder.id && (
-                      <span onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'folder', id: folder.id, title: folder.name }); }} className="opacity-50 hover:opacity-100 hover:text-red-500"><X size={12} /></span>
-                    )}
-                  </button>
-                ))}
-                <button onClick={() => setIsFolderModalOpen(true)} className="px-3 py-2.5 text-blue-200 hover:text-white"><Plus size={16} /></button>
-              </div>
+                </>
+              ),
+            },
+            customActions: (
+              <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                <Settings size={20} />
+              </button>
+            ),
+          }}
+          mainProps={{
+            onTouchStart: handleTouchStart,
+            onTouchMove: handleTouchMove,
+            onTouchEnd: handleTouchEnd,
+          }}
+          fabConfig={{
+            onClick: handleCreateNew,
+            icon: <Plus size={28} />,
+            ariaLabel: "Create Task",
+          }}
+        >
+          {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (
+            <div className="mb-8">
+              <SharedDocsView
+                sharedDocs={sharedDocs}
+                appType="tasks"
+                onOpenDoc={(doc) => navigate(`${currentBasePath}?edit=${doc.id}`)}
+              />
             </div>
-          </header>
+          )}
 
-          <main
-            className="flex-1 overflow-y-auto scroll-smooth p-4"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            <div className="max-w-3xl mx-auto pb-32 space-y-4">
+          {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (displayedItems.active.length > 0 || displayedItems.completed.length > 0) && (
+            <div className="flex items-center gap-2 px-1 mb-2">
+              <Folder size={14} className="text-gray-400" />
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Personal Vault
+              </span>
+            </div>
+          )}
 
-              {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (
-                <div className="mb-8">
-                  <SharedDocsView
-                    sharedDocs={sharedDocs}
-                    appType="tasks"
-                    onOpenDoc={(doc) => navigate(`${currentBasePath}?edit=${doc.id}`)}
-                  />
-                </div>
-              )}
+          {loading && <div className="flex justify-center py-10"><LoadingSpinner /></div>}
 
-              {!searchQuery && !activeWorkspace && currentTab === 'inbox' && sharedDocs.length > 0 && (displayedItems.active.length > 0 || displayedItems.completed.length > 0) && (
-                <div className="flex items-center gap-2 px-1 mb-2">
-                  <Folder size={14} className="text-gray-400" />
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Personal Vault
-                  </span>
-                </div>
-              )}
+          {!loading && displayedItems.active.length === 0 && displayedItems.completed.length === 0 && (
+            <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+              <div className="bg-white p-4 rounded-full shadow-sm"><CheckSquare size={32} className="opacity-50" /></div>
+              <p>No tasks.</p>
+            </div>
+          )}
 
-              {loading && <div className="flex justify-center py-10"><LoadingSpinner /></div>}
+          {/* ACTIVE TASKS */}
+          <div className="flex flex-col gap-2">
+            {displayedItems.active.map((task, index) => (
+              <TaskCard
+                key={task.id} task={task} index={index}
+                totalActiveCount={displayedItems.active.length}
+                onToggle={handleToggleTask}
+                onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)}
+                setDeleteConfirm={setDeleteConfirm}
+                onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                onReorder={handleReorderTask}
+                isDraggable={true}
+              />
+            ))}
+          </div>
 
-              {!loading && displayedItems.active.length === 0 && displayedItems.completed.length === 0 && (
-                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-                  <div className="bg-white p-4 rounded-full shadow-sm"><CheckSquare size={32} className="opacity-50" /></div>
-                  <p>No tasks.</p>
-                </div>
-              )}
+          {/* COMPLETED SECTION */}
+          {displayedItems.completed.length > 0 && (
+            <div className="mt-6">
+              <button onClick={() => setIsCompletedOpen(!isCompletedOpen)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-wider mb-3 select-none">
+                {isCompletedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                Completed ({displayedItems.completed.length})
+              </button>
 
-              {/* ACTIVE TASKS */}
-              <div className="flex flex-col gap-2">
-                {displayedItems.active.map((task, index) => (
-                  <TaskCard
-                    key={task.id} task={task} index={index}
-                    totalActiveCount={displayedItems.active.length}
-                    onToggle={handleToggleTask}
-                    onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)} // FIXED: Push edit to URL
-                    setDeleteConfirm={setDeleteConfirm}
-                    onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
-                    onReorder={handleReorderTask}
-                    isDraggable={true}
-                  />
-                ))}
-              </div>
-
-              {/* COMPLETED SECTION */}
-              {displayedItems.completed.length > 0 && (
-                <div className="mt-6">
-                  <button onClick={() => setIsCompletedOpen(!isCompletedOpen)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-wider mb-3 select-none">
-                    {isCompletedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    Completed ({displayedItems.completed.length})
-                  </button>
-
-                  {isCompletedOpen && (
-                    <div className="flex flex-col gap-2 opacity-70">
-                      {displayedItems.completed.map((task) => (
-                        <TaskCard
-                          key={task.id} task={task}
-                          onToggle={handleToggleTask}
-                          onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)} // FIXED: Push edit to URL
-                          setDeleteConfirm={setDeleteConfirm}
-                          onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
-                          isDraggable={false}
-                        />
-                      ))}
-                    </div>
-                  )}
+              {isCompletedOpen && (
+                <div className="flex flex-col gap-2 opacity-70">
+                  {displayedItems.completed.map((task) => (
+                    <TaskCard
+                      key={task.id} task={task}
+                      onToggle={handleToggleTask}
+                      onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)}
+                      setDeleteConfirm={setDeleteConfirm}
+                      onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                      isDraggable={false}
+                    />
+                  ))}
                 </div>
               )}
             </div>
-          </main>
-
-          {/* REUSABLE FAB COMPONENT */}
-          <Fab
-            onClick={handleCreateNew}
-            icon={<Plus size={28} />}
-            maxWidth="max-w-4xl" // Align with header
-            ariaLabel="Create Task"
-          />
-        </>
+          )}
+        </StandardAppLayout>
       )}
 
       {/* --- MODALS --- */}

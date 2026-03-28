@@ -1,9 +1,9 @@
 // src/apps/contacts/Contacts.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Search, Plus, X, Star, User, Users, Tag } from 'lucide-react';
+import { Plus, Star, User, Users, Tag } from 'lucide-react';
 
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
-import Fab from '../../components/ui/Fab';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 import {
     saveContact, deleteContact
@@ -26,15 +26,9 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [deleteConfirm, setDeleteConfirm] = useState(null);
     const [processing, setProcessing] = useState(false);
 
-    const [touchStart, setTouchStart] = useState(null);
-    const [touchEnd, setTouchEnd] = useState(null);
-    const MIN_SWIPE_DISTANCE = 50;
-
     // --- URL-Driven State ---
     const view = route.resource === 'edit' ? 'editor' : route.resource === 'view' ? 'detail' : 'list';
 
-
-    // 1. Determine active tab (can be 'all', 'favorites', or a dynamically extracted label name)
     let activeTab = 'all';
     if (route.resource === 'label' && route.resourceId) {
         activeTab = decodeURIComponent(route.resourceId);
@@ -58,13 +52,12 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }, [fetchedContacts]);
 
     useEffect(() => {
-        // Safely scroll to whichever tab is active (system or label)
         const safeId = activeTab.replace(/[^a-zA-Z0-9-_\s]/g, '');
         const tabEl = document.getElementById(`tab-${safeId}`);
         if (tabEl) tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }, [activeTab]);
 
-    // 2. Extract all unique labels from contacts to generate the label tabs
+    // Extract all unique labels
     const allLabels = useMemo(() => {
         const labels = new Set();
         contacts.forEach(c => {
@@ -72,6 +65,16 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         });
         return Array.from(labels).sort();
     }, [contacts]);
+
+    // Build dynamic tabs: system tabs + label tabs
+    const dynamicTabs = useMemo(() => {
+        const labelTabs = allLabels.map(label => ({
+            id: label,
+            label: label,
+            icon: Tag,
+        }));
+        return [...TABS, ...labelTabs];
+    }, [allLabels]);
 
     const groupedContacts = useMemo(() => {
         let filtered = contacts;
@@ -86,7 +89,6 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 (c.email?.toLowerCase().includes(q)) || (c.emails?.some(e => e.value.toLowerCase().includes(q)))
             );
         } else {
-            // 3. Apply filtering based on the currently selected tab
             if (activeTab === 'favorites') {
                 filtered = contacts.filter(c => c.isFavorite);
             } else if (activeTab !== 'all') {
@@ -131,28 +133,11 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         await saveContact(user.uid, cryptoKey, { ...contact, isFavorite: !contact.isFavorite });
     };
 
-    // 4. Update swipe logic to combine both standard tabs and dynamic label tabs
-    const onTouchStart = (e) => {
-        setTouchEnd(null);
-        setTouchStart(e.targetTouches[0].clientX);
-    };
-    const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
-    const onTouchEnd = () => {
-        if (!touchStart || !touchEnd || view !== 'list') return;
-        const distance = touchStart - touchEnd;
-
-        const combinedTabs = [
-            ...TABS.map(t => ({ id: t.id, path: `#contacts/${t.id}` })),
-            ...allLabels.map(l => ({ id: l, path: `#contacts/label/${encodeURIComponent(l)}` }))
-        ];
-
-        const currentIndex = combinedTabs.findIndex(t => t.id === activeTab);
-        if (currentIndex === -1) return;
-
-        if (distance > MIN_SWIPE_DISTANCE && currentIndex < combinedTabs.length - 1) {
-            navigate(combinedTabs[currentIndex + 1].path);
-        } else if (distance < -MIN_SWIPE_DISTANCE && currentIndex > 0) {
-            navigate(combinedTabs[currentIndex - 1].path);
+    const handleTabSelect = (tabId) => {
+        if (TABS.find(t => t.id === tabId)) {
+            navigate(`#contacts/${tabId}`);
+        } else {
+            navigate(`#contacts/label/${encodeURIComponent(tabId)}`);
         }
     };
 
@@ -167,7 +152,6 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onToggleFavorite={handleToggleFavorite}
                 />
 
-                {/* Added the Modal here so it correctly overlays the Detail view */}
                 <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Contact" zIndex={100}>
                     <div className="flex flex-col gap-4">
                         <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">Are you sure you want to delete this contact?</div>
@@ -191,139 +175,81 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }
 
     return (
-        <div className="flex flex-col h-[100dvh] bg-white relative">
-            <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 pb-0">
-                <div className="max-w-4xl mx-auto px-4 pt-4 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <button onClick={onExit} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
-                            <h1 className="text-xl font-bold flex items-center gap-2">Contacts</h1>
-                        </div>
-                    </div>
-
-                    <div className="relative">
-                        <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-                        <input
-                            type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search contacts..."
-                            className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
-                        />
-                        {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
-                    </div>
-
-                    {/* 5. Render standard tabs AND label tabs inline, exactly like Tasks folders */}
-                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
-                        {TABS.map(tab => (
-                            <button
-                                key={tab.id}
-                                id={`tab-${tab.id}`}
-                                onClick={() => navigate(`#contacts/${tab.id}`)}
-                                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                            >
-                                <tab.icon size={16} fill={activeTab === tab.id && tab.id === 'favorites' ? "currentColor" : "none"} />
-                                {tab.label}
-                            </button>
-                        ))}
-
-                        {allLabels.length > 0 && (
-                            <div className="w-px h-6 bg-blue-400/50 mx-1 flex-shrink-0" />
-                        )}
-
-                        {allLabels.map(label => {
-                            // Safe ID for scroll logic stripping out spaces/special chars
-                            const safeId = label.replace(/[^a-zA-Z0-9-_\s]/g, '');
-                            return (
-                                <button
-                                    key={label}
-                                    id={`tab-${safeId}`}
-                                    onClick={() => navigate(`#contacts/label/${encodeURIComponent(label)}`)}
-                                    className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === label ? 'bg-white text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                                >
-                                    <Tag size={14} fill={activeTab === label ? "currentColor" : "none"} />
-                                    {label}
-                                </button>
-                            );
-                        })}
-                    </div>
+        <StandardAppLayout
+            headerConfig={{
+                onBack: onExit,
+                title: 'Contacts',
+                search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search contacts...' },
+                nav: {
+                    type: 'tabs',
+                    data: dynamicTabs,
+                    activeId: activeTab,
+                    onSelect: handleTabSelect,
+                },
+            }}
+            fabConfig={{ onClick: () => navigate(`#contacts/edit/new`), icon: <Plus size={28} />, ariaLabel: "Add Contact" }}
+        >
+            {loading ? <div className="flex justify-center py-20"><LoadingSpinner /></div> : contacts.length === 0 ? (
+                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-3">
+                    <div className="bg-gray-50 p-4 rounded-full shadow-sm"><User size={32} /></div>
+                    <p>No contacts yet.</p>
                 </div>
-            </header>
+            ) : groupedContacts.length === 0 ? (
+                <div className="text-center py-20 text-gray-400">No matching contacts.</div>
+            ) : (
+                <div className="flex flex-col">
+                    {groupedContacts.map((group) => (
+                        <div key={group.letter} className="flex flex-col">
+                            <div className="sticky top-0 bg-white/95 backdrop-blur-sm px-6 py-2 border-b border-gray-100 z-10 font-bold text-[#4285f4]">
+                                {group.letter}
+                            </div>
+                            <div className="divide-y divide-gray-100">
+                                {group.items.map(contact => {
+                                    const name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.company;
+                                    const initial = name ? name.charAt(0).toUpperCase() : '#';
 
-            <main
-                className="flex-1 overflow-y-auto scroll-smooth"
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-            >
-                <div className="max-w-3xl mx-auto pb-24">
-                    {loading ? <div className="flex justify-center py-20"><LoadingSpinner /></div> : contacts.length === 0 ? (
-                        <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-3">
-                            <div className="bg-gray-50 p-4 rounded-full shadow-sm"><User size={32} /></div>
-                            <p>No contacts yet.</p>
+                                    const displayPhone = contact.phones?.[0]?.value || contact.phone;
+                                    const displayEmail = contact.emails?.[0]?.value || contact.email;
+
+                                    const rawCustomFields = contact.customFields || [];
+                                    const photoUrl = contact.photo || rawCustomFields.find(c => c.label?.toLowerCase() === 'photo')?.value;
+
+                                    return (
+                                        <div
+                                            key={contact.id}
+                                            onClick={() => navigate(`#contacts/view/${contact.id}`)}
+                                            className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 cursor-pointer transition-colors group"
+                                        >
+                                            <div className="w-10 h-10 bg-blue-100 text-[#4285f4] rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0 relative overflow-hidden">
+                                                <span className="absolute inset-0 flex items-center justify-center">
+                                                    {initial}
+                                                </span>
+                                                {photoUrl && (
+                                                    <img
+                                                        src={photoUrl}
+                                                        alt={name}
+                                                        className="w-full h-full object-cover relative z-10"
+                                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                                    />
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <h3 className="font-semibold text-gray-900 truncate">{name}</h3>
+                                                {contact.jobTitle && contact.company ? (
+                                                    <p className="text-xs text-gray-500 truncate">{contact.jobTitle}, {contact.company}</p>
+                                                ) : (displayPhone || displayEmail) ? (
+                                                    <p className="text-xs text-gray-500 truncate">{displayPhone || displayEmail}</p>
+                                                ) : null}
+                                            </div>
+                                            {contact.isFavorite && <Star size={16} fill="currentColor" className="text-yellow-400 flex-shrink-0" />}
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
-                    ) : groupedContacts.length === 0 ? (
-                        <div className="text-center py-20 text-gray-400">No matching contacts.</div>
-                    ) : (
-                        <div className="flex flex-col">
-                            {groupedContacts.map((group) => (
-                                <div key={group.letter} className="flex flex-col">
-                                    <div className="sticky top-0 bg-white/95 backdrop-blur-sm px-6 py-2 border-b border-gray-100 z-10 font-bold text-[#4285f4]">
-                                        {group.letter}
-                                    </div>
-                                    <div className="divide-y divide-gray-100">
-                                        {group.items.map(contact => {
-                                            const name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.company;
-                                            const initial = name ? name.charAt(0).toUpperCase() : '#';
-
-                                            const displayPhone = contact.phones?.[0]?.value || contact.phone;
-                                            const displayEmail = contact.emails?.[0]?.value || contact.email;
-
-                                            const rawCustomFields = contact.customFields || [];
-                                            const photoUrl = contact.photo || rawCustomFields.find(c => c.label?.toLowerCase() === 'photo')?.value;
-
-                                            return (
-                                                <div
-                                                    key={contact.id}
-                                                    onClick={() => navigate(`#contacts/view/${contact.id}`)}
-                                                    className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 cursor-pointer transition-colors group"
-                                                >
-                                                    <div className="w-10 h-10 bg-blue-100 text-[#4285f4] rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0 relative overflow-hidden">
-                                                        <span className="absolute inset-0 flex items-center justify-center">
-                                                            {initial}
-                                                        </span>
-                                                        {photoUrl && (
-                                                            <img
-                                                                src={photoUrl}
-                                                                alt={name}
-                                                                className="w-full h-full object-cover relative z-10"
-                                                                onError={(e) => { e.target.style.display = 'none'; }}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <h3 className="font-semibold text-gray-900 truncate">{name}</h3>
-                                                        {contact.jobTitle && contact.company ? (
-                                                            <p className="text-xs text-gray-500 truncate">{contact.jobTitle}, {contact.company}</p>
-                                                        ) : (displayPhone || displayEmail) ? (
-                                                            <p className="text-xs text-gray-500 truncate">{displayPhone || displayEmail}</p>
-                                                        ) : null}
-                                                    </div>
-                                                    {contact.isFavorite && <Star size={16} fill="currentColor" className="text-yellow-400 flex-shrink-0" />}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    ))}
                 </div>
-            </main>
-
-            <Fab
-                onClick={() => navigate(`#contacts/edit/new`)}
-                icon={<Plus size={28} />}
-                maxWidth="max-w-4xl"
-                ariaLabel="Add Contact"
-            />
+            )}
 
             <Modal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Contact">
                 <div className="flex flex-col gap-4">
@@ -334,7 +260,7 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     </div>
                 </div>
             </Modal>
-        </div>
+        </StandardAppLayout>
     );
 };
 

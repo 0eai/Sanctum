@@ -1,14 +1,12 @@
 // src/apps/bookmarks/Bookmarks.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, Search, Folder, FolderPlus, Plus, X, Settings,
-  ChevronRight, Home
+  Folder, FolderPlus, Plus, Settings
 } from 'lucide-react';
 
 import { Button, LoadingSpinner, Modal } from '../../components/ui';
-import MultiFab from '../../components/ui/MultiFab';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
-import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
 import SharedDocsView from '../../components/ui/SharedDocsView';
@@ -110,17 +108,16 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Handlers ---
 
-  const handleBreadcrumbClick = (index) => {
-    const targetFolder = folderPath[index];
-    if (targetFolder.id === null) navigate(`#bookmarks`);
-    else navigate(`#bookmarks/folder/${targetFolder.id}`);
+  const handleBreadcrumbClick = (index, folder) => {
+    if (folder.id === null) navigate(`#bookmarks`);
+    else navigate(`#bookmarks/folder/${folder.id}`);
   };
 
   const handleBack = () => {
     if (searchQuery) {
       setSearchQuery("");
     } else {
-      if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
+      if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2, folderPath[folderPath.length - 2]);
       else onExit();
     }
   };
@@ -166,104 +163,75 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   ], [currentBasePath, navigate]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-gray-50 overflow-hidden relative">
-
-      {/* Header */}
-      <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 p-4">
-        <div className="max-w-4xl mx-auto flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button onClick={handleBack} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-              <WorkspaceSwitcher
-                {...collab.switcherProps}
-                onSelect={(ws) => {
-                  collab.switchWorkspace(ws);
-                  navigate('#bookmarks');
-                }}
-              />
-            </div>
-            <div className="flex items-center gap-1">
-              {activeWorkspace && (
-                <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                </button>
-              )}
-              <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><Settings size={20} /></button>
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-            <input
-              type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..."
-              className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
+    <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
+      <StandardAppLayout
+        headerConfig={{
+          onBack: handleBack,
+          workspaceConfig: {
+            switcherProps: collab.switcherProps,
+            activeWorkspace: activeWorkspace,
+            onSelect: (ws) => {
+              collab.switchWorkspace(ws);
+              navigate('#bookmarks');
+            },
+            onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
+          },
+          search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search bookmarks...' },
+          nav: !searchQuery ? {
+            type: 'breadcrumbs',
+            data: folderPath,
+            onSelect: handleBreadcrumbClick,
+          } : undefined,
+          customActions: (
+            <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+              <Settings size={20} />
+            </button>
+          ),
+        }}
+        fabConfig={{ actions: fabActions }}
+      >
+        {!searchQuery && !activeWorkspace && currentFolderId === null && sharedDocs.length > 0 && (
+          <div className="mb-8">
+            <SharedDocsView
+              sharedDocs={sharedDocs}
+              appType="bookmarks"
+              onOpenDoc={(doc) => navigate(`#bookmarks?view=${doc.id}`)}
             />
-            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
           </div>
+        )}
 
-          {!searchQuery && (
-            <div className="flex items-center gap-1 text-sm text-blue-100 overflow-x-auto no-scrollbar whitespace-nowrap mask-fade-right">
-              {folderPath.map((folder, index) => (
-                <React.Fragment key={index}>
-                  {index > 0 && <ChevronRight size={14} className="opacity-50" />}
-                  <button onClick={() => handleBreadcrumbClick(index)} className={`hover:text-white transition-colors flex items-center gap-1 ${index === folderPath.length - 1 ? 'font-bold text-white' : ''}`}>
-                    {index === 0 && <Home size={14} />} {folder.title}
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-        </div>
-      </header>
+        {!searchQuery && !activeWorkspace && currentFolderId === null && sharedDocs.length > 0 && viewItems.length > 0 && (
+          <div className="flex items-center gap-2 px-1 mb-3 mt-4">
+            <Folder size={14} className="text-gray-400" />
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              Personal Vault
+            </span>
+          </div>
+        )}
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto scroll-smooth p-4">
-        <div className="max-w-3xl mx-auto pb-32">
-          {!searchQuery && !activeWorkspace && currentFolderId === null && sharedDocs.length > 0 && (
-            <div className="mb-8">
-              <SharedDocsView
-                sharedDocs={sharedDocs}
-                appType="bookmarks"
-                onOpenDoc={(doc) => navigate(`#bookmarks?view=${doc.id}`)}
+        {loading || processing ? (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2"><LoadingSpinner /><p>{processing ? "Processing..." : "Loading vault..."}</p></div>
+        ) : viewItems.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+            <div className="bg-gray-100 p-4 rounded-full"><Folder size={32} className="opacity-50" /></div>
+            <p>{searchQuery ? "No matching items found." : "This folder is empty."}</p>
+            {!searchQuery && <Button variant="ghost" onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="text-[#4285f4]">Import from Browser</Button>}
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {viewItems.map(item => (
+              <BookmarkCard
+                key={item.id}
+                item={item}
+                onEnterFolder={(folder) => navigate(`#bookmarks/folder/${folder.id}`)}
+                onViewDetails={(i) => navigate(`${currentBasePath}?view=${i.id}`)}
+                copyUtils={copyUtils}
+                onCollaborate={!ctx && !item.isSharedDoc ? ((i) => collab.openCollaborateModal(i)) : null}
               />
-            </div>
-          )}
-
-          {!searchQuery && !activeWorkspace && currentFolderId === null && sharedDocs.length > 0 && viewItems.length > 0 && (
-            <div className="flex items-center gap-2 px-1 mb-3 mt-4">
-              <Folder size={14} className="text-gray-400" />
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                Personal Vault
-              </span>
-            </div>
-          )}
-
-          {loading || processing ? (
-            <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2"><LoadingSpinner /><p>{processing ? "Processing..." : "Loading vault..."}</p></div>
-          ) : viewItems.length === 0 ? (
-            <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-              <div className="bg-gray-100 p-4 rounded-full"><Folder size={32} className="opacity-50" /></div>
-              <p>{searchQuery ? "No matching items found." : "This folder is empty."}</p>
-              {!searchQuery && <Button variant="ghost" onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="text-[#4285f4]">Import from Browser</Button>}
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {viewItems.map(item => (
-                <BookmarkCard
-                  key={item.id}
-                  item={item}
-                  onEnterFolder={(folder) => navigate(`#bookmarks/folder/${folder.id}`)}
-                  onViewDetails={(i) => navigate(`${currentBasePath}?view=${i.id}`)}
-                  copyUtils={copyUtils}
-                  onCollaborate={!ctx && !item.isSharedDoc ? ((i) => collab.openCollaborateModal(i)) : null}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
+            ))}
+          </div>
+        )}
+      </StandardAppLayout>
 
       {/* Modals */}
       <AddBookmarkModal
@@ -331,7 +299,6 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           }}
         />
       )}
-
     </div>
   );
 };

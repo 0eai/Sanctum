@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Plus, FolderPlus, Grid, List, Search, BookOpen, X, ChevronRight, Hash, Users, Folder } from 'lucide-react';
+import { Plus, FolderPlus, Grid, List, BookOpen, Folder } from 'lucide-react';
 import { Button, Modal, Input } from '../../components/ui';
-import MultiFab from '../../components/ui/MultiFab';
-import { listenToPapers, createFolder, updateFolder, deletePaper } from './services/research';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
+import { listenToPapers, createFolder, updateFolder, deletePaper, savePaper } from './services/research';
 import useCollaboration from '../../hooks/useCollaboration';
 
-import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
 import SharedDocsView from '../../components/ui/SharedDocsView';
@@ -36,7 +35,6 @@ const FolderModal = ({ isOpen, onClose, onSubmit, initialName = '' }) => {
 const MoveModal = ({ isOpen, onClose, item, allFolders, currentFolderId, onMove }) => {
     if (!isOpen || !item) return null;
 
-    // Filter out the item itself and its descendants to prevent circular loops
     const getDescendants = (folderId, folders) => {
         let descendants = [];
         const children = folders.filter(f => f.parentId === folderId);
@@ -55,8 +53,9 @@ const MoveModal = ({ isOpen, onClose, item, allFolders, currentFolderId, onMove 
             <div className="space-y-2 max-h-96 overflow-y-auto">
                 <div
                     className={`p-3 rounded-lg border cursor-pointer hover:bg-blue-50 flex items-center gap-3 ${currentFolderId === null ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'}`}
+                    onClick={() => { onMove(null); onClose(); }}
                 >
-                    <Hash size={18} className="text-gray-400" />
+                    <BookOpen size={18} className="text-gray-400" />
                     <span className="font-medium text-gray-800">Root / Home</span>
                 </div>
                 {validFolders.map(folder => (
@@ -98,7 +97,7 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, isFolder }) => {
 const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) => {
     const [papers, setPapers] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
+    const [viewMode, setViewMode] = useState('grid');
     const [editingPaper, setEditingPaper] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [currentFolder, setCurrentFolder] = useState(null);
@@ -142,7 +141,6 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                     setEditingPaper({ ...targetPaper, initialPreview: action !== 'edit' });
                     setCurrentFolder(targetPaper.parentId || null);
                 } else if (papers.length > 0 || sharedDocs.length > 0) {
-                    // Not found, go home
                     setCurrentFolder(null);
                     setEditingPaper(null);
                 }
@@ -187,15 +185,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
         if (moveModal.item.type === 'folder') {
             await updateFolder(user.uid, cryptoKey, moveModal.item.id, moveModal.item.title, newParentId, ctx);
         } else {
-            // we need a lightweight update utility for papers, or we can use savePaper with the item directly
-            // For now, we'll re-save it with the new parentId
-            const importFileKey = async () => { }; // Stub since we don't re-upload
-            // To properly move a paper without re-upload/re-encrypting everything manually here,
-            // we should ideally add an `updatePaperFolder` to research.js.
-            // But since savePaper merges, passing the unencrypted payload works if we re-encrypt.
-            // Actually, we need to pass the full unencrypted payload to `savePaper` to avoid erasing fields.
             const fullPayload = { ...moveModal.item, parentId: newParentId };
-            const { savePaper } = await import('./services/research');
             await savePaper(user.uid, cryptoKey, fullPayload, newParentId, ctx);
         }
     };
@@ -212,22 +202,22 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
 
     // Breadcrumbs
     const getCurrentPath = () => {
-        const path = [];
+        const path = [{ id: null, title: 'Research' }];
         let currId = currentFolder;
+        const folderTrail = [];
         while (currId) {
             const f = allFolders.find(x => x.id === currId);
             if (f) {
-                path.unshift(f);
+                folderTrail.unshift(f);
                 currId = f.parentId;
             } else break;
         }
-        return path;
+        return [...path, ...folderTrail];
     };
 
     const displayedItems = papers.filter(p => {
         const q = searchQuery.toLowerCase();
         if (q) {
-            // Global search
             return (
                 (p.title || '').toLowerCase().includes(q) ||
                 (p.authors || '').toLowerCase().includes(q) ||
@@ -236,11 +226,9 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                 (p.venue || '').toLowerCase().includes(q)
             );
         }
-        // Folder view
         return p.parentId === currentFolder;
     });
 
-    // Sort: Folders first, then by date descending
     displayedItems.sort((a, b) => {
         if (a.type === 'folder' && b.type !== 'folder') return -1;
         if (a.type !== 'folder' && b.type === 'folder') return 1;
@@ -283,136 +271,107 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
         );
     }
 
+    const breadcrumbPath = getCurrentPath();
+
+    const handleBreadcrumbClick = (index, folder) => {
+        if (folder.id === null) navigate(`#research`);
+        else navigate(`#research/folder/${folder.id}`);
+    };
+
     return (
         <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
-            <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
-                <div className="max-w-4xl mx-auto p-4 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => {
-                                if (getCurrentPath().length > 0) {
-                                    const path = getCurrentPath();
-                                    const parent = path[path.length - 2];
-                                    if (parent) navigate(`#research/folder/${parent.id}`);
-                                    else navigate(`#research`);
-                                }
-                                else onExit();
-                            }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                            <WorkspaceSwitcher
-                                {...collab.switcherProps}
-                                onSelect={(ws) => {
-                                    collab.switchWorkspace(ws);
-                                    navigate('#research');
-                                }}
-                            />
-                        </div>
-                        <div className="flex gap-1">
-                            {activeWorkspace && (
-                                <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                                    <Users size={20} />
-                                </button>
-                            )}
-                            <button onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
-                                {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="relative">
-                        <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-                        <input
-                            type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search papers and folders..."
-                            className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
+            <StandardAppLayout
+                headerConfig={{
+                    onBack: () => {
+                        if (breadcrumbPath.length > 1) {
+                            const parent = breadcrumbPath[breadcrumbPath.length - 2];
+                            handleBreadcrumbClick(breadcrumbPath.length - 2, parent);
+                        } else {
+                            onExit();
+                        }
+                    },
+                    workspaceConfig: {
+                        switcherProps: collab.switcherProps,
+                        activeWorkspace: activeWorkspace,
+                        onSelect: (ws) => {
+                            collab.switchWorkspace(ws);
+                            navigate('#research');
+                        },
+                        onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
+                    },
+                    search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search papers and folders...' },
+                    nav: !searchQuery ? {
+                        type: 'breadcrumbs',
+                        data: breadcrumbPath,
+                        onSelect: handleBreadcrumbClick,
+                    } : undefined,
+                    customActions: (
+                        <button onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
+                            {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
+                        </button>
+                    ),
+                }}
+                fabConfig={{ actions: fabActions }}
+            >
+                {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && (
+                    <div className="mb-8">
+                        <SharedDocsView
+                            sharedDocs={sharedDocs}
+                            appType="research"
+                            onOpenDoc={(doc) => navigate(`#research/paper/${doc.id}`)}
                         />
-                        {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
                     </div>
+                )}
 
-                    {!searchQuery && (
-                        <div className="flex items-center gap-1 text-sm text-blue-100 overflow-x-auto no-scrollbar whitespace-nowrap">
-                            <button onClick={() => navigate(`#research`)} className={`hover:text-white transition-colors flex items-center gap-1 ${getCurrentPath().length === 0 ? 'font-bold text-white' : ''}`}>
-                                <BookOpen size={14} /> Home
-                            </button>
-                            {getCurrentPath().map((folder, index) => (
-                                <React.Fragment key={folder.id}>
-                                    <ChevronRight size={14} className="opacity-50" />
-                                    <button
-                                        onClick={() => navigate(`#research/folder/${folder.id}`)}
-                                        className={`hover:text-white transition-colors flex items-center gap-1 ${index === getCurrentPath().length - 1 ? 'font-bold text-white' : ''}`}
-                                    >
-                                        <FolderPlus size={14} /> {folder.title}
-                                    </button>
-                                </React.Fragment>
-                            ))}
+                {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && displayedItems.length > 0 && (
+                    <div className="flex items-center gap-2 px-1 mb-3">
+                        <Folder size={14} className="text-gray-400" />
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                            Personal Vault
+                        </span>
+                    </div>
+                )}
+
+                {isLoading ? (
+                    <div className="flex justify-center py-20">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                ) : displayedItems.length === 0 ? (
+                    <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+                        <div className="bg-white p-4 rounded-full shadow-sm">
+                            <BookOpen size={32} className="opacity-50" />
                         </div>
-                    )}
-                </div>
-            </header>
-
-            <main className="flex-1 overflow-y-auto scroll-smooth p-4">
-                <div className="max-w-3xl mx-auto pb-32">
-
-                    {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && (
-                        <div className="mb-8">
-                            <SharedDocsView
-                                sharedDocs={sharedDocs}
-                                appType="research"
-                                onOpenDoc={(doc) => navigate(`#research/paper/${doc.id}`)}
-                            />
-                        </div>
-                    )}
-
-                    {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && displayedItems.length > 0 && (
-                        <div className="flex items-center gap-2 px-1 mb-3">
-                            <Folder size={14} className="text-gray-400" />
-                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                Personal Vault
-                            </span>
-                        </div>
-                    )}
-
-                    {isLoading ? (
-                        <div className="flex justify-center py-20">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                        </div>
-                    ) : displayedItems.length === 0 ? (
-                        <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-                            <div className="bg-white p-4 rounded-full shadow-sm">
-                                <BookOpen size={32} className="opacity-50" />
+                        <p className="max-w-md mx-auto">
+                            {searchQuery ? "Try adjusting your search terms." : "Empty folder. Add a paper manually or parse BibTeX to get started."}
+                        </p>
+                        {!searchQuery && (
+                            <div className="flex items-center justify-center gap-4 mt-6">
+                                <Button onClick={() => setFolderModal({ isOpen: true, initialName: '', editingId: null })} variant="secondary">
+                                    <FolderPlus size={18} className="mr-2" /> New Folder
+                                </Button>
+                                <Button onClick={handleCreatePaper} variant="primary">
+                                    <Plus size={18} className="mr-2" /> Add Paper
+                                </Button>
                             </div>
-                            <p className="max-w-md mx-auto">
-                                {searchQuery ? "Try adjusting your search terms." : "Empty folder. Add a paper manually or parse BibTeX to get started."}
-                            </p>
-                            {!searchQuery && (
-                                <div className="flex items-center justify-center gap-4 mt-6">
-                                    <Button onClick={() => setFolderModal({ isOpen: true, initialName: '', editingId: null })} variant="secondary">
-                                        <FolderPlus size={18} className="mr-2" /> New Folder
-                                    </Button>
-                                    <Button onClick={handleCreatePaper} variant="primary">
-                                        <Plus size={18} className="mr-2" /> Add Paper
-                                    </Button>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
-                            {displayedItems.map(item => (
-                                <PaperCard
-                                    key={item.id}
-                                    item={item}
-                                    papers={papers}
-                                    viewMode={viewMode}
-                                    onClick={() => handleEditPaper(item)}
-                                    onMove={() => setMoveModal({ isOpen: true, item })}
-                                    onDelete={() => setDeleteModal({ isOpen: true, item })}
-                                    onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </main>
-
-            <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
+                        )}
+                    </div>
+                ) : (
+                    <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
+                        {displayedItems.map(item => (
+                            <PaperCard
+                                key={item.id}
+                                item={item}
+                                papers={papers}
+                                viewMode={viewMode}
+                                onClick={() => handleEditPaper(item)}
+                                onMove={() => setMoveModal({ isOpen: true, item })}
+                                onDelete={() => setDeleteModal({ isOpen: true, item })}
+                                onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
+                            />
+                        ))}
+                    </div>
+                )}
+            </StandardAppLayout>
 
             <FolderModal
                 isOpen={folderModal.isOpen}
@@ -463,14 +422,12 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                     onClose={() => collab.closeCollaborateModal()}
                     onShareCreated={async (newShareId) => {
                         if (collab.collaborateModalItem) {
-                            const { savePaper } = await import('./services/research');
                             await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, null, ctx);
                             setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
                         }
                     }}
                     onShareDeleted={async () => {
                         if (collab.collaborateModalItem) {
-                            const { savePaper } = await import('./services/research');
                             await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, null, ctx);
                             setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
                         }

@@ -2,12 +2,11 @@
 // src/apps/markdown/Markdown.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, Plus, Search, FileText, Settings, X, Star, FileCode,
-  FolderPlus, Folder, ChevronRight, Home, Link, Globe, Check, CloudOff, Users
+  Plus, FileCode, FolderPlus, Folder, Home, Link, Globe, Check, CloudOff, Users, Settings
 } from 'lucide-react';
 
 import { Modal, Button, LoadingSpinner, Input } from '../../components/ui';
-import MultiFab from '../../components/ui/MultiFab';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 import {
   listenToMarkdownDocs, saveMarkdownDoc, deleteMarkdownItem, createFolder, updateFolder,
@@ -77,13 +76,11 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       buildBreadcrumbs(resourceId);
 
     } else if (resource === 'doc' && resourceId) {
-      // --- NEW DOC CREATION ---
       if (resourceId === 'new') {
         setEditorDoc({ title: '', content: '', isPinned: false, parentId: currentFolderId, initialPreview: false });
-        return; // Skip the rest
+        return;
       }
 
-      // --- EXISTING DOC ---
       const targetDoc = docs.find(d => d.id === resourceId) || sharedDocs.find(d => d.id === resourceId);
       if (targetDoc) {
         setEditorDoc({ ...targetDoc, initialPreview: action !== 'edit' });
@@ -97,7 +94,6 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }
   }, [route, docs, loading]);
 
-  // Helper function to reconstruct path
   const buildBreadcrumbs = (startId) => {
     const pathArray = [];
     let currentId = startId;
@@ -127,9 +123,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       if (!docData.id) {
         setEditorDoc(prev => ({ ...prev, id }));
-        // Silently update the URL from 'new' to the actual ID so refreshes work safely
         window.history.replaceState(null, '', `#markdown/doc/${id}/edit`);
-        // Dispatch event so useHashRoute hook catches the new ID and stops treating it as 'new'
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       }
 
@@ -156,10 +150,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleMove = async (targetFolderId) => {
     if (itemToMove.type === 'folder') {
-      // Move folder: update its parentId via updateFolder
       await updateFolder(user.uid, cryptoKey, itemToMove.id, itemToMove.title, targetFolderId, ctx);
     } else {
-      // Move doc: re-save with new parentId (saveMarkdownDoc handles encryption)
       await saveMarkdownDoc(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId, ctx);
     }
 
@@ -185,7 +177,6 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         date: new Date().toISOString()
       };
       const { sharedId, shareUrlKey } = await shareItem(payload, shareTTL);
-      // Save sharedId back to the doc
       await saveMarkdownDoc(user.uid, cryptoKey, { ...item, sharedId, shareUrlKey }, currentFolderId);
       const url = buildShareUrl(sharedId, shareUrlKey);
       setShareModal({ isOpen: true, item: { ...item, sharedId, shareUrlKey }, link: url });
@@ -200,16 +191,14 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Navigation Handlers ---
   const handleEnterFolder = (folder) => {
-    // Instead of setting state, update the URL!
     navigate(`#markdown/folder/${folder.id}`);
   };
 
-  const handleBreadcrumbClick = (index) => {
-    const targetFolder = folderPath[index];
-    if (targetFolder.id === null) {
+  const handleBreadcrumbClick = (index, folder) => {
+    if (folder.id === null) {
       navigate(`#markdown`);
     } else {
-      navigate(`#markdown/folder/${targetFolder.id}`);
+      navigate(`#markdown/folder/${folder.id}`);
     }
   };
 
@@ -240,7 +229,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     {
       label: "New Document",
       icon: <Plus size={24} />,
-      onClick: () => navigate(`#markdown/doc/new/edit`), // <-- Let the URL do the work!
+      onClick: () => navigate(`#markdown/doc/new/edit`),
       variant: 'primary'
     }
   ], [currentFolderId, navigate]);
@@ -252,7 +241,6 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         item={editorDoc}
         onSave={handleSave}
         onBack={() => {
-          // Let the URL close the editor
           if (currentFolderId) {
             navigate(`#markdown/folder/${currentFolderId}`);
           } else {
@@ -281,116 +269,87 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   // --- View: List ---
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
-      <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
-        <div className="max-w-4xl mx-auto p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button onClick={() => {
-                if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
-                else onExit();
-              }} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-              <WorkspaceSwitcher
-                {...collab.switcherProps}
-                onSelect={(ws) => {
-                  collab.switchWorkspace(ws);
-                  navigate('#markdown');
-                }}
-              />
-            </div>
-            <div className="flex gap-1">
-              {activeWorkspace && (
-                <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                  <Users size={20} />
-                </button>
-              )}
-              <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                <Settings size={20} />
-              </button>
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-3 text-blue-200 pointer-events-none" />
-            <input
-              type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..."
-              className="w-full pl-9 pr-4 py-2.5 bg-blue-600/50 text-white placeholder-blue-200 rounded-xl border-none outline-none focus:bg-blue-600 transition-colors text-sm"
+      <StandardAppLayout
+        headerConfig={{
+          onBack: () => {
+            if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2, folderPath[folderPath.length - 2]);
+            else onExit();
+          },
+          workspaceConfig: {
+            switcherProps: collab.switcherProps,
+            activeWorkspace: activeWorkspace,
+            onSelect: (ws) => {
+              collab.switchWorkspace(ws);
+              navigate('#markdown');
+            },
+            onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
+          },
+          search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search...' },
+          nav: !searchQuery ? {
+            type: 'breadcrumbs',
+            data: folderPath,
+            onSelect: handleBreadcrumbClick,
+          } : undefined,
+          customActions: (
+            <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+              <Settings size={20} />
+            </button>
+          ),
+        }}
+        fabConfig={{ actions: fabActions }}
+      >
+        {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
+          <div className="mb-8">
+            <SharedDocsView
+              sharedDocs={sharedDocs}
+              appType="markdown"
+              onOpenDoc={(doc) => navigate(`#markdown/doc/${doc.id}`)}
             />
-            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-blue-200 hover:text-white"><X size={16} /></button>}
           </div>
+        )}
 
-          {!searchQuery && (
-            <div className="flex items-center gap-1 text-sm text-blue-100 overflow-x-auto no-scrollbar whitespace-nowrap">
-              {folderPath.map((folder, index) => (
-                <React.Fragment key={index}>
-                  {index > 0 && <ChevronRight size={14} className="opacity-50" />}
-                  <button onClick={() => handleBreadcrumbClick(index)} className={`hover:text-white transition-colors flex items-center gap-1 ${index === folderPath.length - 1 ? 'font-bold text-white' : ''}`}>
-                    {index === 0 && <Home size={14} />} {folder.title}
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-        </div>
-      </header>
+        {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
+          <div className="flex items-center gap-2 px-1 mb-3">
+            <Folder size={14} className="text-gray-400" />
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              Personal Vault
+            </span>
+          </div>
+        )}
 
-      <main className="flex-1 overflow-y-auto scroll-smooth p-4">
-        <div className="max-w-3xl mx-auto pb-32">
-
-          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
-            <div className="mb-8">
-              <SharedDocsView
-                sharedDocs={sharedDocs}
-                appType="markdown"
-                onOpenDoc={(doc) => navigate(`#markdown/doc/${doc.id}`)}
-              />
-            </div>
-          )}
-
-          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
-            <div className="flex items-center gap-2 px-1 mb-3">
-              <Folder size={14} className="text-gray-400" />
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                Personal Vault
-              </span>
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex justify-center py-20"><LoadingSpinner /></div>
-          ) : displayedItems.length === 0 ? (
-            <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
-              <div className="bg-white p-4 rounded-full shadow-sm"><FileCode size={32} className="opacity-50" /></div>
-              <p>Empty folder.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {displayedItems.map(item => (
-                <MarkdownCard
-                  key={item.id}
-                  item={item}
-                  docs={docs}
-                  onClick={() => item.type === 'folder'
-                    ? navigate(`#markdown/folder/${item.id}`)
-                    : navigate(`#markdown/doc/${item.id}`) // Defaults to view
+        {loading ? (
+          <div className="flex justify-center py-20"><LoadingSpinner /></div>
+        ) : displayedItems.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4">
+            <div className="bg-white p-4 rounded-full shadow-sm"><FileCode size={32} className="opacity-50" /></div>
+            <p>Empty folder.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {displayedItems.map(item => (
+              <MarkdownCard
+                key={item.id}
+                item={item}
+                docs={docs}
+                onClick={() => item.type === 'folder'
+                  ? navigate(`#markdown/folder/${item.id}`)
+                  : navigate(`#markdown/doc/${item.id}`)
+                }
+                onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
+                onDelete={(i) => setDeleteConfirm(i)}
+                onShare={!ctx ? ((i) => {
+                  if (i.sharedId) {
+                    setShareModal({ isOpen: true, item: i, link: buildShareUrl(i.sharedId, i.shareUrlKey) });
+                  } else {
+                    handleShare(i);
                   }
-                  onMove={(i) => { setItemToMove(i); setIsMoveModalOpen(true); }}
-                  onDelete={(i) => setDeleteConfirm(i)}
-                  onShare={!ctx ? ((i) => {
-                    if (i.sharedId) {
-                      setShareModal({ isOpen: true, item: i, link: buildShareUrl(i.sharedId, i.shareUrlKey) });
-                    } else {
-                      handleShare(i);
-                    }
-                  }) : null}
-                  onCollaborate={!ctx ? ((i) => collab.openCollaborateModal(i)) : null}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
+                }) : null}
+                onCollaborate={!ctx ? ((i) => collab.openCollaborateModal(i)) : null}
+              />
+            ))}
+          </div>
+        )}
+      </StandardAppLayout>
 
       {/* --- MODALS --- */}
 

@@ -1,16 +1,15 @@
 // src/apps/counter/Counter.jsx
 import React, { useState, useEffect } from 'react';
-import { Plus, AlertCircle } from 'lucide-react';
+import { Plus, AlertCircle, Edit2, Trash2, Settings, History, PieChart } from 'lucide-react';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 // Sub-components
-import CounterHeader from './components/CounterHeader';
 import CounterList from './components/CounterList';
 import CounterDetail from './components/CounterDetail';
 import CounterEditor from './components/CounterEditor';
 import EntryModal from './components/EntryModal';
 import ViewEntryModal from './components/ViewEntryModal';
-import Fab from '../../components/ui/Fab';
 
 // Services
 import {
@@ -37,6 +36,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   const [counters, setCounters] = useState([]);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Tab State for Detail View
   const [activeTab, setActiveTab] = useState('history');
@@ -209,6 +209,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
   };
 
   // --- RENDER LOGIC ---
+  const filteredCounters = counters.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()));
 
   if (view === 'detail' && !selectedCounter && !loading) {
     navigate('#counter');
@@ -225,59 +226,81 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
     );
   }
 
+  // --- Dynamic headerConfig ---
+  const headerConfig = view === 'detail' && selectedCounter ? {
+    // DETAIL VIEW: Title + Edit/Settings/Delete + History/Stats tabs
+    onBack: handleBack,
+    title: selectedCounter.title,
+    customActions: (
+      <>
+        <button onClick={() => handleOpenEditor(selectedCounter)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title="Edit Counter">
+          <Edit2 size={18} />
+        </button>
+        <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title="Settings">
+          <Settings size={18} />
+        </button>
+        <button onClick={() => setDeleteConfirmation({ type: 'counter', id: selectedCounter.id })} className="p-2 hover:bg-white/20 text-red-100 hover:text-red-500 rounded-full transition-colors" title="Delete Counter">
+          <Trash2 size={18} />
+        </button>
+      </>
+    ),
+    nav: {
+      type: 'tabs',
+      activeId: activeTab,
+      data: [
+        { id: 'history', label: 'History', icon: History },
+        { id: 'stats', label: 'Stats', icon: PieChart },
+      ],
+      onSelect: (tabId) => setActiveTab(tabId),
+    },
+  } : {
+    // LIST VIEW: Title + Search + Settings
+    onBack: handleBack,
+    title: 'My Counters',
+    search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search counters...' },
+    customActions: (
+      <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title="Manage Data">
+        <Settings size={20} />
+      </button>
+    ),
+  };
+
   return (
-    <div className="flex flex-col h-[100dvh] bg-gray-50 text-gray-900 font-sans overflow-hidden">
-
-      <CounterHeader
-        view={view}
-        title={view === 'detail' && selectedCounter ? selectedCounter.title : 'My Counters'}
-        onBack={handleBack}
-        onEdit={() => handleOpenEditor(selectedCounter)}
-        onSettings={() => navigate(`${currentBasePath}?modal=settings`)}
-        onDelete={() => setDeleteConfirmation({ type: 'counter', id: selectedCounter?.id })}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-      />
-
-      <main
-        className="flex-1 overflow-y-auto pb-24 scroll-smooth"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div className="max-w-3xl mx-auto p-4">
-          {loading ? <LoadingSpinner /> : view === 'list' ? (
-            <CounterList
-              counters={counters}
-              loading={loading}
-              onOpen={handleOpenCounter}
-              onCreate={() => handleOpenEditor(null)}
-              onReorder={handleReorderCounter}
-            />
-          ) : (
-            <CounterDetail
-              counter={selectedCounter}
-              entries={entries}
-              activeTab={activeTab}
-              user={user}
-              cryptoKey={cryptoKey}
-              onStartTimer={startTimer}
-              onStopTimer={stopTimer}
-              onEditEntry={(entry) => { setEditingEntry(entry); setIsEntryModalOpen(true); }}
-              onDeleteEntry={(id) => setDeleteConfirmation({ type: 'entry', id })}
-              onViewEntry={setViewingEntry}
-            />
-          )}
-        </div>
-      </main>
-
-      {/* REUSABLE FAB */}
-      <Fab
-        onClick={() => view === 'list' ? handleOpenEditor(null) : (() => { setEditingEntry(null); setIsEntryModalOpen(true); })()}
-        icon={<Plus size={28} />}
-        maxWidth="max-w-4xl"
-        ariaLabel={view === 'list' ? "New Counter" : "Add Entry"}
-      />
+    <StandardAppLayout
+      headerConfig={headerConfig}
+      mainProps={{
+        onTouchStart: handleTouchStart,
+        onTouchMove: handleTouchMove,
+        onTouchEnd: handleTouchEnd,
+      }}
+      fabConfig={{
+        onClick: () => view === 'list' ? handleOpenEditor(null) : (() => { setEditingEntry(null); setIsEntryModalOpen(true); })(),
+        icon: <Plus size={28} />,
+        ariaLabel: view === 'list' ? "New Counter" : "Add Entry",
+      }}
+    >
+      {loading ? <LoadingSpinner /> : view === 'list' ? (
+        <CounterList
+          counters={filteredCounters}
+          loading={loading}
+          onOpen={handleOpenCounter}
+          onCreate={() => handleOpenEditor(null)}
+          onReorder={handleReorderCounter}
+        />
+      ) : (
+        <CounterDetail
+          counter={selectedCounter}
+          entries={entries}
+          activeTab={activeTab}
+          user={user}
+          cryptoKey={cryptoKey}
+          onStartTimer={startTimer}
+          onStopTimer={stopTimer}
+          onEditEntry={(entry) => { setEditingEntry(entry); setIsEntryModalOpen(true); }}
+          onDeleteEntry={(id) => setDeleteConfirmation({ type: 'entry', id })}
+          onViewEntry={setViewingEntry}
+        />
+      )}
 
       <EntryModal
         isOpen={isEntryModalOpen}
@@ -305,6 +328,6 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDeleteConfirmation(null)}>Cancel</Button><Button variant="danger" onClick={handleDelete}>Delete</Button></div>
         </div>
       </Modal>
-    </div>
+    </StandardAppLayout>
   );
 }

@@ -1,12 +1,12 @@
 // src/apps/notes/Notes.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, Plus, FolderPlus, Home, ChevronRight, LayoutGrid, List,
+  Plus, FolderPlus, LayoutGrid, List,
   Loader, Link, Globe, Check, CloudOff, Folder, Users
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
-import MultiFab from '../../components/ui/MultiFab';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
@@ -66,11 +66,9 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   }, [user, cryptoKey, activeWorkspace, collab.workspaceKey, ctx]);
 
   // --- 2. URL Route Sync ---
-  // FIXED: Sync internal state strictly to the URL route object
   useEffect(() => {
     if (loading) return;
 
-    // FIXED: Catch legacy "?openId=123" deep links and redirect them to the new REST URL
     if (route.query?.openId) {
       window.location.replace(
         `${window.location.pathname}${window.location.search}#notes/doc/${route.query.openId}`
@@ -98,7 +96,6 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         buildBreadcrumbs(targetNote.parentId);
       }
     } else {
-      // Root path fallback
       setCurrentFolderId(null);
       setEditorState(null);
       setFolderPath([{ id: null, title: 'Notes' }]);
@@ -157,11 +154,9 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     try {
       const id = await saveNote(user.uid, cryptoKey, noteData, currentFolderId, ctx);
 
-      // Silently update the URL from 'new' to the actual ID so refreshes work
       if (!noteData.id) {
         setEditorState(prev => ({ ...prev, id }));
         window.history.replaceState(null, '', `#notes/doc/${id}/edit`);
-        // Dispatch event so useHashRoute catches the new ID and stops treating it as 'new'
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       }
 
@@ -213,10 +208,9 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
 
   // --- Navigation Handlers ---
-  const handleBreadcrumbClick = (index) => {
-    const targetFolder = folderPath[index];
-    if (targetFolder.id === null) navigate(`#notes`);
-    else navigate(`#notes/folder/${targetFolder.id}`);
+  const handleBreadcrumbClick = (index, folder) => {
+    if (folder.id === null) navigate(`#notes`);
+    else navigate(`#notes/folder/${folder.id}`);
   };
 
   const handleBack = () => {
@@ -226,7 +220,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     } else if (searchQuery) {
       setSearchQuery("");
     } else {
-      if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2);
+      if (folderPath.length > 1) handleBreadcrumbClick(folderPath.length - 2, folderPath[folderPath.length - 2]);
       else navigate(''); // Exit to launcher
     }
   };
@@ -242,7 +236,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     {
       label: "New Note",
       icon: <Plus size={24} />,
-      onClick: () => navigate(`#notes/doc/new/edit`), // FIXED: Push URL instead of setting state
+      onClick: () => navigate(`#notes/doc/new/edit`),
       variant: 'primary'
     }
   ], [currentFolderId, navigate]);
@@ -252,7 +246,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       {editorState ? (
         <NoteEditor
           note={editorState}
-          cryptoKey={editorState.isSharedDoc && !activeWorkspace ? editorState.docKey : (ctx?.key || cryptoKey)} /* If it's a shared doc from SharedDocsView, use docKey */
+          cryptoKey={editorState.isSharedDoc && !activeWorkspace ? editorState.docKey : (ctx?.key || cryptoKey)}
           onSave={handleSaveNote}
           onBack={handleBack}
           onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned, ctx)}
@@ -264,100 +258,78 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           readOnly={editorState.isSharedDoc && editorState.role === 'viewer'}
         />
       ) : (
-        <>
-          <header className="flex-none bg-[#4285f4] text-white shadow-md z-10">
-            <div className="max-w-4xl mx-auto p-4 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button onClick={handleBack} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft /></button>
-                  <WorkspaceSwitcher
-                    {...collab.switcherProps}
-                    onSelect={(ws) => {
-                      collab.switchWorkspace(ws);
-                      navigate('#notes');
-                    }}
-                  />
-                </div>
-
-                <div className="flex items-center gap-1">
-                  {activeWorkspace && (
-                    <button onClick={() => collab.setIsWorkspacePanelOpen(true)} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                      <Users size={20} />
-                    </button>
-                  )}
-                  <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                    {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
-                  </button>
-                </div>
-              </div>
-              {!searchQuery && (
-                <div className="flex items-center gap-1 text-sm text-blue-100 overflow-x-auto no-scrollbar whitespace-nowrap mask-fade-right">
-                  {folderPath.map((folder, index) => (
-                    <React.Fragment key={index}>
-                      {index > 0 && <ChevronRight size={14} className="opacity-50" />}
-                      <button onClick={() => handleBreadcrumbClick(index)} className={`hover:text-white transition-colors flex items-center gap-1 ${index === folderPath.length - 1 ? 'font-bold text-white' : ''}`}>
-                        {index === 0 && <Home size={14} />} {folder.title}
-                      </button>
-                    </React.Fragment>
-                  ))}
-                </div>
-              )}
+        <StandardAppLayout
+          headerConfig={{
+            onBack: handleBack,
+            workspaceConfig: {
+              switcherProps: collab.switcherProps,
+              activeWorkspace: activeWorkspace,
+              onSelect: (ws) => {
+                collab.switchWorkspace(ws);
+                navigate('#notes');
+              },
+              onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
+            },
+            search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search notes...' },
+            nav: !searchQuery ? {
+              type: 'breadcrumbs',
+              data: folderPath,
+              onSelect: handleBreadcrumbClick,
+            } : undefined,
+            customActions: (
+              <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                {viewMode === 'grid' ? <List size={20} /> : <LayoutGrid size={20} />}
+              </button>
+            ),
+          }}
+          fabConfig={{ actions: fabActions }}
+        >
+          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
+            <div className="mb-8">
+              <SharedDocsView
+                sharedDocs={sharedDocs}
+                appType="notes"
+                onOpenDoc={(doc) => navigate(`#notes/doc/${doc.id}/edit`)}
+              />
             </div>
-          </header>
+          )}
 
-          <main className="flex-1 overflow-y-auto scroll-smooth p-4">
-            <div className="max-w-3xl mx-auto pb-32">
-
-              {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
-                <div className="mb-8">
-                  <SharedDocsView
-                    sharedDocs={sharedDocs}
-                    appType="notes"
-                    onOpenDoc={(doc) => navigate(`#notes/doc/${doc.id}/edit`)}
-                  />
-                </div>
-              )}
-
-              {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
-                <div className="flex items-center gap-2 px-1 mb-3">
-                  <Folder size={14} className="text-gray-400" />
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Personal Vault
-                  </span>
-                </div>
-              )}
-
-              {loading ? (
-                <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2"><Loader className="animate-spin" /> <p>Loading...</p></div>
-              ) : displayedItems.length === 0 ? (
-                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4"><div className="bg-white p-4 rounded-full shadow-sm"><FolderPlus size={32} className="opacity-50" /></div><p>Empty folder.</p></div>
-              ) : (
-                <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
-                  {displayedItems.map(item => (
-                    <NoteCard
-                      key={item.id}
-                      item={item}
-                      viewMode={viewMode}
-                      onOpen={() => navigate(`#notes/doc/${item.id}/edit`)} // FIXED: Drive by URL
-                      onFolderOpen={() => navigate(`#notes/folder/${item.id}`)} // FIXED: Drive by URL
-                      onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned, ctx); }}
-                      onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
-                      onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
-                      onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
-                      onShare={!ctx ? ((e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
-                      onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item, ctx); }}
-                      onCollaborate={!ctx ? ((e) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
-                      folderCounts={folderCounts}
-                      readOnly={item.isSharedDoc && item.role === 'viewer'}
-                    />
-                  ))}
-                </div>
-              )}
+          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
+            <div className="flex items-center gap-2 px-1 mb-3">
+              <Folder size={14} className="text-gray-400" />
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Personal Vault
+              </span>
             </div>
-          </main>
+          )}
 
-          <MultiFab actions={fabActions} maxWidth="max-w-4xl" />
-        </>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2"><Loader className="animate-spin" /> <p>Loading...</p></div>
+          ) : displayedItems.length === 0 ? (
+            <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-4"><div className="bg-white p-4 rounded-full shadow-sm"><FolderPlus size={32} className="opacity-50" /></div><p>Empty folder.</p></div>
+          ) : (
+            <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex flex-col gap-2"}>
+              {displayedItems.map(item => (
+                <NoteCard
+                  key={item.id}
+                  item={item}
+                  viewMode={viewMode}
+                  onOpen={() => navigate(`#notes/doc/${item.id}/edit`)}
+                  onFolderOpen={() => navigate(`#notes/folder/${item.id}`)}
+                  onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned, ctx); }}
+                  onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
+                  onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
+                  onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
+                  onShare={!ctx ? ((e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
+                  onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item, ctx); }}
+                  onCollaborate={!ctx ? ((e) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
+                  folderCounts={folderCounts}
+                  readOnly={item.isSharedDoc && item.role === 'viewer'}
+                />
+              ))}
+            </div>
+          )}
+        </StandardAppLayout>
       )}
 
       {/* Modals */}
@@ -370,7 +342,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
       <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
         <div className="flex flex-col gap-2">
-          <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Home size={16} /> Home</button>
+          <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> Home</button>
           {items.filter(i => i.type === 'folder' && i.id !== itemToMove?.id).map(f => (
             <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
           ))}

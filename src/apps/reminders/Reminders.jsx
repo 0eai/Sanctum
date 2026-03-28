@@ -1,9 +1,9 @@
 // src/apps/reminders/Reminders.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Plus, Bell, CheckCircle2 } from 'lucide-react';
+import { Plus, Bell, CheckCircle2 } from 'lucide-react';
 
-import { LoadingSpinner, Button, Modal } from '../../components/ui';
-import Fab from '../../components/ui/Fab';
+import { Button, Modal } from '../../components/ui';
+import StandardAppLayout from '../../components/ui/StandardAppLayout';
 
 import { listenToReminders, saveReminder, deleteReminder } from './services/reminders';
 import ReminderCard from './components/ReminderCard';
@@ -18,20 +18,13 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [reminders, setReminders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [deleteConfirm, setDeleteConfirm] = useState(null);
-    const [processing, setProcessing] = useState(false);
-
-    // --- Swipe State ---
-    const [touchStart, setTouchStart] = useState(null);
-    const [touchEnd, setTouchEnd] = useState(null);
-    const MIN_SWIPE_DISTANCE = 50;
+    const [searchQuery, setSearchQuery] = useState("");
 
     // --- URL-Driven State ---
     const activeTab = TABS.find(t => t.id === route.resource)?.id || 'upcoming';
-
     const editId = route.query?.edit;
     const currentBasePath = `#reminders/${activeTab}`;
 
-    // Determine what to show in the editor modal
     const editingItem = useMemo(() => {
         if (!editId) return null;
         if (editId === 'new') return null;
@@ -49,7 +42,6 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }, [user, cryptoKey]);
 
     // --- UI Sync ---
-    // Smooth scroll the active tab into view
     useEffect(() => {
         const tabEl = document.getElementById(`tab-${activeTab}`);
         if (tabEl) tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
@@ -58,20 +50,30 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     // --- Derived State ---
     const displayedReminders = useMemo(() => {
         let filtered = reminders;
-        if (activeTab === 'upcoming') {
-            filtered = reminders.filter(r => r.isActive);
-            filtered.sort((a, b) => new Date(a.datetime || '9999') - new Date(b.datetime || '9999'));
+
+        // Apply search filter first
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            filtered = reminders.filter(r =>
+                r.title?.toLowerCase().includes(q) ||
+                r.note?.toLowerCase().includes(q)
+            );
         } else {
-            filtered = reminders.filter(r => !r.isActive);
-            filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            if (activeTab === 'upcoming') {
+                filtered = reminders.filter(r => r.isActive);
+                filtered.sort((a, b) => new Date(a.datetime || '9999') - new Date(b.datetime || '9999'));
+            } else {
+                filtered = reminders.filter(r => !r.isActive);
+                filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            }
         }
         return filtered;
-    }, [reminders, activeTab]);
+    }, [reminders, activeTab, searchQuery]);
 
     // --- Handlers ---
     const handleSave = async (data) => {
         await saveReminder(user.uid, cryptoKey, data);
-        navigate(currentBasePath); // Close Modal
+        navigate(currentBasePath);
     };
 
     const handleToggle = async (item) => {
@@ -84,97 +86,47 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         setDeleteConfirm(null);
     };
 
-    // --- Swipe Logic ---
-    const handleTouchStart = (e) => {
-        setTouchEnd(null);
-        setTouchStart(e.targetTouches[0].clientX);
-    };
-
-    const handleTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
-
-    const handleTouchEnd = () => {
-        if (!touchStart || !touchEnd) return;
-
-        const distance = touchStart - touchEnd;
-        const currentIndex = TABS.findIndex(t => t.id === activeTab);
-
-        // Swipe Left -> Next Tab
-        if (distance > MIN_SWIPE_DISTANCE && currentIndex < TABS.length - 1) {
-            navigate(`#reminders/${TABS[currentIndex + 1].id}`);
-        }
-        // Swipe Right -> Prev Tab
-        else if (distance < -MIN_SWIPE_DISTANCE && currentIndex > 0) {
-            navigate(`#reminders/${TABS[currentIndex - 1].id}`);
-        }
-    };
-
-
+    // Build tab data with counts
+    const tabsWithCounts = useMemo(() => TABS.map(tab => ({
+        ...tab,
+        count: tab.id === 'upcoming' ? reminders.filter(r => r.isActive).length : reminders.filter(r => !r.isActive).length
+    })), [reminders]);
 
     return (
-        <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
-            <header className="flex-none bg-[#4285f4] text-white shadow-md z-10 pb-0">
-                <div className="max-w-4xl mx-auto px-4 pt-4 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <button onClick={onExit} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
-                            <h1 className="text-xl font-bold flex items-center gap-2">Reminders</h1>
-                        </div>
-                    </div>
-
-                    {/* Tab Bar */}
-                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0 mt-1">
-                        {TABS.map(tab => (
-                            <button
-                                key={tab.id}
-                                id={`tab-${tab.id}`}
-                                onClick={() => navigate(`#reminders/${tab.id}`)}
-                                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === tab.id ? 'bg-gray-50 text-[#4285f4]' : 'text-blue-100 hover:bg-white/10'}`}
-                            >
-                                <tab.icon size={16} /> {tab.label}
-                                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === tab.id ? 'bg-blue-100 text-blue-600' : 'bg-white/20 text-white'}`}>
-                                    {/* FIXED: Using tab.id to calculate counts so they show accurately for each tab */}
-                                    {tab.id === 'upcoming' ? reminders.filter(r => r.isActive).length : reminders.filter(r => !r.isActive).length}
-                                </span>
-                            </button>
-                        ))}
-                    </div>
+        <StandardAppLayout
+            headerConfig={{
+                onBack: onExit,
+                title: 'Reminders',
+                search: { query: searchQuery, setQuery: setSearchQuery, placeholder: 'Search reminders...' },
+                nav: {
+                    type: 'tabs',
+                    data: tabsWithCounts,
+                    activeId: activeTab,
+                    onSelect: (tabId) => navigate(`#reminders/${tabId}`),
+                },
+            }}
+            fabConfig={{ onClick: () => navigate(`${currentBasePath}?edit=new`), icon: <Plus size={28} />, ariaLabel: "New Reminder" }}
+        >
+            {loading ? (
+                <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+            ) : displayedReminders.length === 0 ? (
+                <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-3">
+                    <div className="bg-white p-4 rounded-full shadow-sm opacity-50"><Bell size={32} /></div>
+                    <p>No {activeTab} reminders.</p>
                 </div>
-            </header>
-
-            <main
-                className="flex-1 overflow-y-auto scroll-smooth p-4"
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-            >
-                <div className="max-w-3xl mx-auto pb-24">
-                    {loading ? <div className="flex justify-center py-20"><LoadingSpinner /></div> : displayedReminders.length === 0 ? (
-                        <div className="text-center py-20 text-gray-400 flex flex-col items-center gap-3">
-                            <div className="bg-white p-4 rounded-full shadow-sm opacity-50"><Bell size={32} /></div>
-                            <p>No {activeTab} reminders.</p>
-                        </div>
-                    ) : (
-                        <div className="flex flex-col gap-3">
-                            {displayedReminders.map(item => (
-                                <ReminderCard
-                                    key={item.id}
-                                    item={item}
-                                    onToggle={handleToggle}
-                                    onEdit={(i) => navigate(`${currentBasePath}?edit=${i.id}`)}
-                                    onDelete={setDeleteConfirm}
-                                />
-                            ))}
-                        </div>
-                    )}
+            ) : (
+                <div className="flex flex-col gap-3">
+                    {displayedReminders.map(item => (
+                        <ReminderCard
+                            key={item.id}
+                            item={item}
+                            onToggle={handleToggle}
+                            onEdit={(i) => navigate(`${currentBasePath}?edit=${i.id}`)}
+                            onDelete={setDeleteConfirm}
+                        />
+                    ))}
                 </div>
-            </main>
-
-            <Fab
-                onClick={() => navigate(`${currentBasePath}?edit=new`)}
-                icon={<Plus size={28} />}
-                maxWidth="max-w-4xl"
-                ariaLabel="New Reminder"
-            />
+            )}
 
             <ReminderFormModal
                 isOpen={!!editId}
@@ -192,7 +144,7 @@ const RemindersApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     </div>
                 </div>
             </Modal>
-        </div>
+        </StandardAppLayout>
     );
 };
 
