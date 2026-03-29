@@ -18,6 +18,7 @@ import { useHashRoute } from './hooks/useHashRoute';
 // System Components
 import LockScreen from './components/system/LockScreen';
 import Launcher from './components/system/Launcher';
+import AppErrorBoundary from './components/system/AppErrorBoundary';
 
 // App Registry (replaces 17 individual lazy imports)
 import appRegistry, { SharedNote } from './AppRegistry';
@@ -45,7 +46,7 @@ export default function App() {
       const timeout = getTimeout();
       if (timeout) {
         timer = setTimeout(() => {
-          logActivity(user.uid, 'Vault Auto-Locked', 'info', 'Lock');
+          logActivity(user.uid, 'Vault Auto-Locked', 'info', 'Lock', cryptoKey);
           lockVault('Session expired due to inactivity.');
         }, timeout);
       }
@@ -70,7 +71,7 @@ export default function App() {
     const handleVisibilityChange = () => {
       const isLockOnHiddenEnabled = localStorage.getItem('sanctum_lock_on_hidden') === 'true';
       if (isLockOnHiddenEnabled && document.visibilityState === 'hidden') {
-        logActivity(user.uid, 'Vault Auto-Locked (Hidden)', 'info', 'Lock');
+        logActivity(user.uid, 'Vault Auto-Locked (Hidden)', 'info', 'Lock', cryptoKey);
         lockVault('Locked for your security because the tab was hidden.');
       }
     };
@@ -117,8 +118,8 @@ export default function App() {
 
   const handleUnlock = (key) => {
     unlockVault(key);
-    logActivity(user.uid, 'Vault Unlocked', 'success', 'Lock');
-    registerDevice(user.uid);
+    logActivity(user.uid, 'Vault Unlocked', 'success', 'Lock', key);
+    registerDevice(user.uid, key);
   };
 
   const handleLogin = async () => {
@@ -167,8 +168,10 @@ export default function App() {
   }
 
   return (
-    <Suspense fallback={<div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>}>
-      {AppRenderer}
-    </Suspense>
+    <AppErrorBoundary>
+      <Suspense fallback={<div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>}>
+        {AppRenderer}
+      </Suspense>
+    </AppErrorBoundary>
   );
 }

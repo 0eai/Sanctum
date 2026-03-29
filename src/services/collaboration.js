@@ -2,12 +2,13 @@
 // Per-document E2EE collaboration — each shared doc gets its own AES-256 key,
 // RSA-wrapped per collaborator.
 import {
-    collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, onSnapshot,
-    query, where, orderBy, serverTimestamp, updateDoc, writeBatch
+    collection, doc, setDoc, getDoc, getDocs, onSnapshot,
+    query, where, serverTimestamp, updateDoc, runTransaction
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
+import { deleteInChunks } from '../lib/firestore';
 import {
-    generateMasterKey, encryptData, decryptData, exportKey, importMasterKey,
+    generateMasterKey, encryptData, decryptData,
     encryptRSA, decryptRSA, importRSAPublicKey
 } from '../lib/crypto';
 import { ref, getBlob, uploadBytesResumable } from 'firebase/storage';
@@ -68,11 +69,47 @@ export const findUserByEmail = async (email) => {
 // =============================================
 
 /**
+ * In-place re-encryption of shared doc Storage attachments with a new key.
+ * Called after collaborator removal / key rotation. Overwrites files at the same Storage paths.
+ */
+const reEncryptAttachments = async (shareId, currentData, oldKey, newKey) => {
+    const prefix = `shared_docs/${shareId}/`;
+    const attachments = currentData.attachments || [];
+
+    const reEncryptFile = async (storagePath) => {
+        try {
+            const fileRef = ref(storage, `artifacts/${appId}/${storagePath}`);
+            const blob = await getBlob(fileRef);
+            const buffer = await blob.arrayBuffer();
+            const iv = new Uint8Array(buffer.slice(0, 12));
+            const ciphertext = new Uint8Array(buffer.slice(12));
+            const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, oldKey, ciphertext);
+            const newIv = crypto.getRandomValues(new Uint8Array(12));
+            const reEnc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: newIv }, newKey, plain);
+            const payload = new Uint8Array(12 + reEnc.byteLength);
+            payload.set(newIv);
+            payload.set(new Uint8Array(reEnc), 12);
+            await uploadBytesResumable(fileRef, new Blob([payload], { type: 'application/octet-stream' }), { contentType: 'application/octet-stream' });
+        } catch (e) {
+            console.warn(`[reEncryptAttachments] Failed to re-encrypt ${storagePath}:`, e);
+        }
+    };
+
+    const jobs = [];
+    for (const att of attachments) {
+        if (att.driveFileId?.startsWith(prefix)) jobs.push(reEncryptFile(att.driveFileId));
+    }
+    if (currentData.driveFileId?.startsWith(prefix)) jobs.push(reEncryptFile(currentData.driveFileId));
+
+    await Promise.all(jobs);
+};
+
+/**
  * Copy attachment files from owner's personal storage to shared storage.
- * Decrypts with owner's master key, re-encrypts with per-doc key.
+ * Decrypts with sourceKey (personal master key or workspace key), re-encrypts with per-doc key.
  * Updates attachment references in the shared doc.
  */
-const copyFilesForShare = async (shareId, docData, personalKey, docKey) => {
+const copyFilesForShare = async (shareId, docData, sourceKey, docKey) => {
     const attachments = docData.attachments || [];
     const hasFiles = attachments.some(a => a.driveFileId);
     // Research papers store the PDF storage path in driveFileId (pdfHash is just a content hash)
@@ -89,16 +126,16 @@ const copyFilesForShare = async (shareId, docData, personalKey, docKey) => {
             continue;
         }
         try {
-            // 1. Download encrypted file from owner's personal path
+            // 1. Download encrypted file from source path
             const srcRef = ref(storage, getStoragePath(att.driveFileId));
             const encryptedBlob = await getBlob(srcRef);
             const buffer = await encryptedBlob.arrayBuffer();
 
-            // 2. Decrypt with owner's master key
+            // 2. Decrypt with source key (personal or workspace)
             const iv = new Uint8Array(buffer.slice(0, 12));
             const data = new Uint8Array(buffer.slice(12));
             const decryptedBuffer = await crypto.subtle.decrypt(
-                { name: 'AES-GCM', iv }, personalKey, data
+                { name: 'AES-GCM', iv }, sourceKey, data
             );
 
             // 3. Re-encrypt with doc key
@@ -133,11 +170,11 @@ const copyFilesForShare = async (shareId, docData, personalKey, docKey) => {
 
             let plainBuffer;
             if (docData.isEncrypted || docData.isPrivate) {
-                // File is AES-encrypted with master key — decrypt first
+                // File is AES-encrypted — decrypt with source key (personal or workspace)
                 const iv = new Uint8Array(buffer.slice(0, 12));
                 const data = new Uint8Array(buffer.slice(12));
                 plainBuffer = await crypto.subtle.decrypt(
-                    { name: 'AES-GCM', iv }, personalKey, data
+                    { name: 'AES-GCM', iv }, sourceKey, data
                 );
             } else {
                 // File is NOT encrypted — use raw bytes directly
@@ -188,8 +225,8 @@ const copyFilesForShare = async (shareId, docData, personalKey, docKey) => {
  * Share a document with specific users.
  * 1. Generate a per-doc AES-256 key
  * 2. Encrypt the document payload with it
- * 3. RSA-wrap the key for each collaborator (including owner)
- * 4. Store in /shared_docs/{shareId}
+ * 3. RSA-wrap the key for each collaborator (including owner) — atomic via runTransaction
+ * 4. Copy attachment files to shared storage (re-encrypted with docKey)
  *
  * @param {string} ownerUid
  * @param {CryptoKey} personalKey - owner's master key to decrypt the original doc
@@ -199,9 +236,10 @@ const copyFilesForShare = async (shareId, docData, personalKey, docKey) => {
  * @param {string[]} collaboratorUids - UIDs to share with (owner is added automatically)
  * @param {string|null} sharedFolderId - links batch-shared folder items
  * @param {string|null} parentShareId - parent shared folder's shareId
+ * @param {CryptoKey|null} sourceKey - key used to decrypt source attachments (workspace key or personalKey)
  * @returns {{ shareId: string, docKey: CryptoKey }}
  */
-export const shareDocument = async (ownerUid, personalKey, docData, appType, docType, collaboratorUids, sharedFolderId = null, parentShareId = null) => {
+export const shareDocument = async (ownerUid, personalKey, docData, appType, docType, collaboratorUids, sharedFolderId = null, parentShareId = null, sourceKey = null) => {
     // Generate per-doc key
     const docKey = await generateMasterKey();
 
@@ -214,39 +252,48 @@ export const shareDocument = async (ownerUid, personalKey, docData, appType, doc
     // All members = owner + collaborators (deduplicated)
     const memberUids = [...new Set([ownerUid, ...collaboratorUids])];
 
-    // Create the shared doc
-    const shareRef = await addDoc(collection(db, 'artifacts', appId, 'shared_docs'), {
-        ...encrypted,
-        appType,
-        docType,
-        ownerUid,
-        memberUids,
-        sharedFolderId,
-        parentShareId,
-        isPinned: docData.isPinned || false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-    });
-
-    // RSA-wrap the doc key for each member
+    // Pre-compute RSA-wrapped keys for all members (async — must happen outside the transaction)
     const keyJson = await serializeKey(docKey);
+    const memberKeyMap = {};
     for (const uid of memberUids) {
         try {
             const pubKey = await getPublicKey(uid);
             if (!pubKey) continue;
-            const encryptedDocKey = await encryptRSA(keyJson, pubKey);
-            await setDoc(doc(db, 'artifacts', appId, 'shared_docs', shareRef.id, 'members', uid), {
-                encryptedDocKey,
-                role: uid === ownerUid ? 'owner' : 'editor',
-                joinedAt: serverTimestamp()
-            });
+            memberKeyMap[uid] = await encryptRSA(keyJson, pubKey);
         } catch (e) {
             console.warn(`Failed to wrap key for ${uid}:`, e);
         }
     }
 
+    // Atomically create the share doc + all member key docs in one transaction
+    const shareRef = doc(collection(db, 'artifacts', appId, 'shared_docs'));
+    await runTransaction(db, async (transaction) => {
+        transaction.set(shareRef, {
+            ...encrypted,
+            appType,
+            docType,
+            ownerUid,
+            memberUids,
+            sharedFolderId,
+            parentShareId,
+            isPinned: docData.isPinned || false,
+            keyVersion: 1,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+        });
+        for (const uid of memberUids) {
+            if (!memberKeyMap[uid]) continue;
+            transaction.set(doc(db, 'artifacts', appId, 'shared_docs', shareRef.id, 'members', uid), {
+                encryptedDocKey: memberKeyMap[uid],
+                role: uid === ownerUid ? 'owner' : 'editor',
+                joinedAt: serverTimestamp()
+            });
+        }
+    });
+
     // Copy attachment files to shared storage (re-encrypted with docKey)
-    await copyFilesForShare(shareRef.id, cleanData, personalKey, docKey);
+    // sourceKey falls back to personalKey when not in a workspace context
+    await copyFilesForShare(shareRef.id, cleanData, sourceKey ?? personalKey, docKey);
 
     return { shareId: shareRef.id, docKey };
 };
@@ -283,14 +330,12 @@ export const addDocCollaborator = async (shareId, newUid, docKey, role = 'editor
 };
 
 /**
- * Remove a collaborator. Rotates the doc key and re-encrypts the document.
+ * Remove a collaborator. Rotates the doc key and re-encrypts the document atomically.
  */
 export const removeDocCollaborator = async (shareId, uid, currentDocKey) => {
-    // 1. Remove member's key doc
-    await deleteDoc(doc(db, 'artifacts', appId, 'shared_docs', shareId, 'members', uid));
-
-    // 2. Update memberUids
     const shareRef = doc(db, 'artifacts', appId, 'shared_docs', shareId);
+
+    // Read current state before entering the transaction
     const snap = await getDoc(shareRef);
     if (!snap.exists()) return null;
 
@@ -298,41 +343,54 @@ export const removeDocCollaborator = async (shareId, uid, currentDocKey) => {
 
     // If only the owner remains (or no one), delete the shared doc entirely
     if (remaining.length <= 1) {
-        // Delete all remaining member subdocs
         const membersSnap = await getDocs(collection(db, 'artifacts', appId, 'shared_docs', shareId, 'members'));
-        const batch = writeBatch(db);
-        membersSnap.docs.forEach(d => batch.delete(d.ref));
-        batch.delete(shareRef);
-        await batch.commit();
+        await deleteInChunks([...membersSnap.docs.map(d => d.ref), shareRef]);
         return null;
     }
 
-    await updateDoc(shareRef, { memberUids: remaining });
-
-    // 3. Decrypt current doc with old key
+    // Decrypt current doc and generate new key outside the transaction (async crypto ops)
     const currentData = await decryptData(snap.data(), currentDocKey);
     if (!currentData) return null;
 
-    // 4. Generate new key, re-encrypt doc
     const newKey = await generateMasterKey();
     const newEncrypted = await encryptData(currentData, newKey);
-    await updateDoc(shareRef, { ...newEncrypted, updatedAt: serverTimestamp() });
 
-    // 5. Re-wrap new key for remaining members
+    // Pre-compute new RSA-wrapped keys for remaining members (async — before transaction)
     const newKeyJson = await serializeKey(newKey);
+    const memberKeyMap = {};
     for (const memberUid of remaining) {
         try {
             const pubKey = await getPublicKey(memberUid);
             if (!pubKey) continue;
-            const encryptedDocKey = await encryptRSA(newKeyJson, pubKey);
-            await setDoc(doc(db, 'artifacts', appId, 'shared_docs', shareId, 'members', memberUid), {
-                encryptedDocKey,
-                rotatedAt: serverTimestamp()
-            }, { merge: true });
+            memberKeyMap[memberUid] = await encryptRSA(newKeyJson, pubKey);
         } catch (e) {
             console.warn(`Key rotation failed for ${memberUid}:`, e);
         }
     }
+
+    // Atomically: re-encrypt doc, update memberUids, remove old member, update remaining member keys
+    await runTransaction(db, async (transaction) => {
+        const freshSnap = await transaction.get(shareRef);
+        if (!freshSnap.exists()) return;
+
+        transaction.update(shareRef, {
+            ...newEncrypted,
+            memberUids: remaining,
+            keyVersion: (freshSnap.data().keyVersion || 1) + 1,
+            updatedAt: serverTimestamp()
+        });
+        transaction.delete(doc(db, 'artifacts', appId, 'shared_docs', shareId, 'members', uid));
+        for (const memberUid of remaining) {
+            if (!memberKeyMap[memberUid]) continue;
+            transaction.set(doc(db, 'artifacts', appId, 'shared_docs', shareId, 'members', memberUid), {
+                encryptedDocKey: memberKeyMap[memberUid],
+                rotatedAt: serverTimestamp()
+            }, { merge: true });
+        }
+    });
+
+    // Re-encrypt Storage attachments with the new key (in-place, outside transaction)
+    await reEncryptAttachments(shareId, currentData, currentDocKey, newKey);
 
     return newKey;
 };
@@ -379,11 +437,14 @@ export const listenToSharedDocs = (uid, appType, privateKey, callback) => {
         for (const d of snapshot.docs) {
             const raw = d.data();
             try {
-                // Get or cache the doc key
-                if (!keyCache[d.id]) {
-                    keyCache[d.id] = await getDocumentKey(d.id, uid, privateKey);
+                // Get or cache the doc key; invalidate when keyVersion changes (key rotation)
+                const currentVersion = raw.keyVersion || 1;
+                if (!keyCache[d.id] || keyCache[d.id].version !== currentVersion) {
+                    const fetchedKey = await getDocumentKey(d.id, uid, privateKey);
+                    if (fetchedKey) keyCache[d.id] = { key: fetchedKey, version: currentVersion };
+                    else delete keyCache[d.id];
                 }
-                const docKey = keyCache[d.id];
+                const docKey = keyCache[d.id]?.key;
                 if (!docKey) continue;
 
                 const decrypted = await decryptData(raw, docKey);
@@ -460,12 +521,11 @@ export const saveSharedDoc = async (shareId, docKey, data) => {
  * Delete a shared document (owner only).
  */
 export const deleteSharedDoc = async (shareId) => {
-    // Delete member subdocs first
     const membersSnap = await getDocs(collection(db, 'artifacts', appId, 'shared_docs', shareId, 'members'));
-    const batch = writeBatch(db);
-    membersSnap.docs.forEach(d => batch.delete(d.ref));
-    batch.delete(doc(db, 'artifacts', appId, 'shared_docs', shareId));
-    await batch.commit();
+    await deleteInChunks([
+        ...membersSnap.docs.map(d => d.ref),
+        doc(db, 'artifacts', appId, 'shared_docs', shareId)
+    ]);
 };
 
 /**
@@ -486,7 +546,7 @@ export const unshareDocument = async (shareId) => {
  * @returns {{ sharedFolderId: string, shares: Array<{docId, shareId}> }}
  */
 export const shareFolder = async (ownerUid, personalKey, folderId, folderData, allItems, appType, collaboratorUids) => {
-    const sharedFolderId = `sf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sharedFolderId = `sf_${crypto.randomUUID()}`;
 
     // Share the folder itself
     const folderResult = await shareDocument(

@@ -3,6 +3,7 @@ import {
     doc, setDoc, deleteDoc, collection, getDocs, onSnapshot, serverTimestamp
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
+import { encryptData, decryptData } from '../lib/crypto';
 
 const DEVICE_ID_KEY = 'sanctum_device_id';
 
@@ -77,22 +78,27 @@ const detectDeviceInfo = () => {
 
 /**
  * Register or update the current device session in Firestore.
+ * Encrypts identifying metadata when cryptoKey is provided.
  * Called on every vault unlock.
  */
-export const registerDevice = async (uid) => {
+export const registerDevice = async (uid, cryptoKey = null) => {
     if (!uid) return;
     const deviceId = getDeviceId();
     const info = detectDeviceInfo();
 
     try {
-        await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'devices', deviceId), {
-            deviceId,
+        const metadata = {
             deviceName: info.deviceName,
             os: info.os,
             browser: info.browser,
             deviceType: info.deviceType,
+            userAgent: navigator.userAgent.slice(0, 200),
+        };
+        const stored = cryptoKey ? await encryptData(metadata, cryptoKey) : metadata;
+        await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'devices', deviceId), {
+            deviceId,
+            ...stored,
             lastActive: serverTimestamp(),
-            userAgent: navigator.userAgent.slice(0, 200), // Truncate for storage
         }, { merge: true });
     } catch (e) {
         console.warn('Device registration failed:', e);
@@ -117,15 +123,29 @@ export const updateDeviceActivity = async (uid) => {
 
 /**
  * Listen to all registered devices for a user.
+ * Decrypts metadata when cryptoKey is provided; handles mixed plaintext/encrypted entries.
  */
-export const listenToDevices = (uid, callback) => {
+export const listenToDevices = (uid, callback, cryptoKey = null) => {
     if (!uid) return () => { };
     return onSnapshot(
         collection(db, 'artifacts', appId, 'users', uid, 'devices'),
-        (snap) => {
-            const devices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Sort: current device first, then by lastActive desc
+        async (snap) => {
             const currentId = getDeviceId();
+            const devices = [];
+            for (const d of snap.docs) {
+                const raw = d.data();
+                // Encrypted entries have { iv, data, deviceId, lastActive }
+                if (cryptoKey && raw.iv && raw.data) {
+                    try {
+                        const decrypted = await decryptData(raw, cryptoKey);
+                        if (decrypted) {
+                            devices.push({ id: d.id, deviceId: raw.deviceId, lastActive: raw.lastActive, ...decrypted });
+                            continue;
+                        }
+                    } catch (_) { /* fall through to raw */ }
+                }
+                devices.push({ id: d.id, ...raw });
+            }
             devices.sort((a, b) => {
                 if (a.deviceId === currentId) return -1;
                 if (b.deviceId === currentId) return 1;

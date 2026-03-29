@@ -43,9 +43,9 @@ const ReminderFormModal = ({ isOpen, onClose, onSave, editingItem }) => {
                 <div className="flex flex-col sm:flex-row gap-3">
                     <div className="flex-1">
                         <label className="text-xs font-bold text-gray-500 mb-1 block">When</label>
-                        <input 
-                            type="datetime-local" 
-                            value={datetime}
+                        <input
+                            type="datetime-local"
+                            value={datetime ? datetime.slice(0, 16) : ''}
                             onChange={(e) => setDatetime(e.target.value)}
                             className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4]" 
                             required

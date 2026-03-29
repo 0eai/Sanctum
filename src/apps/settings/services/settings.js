@@ -1,24 +1,15 @@
 import {
-    doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, deleteDoc
+    doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, deleteDoc,
+    query, where
 } from 'firebase/firestore';
+import { deleteInChunks } from '../../../lib/firestore';
 import { deleteUser } from 'firebase/auth';
 import { db, appId } from '../../../lib/firebase';
 import {
     encryptData, decryptData, deriveKeyFromPasskey, deriveKeyArgon2id, generateSalt
 } from '../../../lib/crypto';
 import { DEFAULT_CATEGORIES } from '../constants';
-
-// Ensure we target all specific app collections
-const TARGET_COLLECTIONS = [
-    'notes',
-    'bookmarks',
-    'tasks',
-    'passwords',
-    'banking',
-    'finance',
-    'checklists', // Has sub-collection: 'items'
-    'counters'    // Has sub-collection: 'entries'
-];
+import { TARGET_COLLECTIONS } from '../../../lib/appCollections';
 
 // --- App Preferences ---
 
@@ -42,6 +33,21 @@ export const fetchAppPreferences = async (userId) => {
 
 export const saveAppPreferences = async (userId, updates) => {
     await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'apps'), updates, { merge: true });
+};
+
+// --- Lock Settings (cross-device sync) ---
+
+export const fetchLockSettings = async (userId, cryptoKey) => {
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'security'));
+        if (!snap.exists()) return null;
+        return decryptData(snap.data(), cryptoKey);
+    } catch (e) { return null; }
+};
+
+export const saveLockSettings = async (userId, cryptoKey, settings) => {
+    const encrypted = await encryptData(settings, cryptoKey);
+    await setDoc(doc(db, 'artifacts', appId, 'users', userId, 'settings', 'security'), encrypted);
 };
 
 // --- Data Management (Deep Export/Import) ---
@@ -186,8 +192,9 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
                 updatedAt: new Date()
             };
 
-            // Set Main Document
-            const docRef = doc(db, 'artifacts', appId, 'users', userId, colName, _id);
+            // Assign a new ID to avoid overwriting documents edited after the backup was taken
+            const newDocId = crypto.randomUUID();
+            const docRef = doc(db, 'artifacts', appId, 'users', userId, colName, newDocId);
             batch.set(docRef, payload);
             count++;
 
@@ -196,13 +203,13 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
                 for (const sub of subItems) {
                     const { _id: subId, ...subData } = sub;
                     const subEncrypted = await encryptData(subData, cryptoKey);
-                    const subRef = doc(db, 'artifacts', appId, 'users', userId, colName, _id, 'items', subId);
+                    const subRef = doc(db, 'artifacts', appId, 'users', userId, colName, newDocId, 'items', crypto.randomUUID());
                     batch.set(subRef, subEncrypted);
                     count++;
                 }
             }
 
-            // Handle Sub-Collections: Counter Entries (FIXED: was 'logs')
+            // Handle Sub-Collections: Counter Entries
             if (colName === 'counters' && Array.isArray(subEntries)) {
                 for (const entry of subEntries) {
                     const { _id: entryId, timestamp, endTimestamp, ...entryData } = entry;
@@ -215,7 +222,7 @@ export const importUserData = async (userId, cryptoKey, jsonData) => {
                         createdAt: new Date()
                     };
 
-                    const entryRef = doc(db, 'artifacts', appId, 'users', userId, colName, _id, 'entries', entryId);
+                    const entryRef = doc(db, 'artifacts', appId, 'users', userId, colName, newDocId, 'entries', crypto.randomUUID());
                     batch.set(entryRef, entryPayload);
                     count++;
                 }
@@ -274,6 +281,12 @@ export const wipeAllUserData = async (userId) => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'finance_settings', 'config'));
 
     if (count > 0) await batch.commit();
+
+    // Delete system collections (no sub-collections)
+    for (const colName of ['activity_log', 'devices']) {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'users', userId, colName));
+        if (!snap.empty) await deleteInChunks(snap.docs.map(d => d.ref));
+    }
 };
 
 // Delete data for a single app/collection
@@ -304,8 +317,38 @@ export const wipeAppData = async (userId, collectionName) => {
 };
 
 export const deleteUserAccount = async (user) => {
-    await wipeAllUserData(user.uid);
-    await deleteDoc(doc(db, 'users', user.uid));
+    const uid = user.uid;
+
+    // 1. Wipe personal app data
+    await wipeAllUserData(uid);
+
+    // 2. Delete public key so it's no longer discoverable by other users
+    await deleteDoc(doc(db, 'artifacts', appId, 'public_keys', uid)).catch(() => {});
+
+    // 3. Delete shared docs owned by this user (+ their members subcollection)
+    const sharedSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'shared_docs'),
+        where('ownerUid', '==', uid)
+    ));
+    for (const shareDoc of sharedSnap.docs) {
+        const membersSnap = await getDocs(collection(shareDoc.ref, 'members'));
+        await deleteInChunks([...membersSnap.docs.map(d => d.ref), shareDoc.ref]);
+    }
+
+    // 4. Delete workspaces created by this user (+ their members subcollection)
+    const wsSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'workspaces'),
+        where('createdBy', '==', uid)
+    ));
+    for (const wsDoc of wsSnap.docs) {
+        const membersSnap = await getDocs(collection(wsDoc.ref, 'members'));
+        await deleteInChunks([...membersSnap.docs.map(d => d.ref), wsDoc.ref]);
+    }
+
+    // 5. Delete user profile document
+    await deleteDoc(doc(db, 'users', uid));
+
+    // 6. Delete Firebase Auth user (must be last — invalidates the token)
     await deleteUser(user);
 };
 
@@ -359,7 +402,7 @@ export const rotateUserPasskey = async (userId, oldPass, newPass) => {
     });
 };
 
-export const exportRecoveryKey = async (userId, passkey) => {
+export const exportRecoveryKey = async (userId, passkey, recoveryPassphrase) => {
     const userDocRef = doc(db, 'users', userId);
     const userDoc = await getDoc(userDocRef);
     if (!userDoc.exists()) throw new Error("User data not found.");
@@ -376,12 +419,16 @@ export const exportRecoveryKey = async (userId, passkey) => {
     }
 
     const unlockedMasterKeyJWK = await decryptData(encryptedMasterKey, wrapperKey);
-
     if (!unlockedMasterKeyJWK) throw new Error("Current passkey is incorrect.");
 
-    // The JWK format contains the raw key material. We can serialize and encode it.
-    // For a succinct backup string, we can just base64-encode the stringified JWK.
-    return btoa(JSON.stringify(unlockedMasterKeyJWK));
+    // Wrap the JWK with a separate Argon2id key derived from recoveryPassphrase.
+    // This ensures the recovery string cannot be used without both the file and the passphrase.
+    const recoverySalt = generateSalt();
+    const recoveryWrapperKey = await deriveKeyArgon2id(recoveryPassphrase, recoverySalt);
+    const encryptedJWK = await encryptData(unlockedMasterKeyJWK, recoveryWrapperKey);
+
+    // v2 format: versioned prefix + base64(JSON({ salt, iv, data }))
+    return 'v2:' + btoa(JSON.stringify({ salt: recoverySalt, ...encryptedJWK }));
 };
 
 // --- API Integrations ---

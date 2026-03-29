@@ -65,10 +65,10 @@ const SettingsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           <IntegrationsTab user={user} cryptoKey={cryptoKey} />
         )}
         {activeTab === 'devices' && (
-          <DevicesTab user={user} setMessage={setMessage} />
+          <DevicesTab user={user} cryptoKey={cryptoKey} setMessage={setMessage} />
         )}
         {activeTab === 'security' && (
-          <SecurityTab user={user} setMessage={setMessage} />
+          <SecurityTab user={user} cryptoKey={cryptoKey} setMessage={setMessage} />
         )}
         {activeTab === 'finance' && (
           <FinanceTab user={user} cryptoKey={cryptoKey} setLoading={setLoading} setMessage={setMessage} />

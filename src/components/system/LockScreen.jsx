@@ -10,19 +10,12 @@ import {
 import { resetUserVault, initializeUserKeys } from '../../services/firestoredb';
 import { logActivity } from '../../services/activityLog';
 
-// --- Rate Limiting ---
-const RATE_LIMITS = [
-  { attempts: 3, delay: 2 },
-  { attempts: 5, delay: 5 },
-  { attempts: 8, delay: 15 },
-  { attempts: 10, delay: 60 },
-];
-
+// --- Rate Limiting (exponential backoff) ---
+// After N failures: 0→0s, 1→5s, 2→10s, 3→30s, 4→60s, 5→300s, 6→600s, 7→1800s, 8→3600s, 9→14400s, 10+→86400s
 const getDelay = (failCount) => {
-  for (let i = RATE_LIMITS.length - 1; i >= 0; i--) {
-    if (failCount >= RATE_LIMITS[i].attempts) return RATE_LIMITS[i].delay;
-  }
-  return 0;
+  if (failCount <= 0) return 0;
+  const delays = [5, 10, 30, 60, 300, 600, 1800, 3600, 14400, 86400];
+  return delays[Math.min(failCount - 1, delays.length - 1)];
 };
 
 // --- Passkey Strength ---
@@ -63,6 +56,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
   // Recovery Mode
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryInput, setRecoveryInput] = useState("");
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
 
   // Check if user has existing keys
   useEffect(() => {
@@ -186,9 +180,20 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
 
         let masterKeyJWK;
         try {
-          // The recovery key is the base64 encoded original JWK
-          masterKeyJWK = JSON.parse(atob(recoveryInput));
+          const trimmed = recoveryInput.trim();
+          if (trimmed.startsWith('v2:')) {
+            // v2: Argon2id-wrapped format
+            const payload = JSON.parse(atob(trimmed.slice(3)));
+            const { salt: rSalt, ...encryptedJWK } = payload;
+            const recoveryWrapperKey = await deriveKeyArgon2id(recoveryPassphrase, rSalt);
+            masterKeyJWK = await decryptData(encryptedJWK, recoveryWrapperKey);
+            if (!masterKeyJWK) throw new Error("INVALID_RECOVERY_PASSPHRASE");
+          } else {
+            // Legacy: bare base64 JWK (backward compat)
+            masterKeyJWK = JSON.parse(atob(trimmed));
+          }
         } catch (e) {
+          if (e.message === 'INVALID_RECOVERY_PASSPHRASE') throw e;
           throw new Error("INVALID_RECOVERY_KEY");
         }
 
@@ -230,14 +235,10 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
           wrapperKey = await deriveKeyArgon2id(keyInput, salt);
         } else {
           const storedIterations = userData.iterations || 100000;
-          console.log("Using stored iterations:", storedIterations, "salt:", salt);
           wrapperKey = await deriveKeyFromPasskey(keyInput, salt, storedIterations);
-          console.log("Wrapper key generated:", wrapperKey);
         }
 
-        console.log("Attempting decryption with Blob:", encryptedMasterKeyBlob ? "exists" : "MISSING");
         const masterKeyJWK = await decryptData(encryptedMasterKeyBlob, wrapperKey);
-        console.log("Decrypted JWK:", masterKeyJWK ? "SUCCESS" : "NULL");
 
         if (!masterKeyJWK) throw new Error("WRONG_PASSWORD");
 
@@ -320,13 +321,25 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
         </p>
         <form onSubmit={handleSubmit}>
           {isRecovering && (
-            <textarea
-              value={recoveryInput}
-              onChange={(e) => { setRecoveryInput(e.target.value); if (status) setStatus(""); }}
-              placeholder="Paste your Base64 recovery key..."
-              className="w-full h-24 p-3 rounded-xl bg-black border border-[#27272a] text-white mb-4 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-mono text-xs resize-none"
-              required
-            />
+            <>
+              <textarea
+                value={recoveryInput}
+                onChange={(e) => { setRecoveryInput(e.target.value); if (status) setStatus(""); }}
+                placeholder="Paste your recovery key..."
+                className="w-full h-24 p-3 rounded-xl bg-black border border-[#27272a] text-white mb-2 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-mono text-xs resize-none"
+                required
+              />
+              {recoveryInput.trim().startsWith('v2:') && (
+                <input
+                  type="password"
+                  value={recoveryPassphrase}
+                  onChange={(e) => { setRecoveryPassphrase(e.target.value); if (status) setStatus(""); }}
+                  placeholder="Recovery key passphrase..."
+                  className="w-full p-4 rounded-xl bg-black border border-[#27272a] text-white mb-2 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-gray-600 font-medium tracking-wide"
+                  required
+                />
+              )}
+            </>
           )}
 
           <input
@@ -388,7 +401,7 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
         </form>
         <div className="mt-8 flex justify-between items-center">
           {!isNewUser && (
-            <button onClick={() => { setIsRecovering(!isRecovering); setStatus(''); setKeyInput(''); setConfirmKeyInput(''); }} className="text-[10px] uppercase tracking-widest text-[#4285f4] hover:text-blue-400 flex items-center gap-2 transition-colors font-semibold">
+            <button onClick={() => { setIsRecovering(!isRecovering); setStatus(''); setKeyInput(''); setConfirmKeyInput(''); setRecoveryInput(''); setRecoveryPassphrase(''); }} className="text-[10px] uppercase tracking-widest text-[#4285f4] hover:text-blue-400 flex items-center gap-2 transition-colors font-semibold">
               <Key size={12} /> {isRecovering ? "Cancel Recovery" : "Forgot Passkey?"}
             </button>
           )}

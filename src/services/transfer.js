@@ -9,14 +9,18 @@ export const rtcConfiguration = {
     ]
 };
 
-export const generateRoomCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+export const generateRoomCode = () => {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return (100000 + (arr[0] % 900000)).toString();
+};
 
 // --- Device Presence & Auto-Discovery ---
 
 export const getLocalDeviceId = () => {
     let id = localStorage.getItem('daypulse_device_id');
     if (!id) {
-        id = Math.random().toString(36).substring(2, 15);
+        id = crypto.randomUUID();
         localStorage.setItem('daypulse_device_id', id);
     }
     return id;
@@ -91,7 +95,8 @@ export const clearIncomingInvite = async (uid, myDeviceId) => {
 
 export const setRoomData = async (uid, roomId, data) => {
     const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
-    await setDoc(roomRef, data, { merge: true });
+    // Always persist the creator's UID so Firestore rules can scope access
+    await setDoc(roomRef, { ...data, creatorUid: uid }, { merge: true });
 };
 
 export const getRoomData = async (uid, roomId) => {
@@ -124,6 +129,11 @@ export const listenToIceCandidates = (uid, roomId, collectionName, callback) => 
 export const cleanupRoom = async (uid, roomId) => {
     try {
         const roomRef = doc(db, 'artifacts', appId, 'global_transfers', roomId);
+        // Delete ICE candidate subcollections before the room doc
+        for (const sub of ['offerCandidates', 'answerCandidates']) {
+            const snap = await getDocs(collection(db, 'artifacts', appId, 'global_transfers', roomId, sub));
+            await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+        }
         await deleteDoc(roomRef);
     } catch (e) {
         console.error("Cleanup failed:", e);

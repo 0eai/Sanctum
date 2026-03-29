@@ -213,7 +213,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
                   ref={reminderRef}
                   type="datetime-local"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  value={data.dueDate}
+                  value={data.dueDate ? data.dueDate.slice(0, 16) : ''}
                   disabled={readOnly}
                   onChange={(e) => update({ dueDate: e.target.value, hasTime: true })}
                   onClick={(e) => e.stopPropagation()}

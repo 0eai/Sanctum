@@ -3,9 +3,10 @@
 // all documents inside are encrypted with it. RSA-wrapped per member.
 import {
     collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, onSnapshot,
-    query, where, orderBy, serverTimestamp, updateDoc, writeBatch
+    query, where, orderBy, serverTimestamp, updateDoc
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
+import { deleteInChunks } from '../lib/firestore';
 import {
     generateMasterKey, encryptData, decryptData,
     encryptRSA, decryptRSA, importRSAPublicKey
@@ -76,18 +77,21 @@ export const createWorkspace = async (name, ownerUid) => {
 
 /**
  * Delete a workspace and all its contents (owner only).
+ * Explicitly deletes all document subcollections since Firestore doesn't cascade.
  */
 export const deleteWorkspace = async (wsId) => {
-    // Delete member docs
-    const membersSnap = await getDocs(collection(db, 'artifacts', appId, 'workspaces', wsId, 'members'));
-    const batch = writeBatch(db);
-    membersSnap.docs.forEach(d => batch.delete(d.ref));
-    batch.delete(doc(db, 'artifacts', appId, 'workspaces', wsId));
-    await batch.commit();
+    const wsRef = doc(db, 'artifacts', appId, 'workspaces', wsId);
 
-    // Note: Firestore doesn't cascade-delete subcollections.
-    // Document subcollections (notes, tasks, etc.) need explicit cleanup.
-    // This is handled app-side by deleting all workspace docs before calling deleteWorkspace.
+    // Delete all document subcollections (notes, tasks, etc.)
+    const DOC_COLLECTIONS = ['notes', 'tasks', 'markdown', 'checklists', 'passwords'];
+    for (const colName of DOC_COLLECTIONS) {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'workspaces', wsId, colName));
+        if (!snap.empty) await deleteInChunks(snap.docs.map(d => d.ref));
+    }
+
+    // Delete members subcollection + workspace doc
+    const membersSnap = await getDocs(collection(db, 'artifacts', appId, 'workspaces', wsId, 'members'));
+    await deleteInChunks([...membersSnap.docs.map(d => d.ref), wsRef]);
 };
 
 // =============================================
@@ -192,38 +196,19 @@ export const getWorkspaceMembers = async (wsId) => {
  * Decrypt the workspace AES key for the current user.
  */
 export const getWorkspaceKey = async (wsId, uid, privateKey) => {
-    console.log("getWorkspaceKey called for wsId:", wsId, "uid:", uid);
-    if (!privateKey) {
-        console.error("getWorkspaceKey: privateKey is falsy!", privateKey);
-    }
+    if (!privateKey) return null;
+
     const memberRef = doc(db, 'artifacts', appId, 'workspaces', wsId, 'members', uid);
     const snap = await getDoc(memberRef);
-    if (!snap.exists()) {
-        console.error("getWorkspaceKey: memberRef does not exist for wsId:", wsId, "uid:", uid);
-        return null;
-    }
+    if (!snap.exists()) return null;
 
     const { encryptedWorkspaceKey } = snap.data();
-    if (!encryptedWorkspaceKey) {
-        console.error("getWorkspaceKey: encryptedWorkspaceKey is missing from member doc!");
-        return null;
-    }
+    if (!encryptedWorkspaceKey) return null;
 
-    console.log("getWorkspaceKey: attempting to decrypt using RSA key", privateKey);
     const keyJson = await decryptRSA(encryptedWorkspaceKey, privateKey);
-    if (!keyJson) {
-        console.error("getWorkspaceKey: decryptRSA returned null! Data was:", encryptedWorkspaceKey.substring(0, 20) + "...");
-        return null;
-    }
+    if (!keyJson) return null;
 
-    const key = await deserializeKey(keyJson);
-    if (!key) {
-        console.error("getWorkspaceKey: deserializeKey returned null!");
-        return null;
-    }
-
-    console.log("getWorkspaceKey: successfully recovered workspaceKey");
-    return key;
+    return deserializeKey(keyJson);
 };
 
 // =============================================
@@ -264,18 +249,26 @@ export const listenToWorkspaceDocs = (wsId, collectionName, wsKey, callback, ord
     return onSnapshot(q, async (snapshot) => {
         const docs = await Promise.all(snapshot.docs.map(async d => {
             const raw = d.data();
+            // Only pick known unencrypted metadata fields — never spread ...raw to avoid
+            // leaking AES artifacts (iv, data) or unknown fields into the returned object.
+            const meta = {
+                id: d.id,
+                type: raw.type,
+                isPinned: raw.isPinned || false,
+                parentId: raw.parentId || null,
+                order: raw.order ?? null,
+                completed: raw.completed ?? null,
+                itemCount: raw.itemCount ?? null,
+                completedCount: raw.completedCount ?? null,
+                updatedAt: raw.updatedAt?.toDate() || new Date(),
+                createdAt: raw.createdAt?.toDate() || new Date()
+            };
             try {
                 const decrypted = await decryptData(raw, wsKey);
-                return {
-                    id: d.id,
-                    ...raw,
-                    ...decrypted,
-                    updatedAt: raw.updatedAt?.toDate() || new Date(),
-                    createdAt: raw.createdAt?.toDate() || new Date()
-                };
+                return { ...meta, ...decrypted };
             } catch (e) {
                 console.error(`Failed to decrypt workspace doc ${d.id}`, e);
-                return { id: d.id, title: 'Decryption Failed', ...raw };
+                return { ...meta, title: 'Decryption Failed', _decryptionFailed: true };
             }
         }));
         callback(docs);
@@ -326,11 +319,9 @@ export const deleteWorkspaceDoc = async (wsId, collectionName, docId) => {
 
 /**
  * Batch delete multiple documents from a workspace (for folder deletion).
+ * Chunked to handle more than 500 documents.
  */
 export const batchDeleteWorkspaceDocs = async (wsId, collectionName, docIds) => {
-    const batch = writeBatch(db);
-    docIds.forEach(docId => {
-        batch.delete(doc(db, 'artifacts', appId, 'workspaces', wsId, collectionName, docId));
-    });
-    await batch.commit();
+    const refs = docIds.map(id => doc(db, 'artifacts', appId, 'workspaces', wsId, collectionName, id));
+    await deleteInChunks(refs);
 };

@@ -217,7 +217,7 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                     <div className="bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-full flex items-center gap-1.5 font-medium group relative overflow-hidden">
                                         <Clock size={12} className="pointer-events-none" />
                                         <span className="pointer-events-none">{formatAlertDate(data.dueDate)}</span>
-                                        <input type="datetime-local" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" value={data.dueDate} onChange={(e) => setData(s => ({ ...s, dueDate: e.target.value }))} />
+                                        <input type="datetime-local" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" value={data.dueDate ? data.dueDate.slice(0, 16) : ''} onChange={(e) => setData(s => ({ ...s, dueDate: e.target.value }))} />
                                         <button onClick={(e) => { e.stopPropagation(); setData(s => ({ ...s, dueDate: null, repeat: 'none' })) }} className="hover:text-red-500 z-20 relative"><X size={12} /></button>
                                     </div>
                                 ) : (

@@ -13,8 +13,22 @@ service cloud.firestore {
     }
 
     // --- Transfer App (Drop) - Global Rooms ---
-    match /artifacts/{appId}/global_transfers/{document=**} {
-      allow read, write: if request.auth != null;
+    // Room creator is stored in creatorUid; joiner is any auth'd user who knows the room code.
+    // ICE candidate subcollections follow the same parent-doc access pattern.
+    match /artifacts/{appId}/global_transfers/{roomId} {
+      allow create: if request.auth != null;
+      allow read, update: if request.auth != null
+        && (resource.data.creatorUid == request.auth.uid
+            || resource.data.joinerUid == request.auth.uid
+            || !('joinerUid' in resource.data));  // Room not yet joined — allow any auth'd user to claim it
+      allow delete: if request.auth != null
+        && resource.data.creatorUid == request.auth.uid;
+    }
+    match /artifacts/{appId}/global_transfers/{roomId}/{sub}/{doc} {
+      allow read, write: if request.auth != null
+        && (get(/databases/$(database)/documents/artifacts/$(appId)/global_transfers/$(roomId)).data.creatorUid == request.auth.uid
+            || get(/databases/$(database)/documents/artifacts/$(appId)/global_transfers/$(roomId)).data.joinerUid == request.auth.uid
+            || !('joinerUid' in get(/databases/$(database)/documents/artifacts/$(appId)/global_transfers/$(roomId)).data));
     }
 
     // --- Shared Notes (public encrypted blobs) ---

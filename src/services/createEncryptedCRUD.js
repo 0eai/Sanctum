@@ -87,20 +87,29 @@ export default function createEncryptedCRUD(collectionName, options = {}) {
         const q = query(getCol(userId, ctx), orderBy(field, dir));
 
         return onSnapshot(q, async (snapshot) => {
-            const data = await Promise.all(snapshot.docs.map(async (d) => {
-                const raw = d.data();
-                try {
-                    const decrypted = await decryptData(raw, key);
-                    if (transformDecrypted) {
-                        return { id: d.id, ...transformDecrypted(raw, decrypted, d.id) };
+            // Bound parallel decryption to avoid saturating the WebCrypto thread pool
+            const BATCH = 20;
+            const docs = snapshot.docs;
+            const results = [];
+            for (let i = 0; i < docs.length; i += BATCH) {
+                const chunk = await Promise.all(docs.slice(i, i + BATCH).map(async (d) => {
+                    const raw = d.data();
+                    try {
+                        const decrypted = await decryptData(raw, key);
+                        if (transformDecrypted) {
+                            return { id: d.id, ...transformDecrypted(raw, decrypted, d.id) };
+                        }
+                        return { id: d.id, ...raw, ...decrypted };
+                    } catch (error) {
+                        console.warn(`[${collectionName}] Decrypt failed for ${d.id}:`, error.message);
+                        return { id: d.id, _decryptError: true };
                     }
-                    return { id: d.id, ...raw, ...decrypted };
-                } catch (error) {
-                    console.warn(`[${collectionName}] Decrypt failed for ${d.id}:`, error.message);
-                    return { id: d.id, _decryptError: true };
-                }
-            }));
-            callback(data.filter(d => !d._decryptError));
+                }));
+                results.push(...chunk);
+            }
+            const failures = results.filter(d => d._decryptError).length;
+            // Second arg lets UI surfaces surface a "N items could not be decrypted" notice
+            callback(results.filter(d => !d._decryptError), { decryptFailures: failures });
         });
     };
 

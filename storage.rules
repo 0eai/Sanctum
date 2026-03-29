@@ -9,6 +9,17 @@ service firebase.storage {
     function isUnderSizeLimit() {
       return request.resource.size < 50 * 1024 * 1024;
     }
+    function isSharedDocMember(appId, shareId) {
+      return firestore.exists(/databases/(default)/documents/artifacts/$(appId)/shared_docs/$(shareId)/members/$(request.auth.uid));
+    }
+    function isSecureshareParticipant(appId, chatId) {
+      // DM chats: chatId = uid1_uid2 (sorted); check if requester's UID appears as uid1 or uid2
+      return chatId.matches(request.auth.uid + '_.*')
+          || chatId.matches('.*_' + request.auth.uid)
+          // Group chats: check memberUids array in Firestore group doc
+          || (firestore.exists(/databases/(default)/documents/artifacts/$(appId)/chats/$(chatId))
+              && request.auth.uid in firestore.get(/databases/(default)/documents/artifacts/$(appId)/chats/$(chatId)).data.memberUids);
+    }
 
     match /artifacts/{appId} {
       // 1. Personal Vaults (/users/{userId}/...)
@@ -26,23 +37,18 @@ service firebase.storage {
       }
 
       // 3. Shared Docs (/shared_docs/{shareId}/...)
-      // Files are AES-encrypted with per-doc keys — only collaborators with the
-      // RSA-wrapped key can decrypt. Storage-level read access is safe to broaden.
+      // Only collaborators listed in the Firestore members subcollection may access attachments.
       match /shared_docs/{shareId}/{allPaths=**} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && isUnderSizeLimit();
+        allow read: if isAuthenticated() && isSharedDocMember(appId, shareId);
+        allow write: if isAuthenticated() && isUnderSizeLimit() && isSharedDocMember(appId, shareId);
       }
 
       // 4. SecureShare Temporary Files (/secureshare/{chatId}/...)
+      // DM participants are encoded in the chatId (uid1_uid2); group participants via Firestore.
       match /secureshare/{chatId}/{allPaths=**} {
-        allow read, write: if isAuthenticated() && isUnderSizeLimit(); // Can add membership checks if secureshare chats are stored in firestore
+        allow read, write: if isAuthenticated() && isUnderSizeLimit() && isSecureshareParticipant(appId, chatId);
       }
 
-      // 5. Legacy Generic Modules (Fallback for old files only)
-      match /{folder}/{allPaths=**} {
-        allow read: if isAuthenticated() && folder in ['misc', 'notes', 'markdown', 'research', 'tasks', 'bookmarks', 'checklists'];
-        allow write: if isAuthenticated() && isUnderSizeLimit() && folder in ['misc', 'notes', 'markdown', 'research', 'tasks', 'bookmarks', 'checklists'];
-      }
     }
 
     match /{allPaths=**} {

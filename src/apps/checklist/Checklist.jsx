@@ -329,7 +329,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       <div className="max-w-3xl mx-auto">
         {showOptions && (
           <div className="mb-3 animate-in slide-in-from-bottom-2 fade-in bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col sm:flex-row gap-2">
-            <div className="flex-1 w-full"><label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Due Date</label><input type="datetime-local" value={itemDueDate} onChange={(e) => setItemDueDate(e.target.value)} className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4]" /></div>
+            <div className="flex-1 w-full"><label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Due Date</label><input type="datetime-local" value={itemDueDate ? itemDueDate.slice(0, 16) : ''} onChange={(e) => setItemDueDate(e.target.value)} className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4]" /></div>
             <div className="flex-1 w-full"><label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Repeat</label><select value={itemRepeatFreq} onChange={(e) => setItemRepeatFreq(e.target.value)} className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-[#4285f4]"><option value="none">No Repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
           </div>
         )}
@@ -453,7 +453,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <input
                 name="dueDate"
                 type="datetime-local"
-                value={formDueDate}
+                value={formDueDate ? formDueDate.slice(0, 16) : ''}
                 onChange={(e) => setFormDueDate(e.target.value)}
                 className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none"
               />
@@ -494,7 +494,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <input
                 name="dueDate"
                 type="datetime-local"
-                value={formDueDate}
+                value={formDueDate ? formDueDate.slice(0, 16) : ''}
                 onChange={(e) => setFormDueDate(e.target.value)}
                 className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none"
               />

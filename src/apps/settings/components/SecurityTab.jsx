@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { auth } from '../../../lib/firebase';
 import { listenToActivityLog } from '../../../services/activityLog';
-import { exportRecoveryKey } from '../services/settings';
+import { exportRecoveryKey, fetchLockSettings, saveLockSettings } from '../services/settings';
 import { Button } from '../../../components/ui/Button';
 
 const AUTO_LOCK_OPTIONS = [
@@ -62,7 +62,7 @@ const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false, bad
     );
 };
 
-const SecurityTab = ({ user, setMessage }) => {
+const SecurityTab = ({ user, cryptoKey, setMessage }) => {
     const [autoLock, setAutoLock] = useState(() => {
         const saved = localStorage.getItem('sanctum_autolock');
         return saved ? parseInt(saved) : 60;
@@ -75,8 +75,26 @@ const SecurityTab = ({ user, setMessage }) => {
 
     // Recovery Key State
     const [recoveryPasskey, setRecoveryPasskey] = useState('');
+    const [recoveryPassphrase, setRecoveryPassphrase] = useState('');
     const [recoveryKeyString, setRecoveryKeyString] = useState(null);
     const [isExporting, setIsExporting] = useState(false);
+    const clearTimerRef = React.useRef(null);
+
+    // Sync lock settings from Firestore on mount (cross-device persistence)
+    useEffect(() => {
+        if (!user?.uid || !cryptoKey) return;
+        fetchLockSettings(user.uid, cryptoKey).then(saved => {
+            if (!saved) return;
+            if (saved.autoLock !== undefined) {
+                setAutoLock(saved.autoLock);
+                localStorage.setItem('sanctum_autolock', saved.autoLock.toString());
+            }
+            if (saved.lockOnHidden !== undefined) {
+                setLockOnHidden(saved.lockOnHidden);
+                localStorage.setItem('sanctum_lock_on_hidden', saved.lockOnHidden.toString());
+            }
+        });
+    }, [user?.uid, cryptoKey]);
 
     // Session duration timer
     useEffect(() => {
@@ -94,12 +112,13 @@ const SecurityTab = ({ user, setMessage }) => {
     // Real-time activity log listener
     useEffect(() => {
         if (!user?.uid) return;
-        return listenToActivityLog(user.uid, setActivityLog);
-    }, [user?.uid]);
+        return listenToActivityLog(user.uid, setActivityLog, 30, cryptoKey);
+    }, [user?.uid, cryptoKey]);
 
     const handleAutoLockChange = (value) => {
         setAutoLock(value);
         localStorage.setItem('sanctum_autolock', value.toString());
+        saveLockSettings(user.uid, cryptoKey, { autoLock: value, lockOnHidden }).catch(() => {});
         const label = AUTO_LOCK_OPTIONS.find(o => o.value === value)?.label;
         setMessage?.({ type: 'success', text: `Auto-lock set to ${label}.` });
     };
@@ -108,6 +127,7 @@ const SecurityTab = ({ user, setMessage }) => {
         const newValue = !lockOnHidden;
         setLockOnHidden(newValue);
         localStorage.setItem('sanctum_lock_on_hidden', newValue.toString());
+        saveLockSettings(user.uid, cryptoKey, { autoLock, lockOnHidden: newValue }).catch(() => {});
         setMessage?.({ type: 'success', text: `Lock when hidden is now ${newValue ? 'enabled' : 'disabled'}.` });
     };
 
@@ -131,12 +151,20 @@ const SecurityTab = ({ user, setMessage }) => {
 
     const handleExportRecoveryKey = async (e) => {
         e.preventDefault();
+        if (recoveryPassphrase.length < 8) {
+            setMessage?.({ type: 'danger', text: 'Recovery passphrase must be at least 8 characters.' });
+            return;
+        }
         setIsExporting(true);
         try {
-            const keyStr = await exportRecoveryKey(user.uid, recoveryPasskey);
+            const keyStr = await exportRecoveryKey(user.uid, recoveryPasskey, recoveryPassphrase);
             setRecoveryKeyString(keyStr);
             setRecoveryPasskey('');
-            setMessage?.({ type: 'success', text: 'Recovery key generated successfully. Keep it safe!' });
+            setRecoveryPassphrase('');
+            setMessage?.({ type: 'success', text: 'Recovery key generated. Store it securely — it expires from view in 60 seconds.' });
+
+            // MED-33: auto-clear after 60 seconds
+            clearTimerRef.current = setTimeout(() => setRecoveryKeyString(null), 60000);
         } catch (error) {
             setMessage?.({ type: 'danger', text: error.message || 'Incorrect passkey.' });
         } finally {
@@ -150,6 +178,14 @@ const SecurityTab = ({ user, setMessage }) => {
             setMessage?.({ type: 'success', text: 'Recovery key copied to clipboard.' });
         }
     };
+
+    const dismissRecoveryKey = () => {
+        clearTimeout(clearTimerRef.current);
+        setRecoveryKeyString(null);
+    };
+
+    // Clear auto-clear timer on unmount
+    React.useEffect(() => () => clearTimeout(clearTimerRef.current), []);
 
     return (
         <div className="space-y-4">
@@ -223,7 +259,7 @@ const SecurityTab = ({ user, setMessage }) => {
                     <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-xs mb-4 flex gap-2 items-start border border-yellow-200">
                         <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                         <p>
-                            Your recovery key allows exactly ONE complete bypass of your passkey to restore access to your vault if forgotten. <strong>Store this string securely!</strong> Anyone with this string can read your data.
+                            Your recovery key is encrypted with a separate recovery passphrase. Both are required to restore your vault. <strong>Store the key and passphrase in separate secure locations.</strong> This view clears automatically after 60 seconds.
                         </p>
                     </div>
 
@@ -233,17 +269,26 @@ const SecurityTab = ({ user, setMessage }) => {
                                 type="password"
                                 value={recoveryPasskey}
                                 onChange={(e) => setRecoveryPasskey(e.target.value)}
-                                placeholder="Enter current passkey to decrypt..."
+                                placeholder="Current vault passkey..."
                                 className="w-full p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#4285f4] focus:border-transparent transition-all"
                                 required
                             />
+                            <input
+                                type="password"
+                                value={recoveryPassphrase}
+                                onChange={(e) => setRecoveryPassphrase(e.target.value)}
+                                placeholder="Recovery key passphrase (min 8 chars)..."
+                                className="w-full p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#4285f4] focus:border-transparent transition-all"
+                                required
+                                minLength={8}
+                            />
                             <Button type="submit" disabled={isExporting} className="w-full">
-                                {isExporting ? 'Decrypting...' : 'Generate Recovery Key'}
+                                {isExporting ? 'Encrypting...' : 'Generate Recovery Key'}
                             </Button>
                         </form>
                     ) : (
                         <div className="flex flex-col gap-3">
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Your Master Recovery Key</label>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Your Encrypted Recovery Key</label>
                             <textarea
                                 readOnly
                                 value={recoveryKeyString}
@@ -254,7 +299,7 @@ const SecurityTab = ({ user, setMessage }) => {
                                 <Button onClick={copyRecoveryKey} className="flex-1 flex items-center justify-center gap-2">
                                     <FileText size={16} /> Copy to Clipboard
                                 </Button>
-                                <Button variant="secondary" onClick={() => setRecoveryKeyString(null)}>
+                                <Button variant="secondary" onClick={dismissRecoveryKey}>
                                     Done
                                 </Button>
                             </div>

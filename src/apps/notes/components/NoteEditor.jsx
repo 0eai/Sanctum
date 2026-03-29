@@ -199,7 +199,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                         <input
                                             type="datetime-local"
                                             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                            value={data.dueDate}
+                                            value={data.dueDate ? data.dueDate.slice(0, 16) : ''}
                                             onChange={(e) => setData(s => ({ ...s, dueDate: e.target.value }))}
                                         />
                                         <button onClick={(e) => { e.stopPropagation(); setData(s => ({ ...s, dueDate: null, repeat: 'none' })) }} className="hover:text-red-500 z-20 relative"><X size={12} /></button>

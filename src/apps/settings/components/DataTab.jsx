@@ -235,6 +235,10 @@ const DataTab = ({ user, cryptoKey, setLoading, setMessage }) => {
                 <div className="flex items-center gap-2 mb-4 text-gray-800 font-bold border-b border-gray-100 pb-2">
                     <Database size={18} className="text-[#4285f4]" /> Full Backup & Restore
                 </div>
+                <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-3 mb-3 flex gap-2 items-start text-xs">
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    <span>Exported files contain your <strong>decrypted plaintext data</strong>. Store them in an encrypted location and never share them unprotected.</span>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                     <Button onClick={() => handleExport()} variant="secondary" className="flex flex-col items-center py-4 h-auto gap-2 min-h-[56px]">
                         <Download size={24} /> <span>Export All Data</span>

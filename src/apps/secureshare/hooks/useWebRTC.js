@@ -92,7 +92,6 @@ export const useWebRTC = (currentUid, cryptoKey) => {
             const ecdhWrapped = await encryptData({ key: sessionKeyJsonText }, sharedSecret);
 
             wrappedKey = {
-                ephemeralPublicKey: Math.random().toString(36), // Hack to serialize
                 ephemeralPublicKeyBase64: window.btoa(String.fromCharCode(...new Uint8Array(exportedEphemeralPub))),
                 encryptedKey: ecdhWrapped
             };

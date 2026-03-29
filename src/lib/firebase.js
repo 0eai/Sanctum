@@ -29,12 +29,17 @@ export const storage = getStorage(app);
 export const functions = getFunctions(app);
 export const rtdb = getDatabase(app, import.meta.env.VITE_FIREBASE_DATABASE_URL);
 
-// Initialize Firebase App Check if a ReCAPTCHA site key is provided
-if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
+// Initialize Firebase App Check — required in production, optional in dev
+const isProd = import.meta.env.PROD;
+const recaptchaKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
+
+if (recaptchaKey) {
   initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
+    provider: new ReCaptchaV3Provider(recaptchaKey),
     isTokenAutoRefreshEnabled: true
   });
+} else if (isProd) {
+  console.error('VITE_RECAPTCHA_SITE_KEY is not set. App Check is disabled in production — shared notes and public endpoints are unprotected.');
 }
 
 // Helper for dynamic App ID

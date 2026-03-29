@@ -25,7 +25,7 @@ const formatLastActive = (timestamp) => {
     return `${days} days ago`;
 };
 
-const DevicesTab = ({ user, setMessage }) => {
+const DevicesTab = ({ user, cryptoKey, setMessage }) => {
     const [devices, setDevices] = useState([]);
     const [currentDeviceId, setCurrentDeviceId] = useState(null);
     const [expandedId, setExpandedId] = useState(null);
@@ -38,8 +38,8 @@ const DevicesTab = ({ user, setMessage }) => {
         return listenToDevices(user.uid, (deviceList, currentId) => {
             setDevices(deviceList);
             setCurrentDeviceId(currentId);
-        });
-    }, [user?.uid]);
+        }, cryptoKey);
+    }, [user?.uid, cryptoKey]);
 
     const handleRemoveDevice = async (deviceId, deviceName) => {
         if (!window.confirm(`Sign out "${deviceName}"? That device will need to re-authenticate.`)) return;

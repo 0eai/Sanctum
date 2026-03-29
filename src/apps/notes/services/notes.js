@@ -222,7 +222,9 @@ export const rescheduleNote = async (userId, cryptoKey, note, ctx = null) => {
 
 // --- Sharing ---
 
-export const shareNote = async (userId, cryptoKey, note, expireMinutes = null) => {
+const DEFAULT_EXPIRE_MINUTES = 30 * 24 * 60; // 30 days
+
+export const shareNote = async (userId, cryptoKey, note, expireMinutes = DEFAULT_EXPIRE_MINUTES) => {
   const shareKey = await generateMasterKey();
   const payload = {
     title: note.title,
@@ -233,11 +235,8 @@ export const shareNote = async (userId, cryptoKey, note, expireMinutes = null) =
   };
   const encryptedBlob = await encryptData(payload, shareKey);
 
-  let expiresAt = null;
-  if (expireMinutes) {
-    expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + expireMinutes);
-  }
+  const expiresAt = new Date();
+  expiresAt.setMinutes(expiresAt.getMinutes() + (expireMinutes ?? DEFAULT_EXPIRE_MINUTES));
 
   const docRef = await addDoc(collection(db, 'shared_notes'), { data: encryptedBlob, createdBy: userId, createdAt: serverTimestamp(), expiresAt });
   const keyString = await keyToUrlString(shareKey);

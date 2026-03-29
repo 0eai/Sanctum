@@ -1,35 +1,37 @@
 // src/services/vault.js
-import { 
-  doc, getDoc, setDoc, deleteField, collection, getDocs, writeBatch, query 
+import {
+  doc, getDoc, setDoc, deleteField, collection, getDocs, query
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
-import { 
-  deriveKeyFromPasskey, generateSalt, generateMasterKey, 
-  exportKey, importMasterKey, encryptData, decryptData 
+import {
+  deriveKeyFromPasskey, deriveKeyArgon2id, generateSalt, generateMasterKey,
+  exportKey, importMasterKey, encryptData, decryptData
 } from '../lib/crypto';
+import { deleteInChunks } from '../lib/firestore';
+import { APP_COLLECTIONS } from '../lib/appCollections';
 
 // Service: Hard Reset the Vault
 export const resetUserVault = async (userId) => {
-  const appCollections = ['notes', 'bookmarks', 'checklists', 'counters', 'tasks', 'passwords', 'banking', 'finance'];
-  
-  // 1. Batch delete sub-collections
+  const appCollections = APP_COLLECTIONS;
+
+  // 1. Batch delete all app sub-collections (chunked for >500 docs)
   for (const colName of appCollections) {
-    const q = query(collection(db, 'artifacts', appId, 'users', userId, colName));
-    const snapshot = await getDocs(q);
-    const batch = writeBatch(db);
-    
+    const snapshot = await getDocs(query(collection(db, 'artifacts', appId, 'users', userId, colName)));
     if (!snapshot.empty) {
-      snapshot.forEach((doc) => batch.delete(doc.ref));
-      await batch.commit();
+      await deleteInChunks(snapshot.docs.map(d => d.ref));
     }
   }
 
-  // 2. Reset User Doc
+  // 2. Reset User Doc (clear encryption keys)
   const userDocRef = doc(db, 'users', userId);
-  await setDoc(userDocRef, { 
-    encryptionSalt: deleteField(), 
-    encryptedMasterKey: deleteField(), 
-    encryptedValidator: deleteField() 
+  await setDoc(userDocRef, {
+    encryptionSalt: deleteField(),
+    encryptedMasterKey: deleteField(),
+    encryptedValidator: deleteField(),
+    kdf: deleteField(),
+    iterations: deleteField(),
+    failedAttempts: deleteField(),
+    lockoutUntil: deleteField(),
   }, { merge: true });
 };
 
@@ -46,30 +48,34 @@ export const attemptVaultUnlock = async (userId, password) => {
   if (!salt || !encryptedBlob) {
     salt = generateSalt();
     masterKey = await generateMasterKey();
-    const wrapperKey = await deriveKeyFromPasskey(password, salt);
+    const wrapperKey = await deriveKeyArgon2id(password, salt);
     const masterKeyJWK = await exportKey(masterKey);
-    
+
     const encryptedMasterKey = await encryptData(masterKeyJWK, wrapperKey);
     const validationPayload = await encryptData({ check: "VALID" }, masterKey);
-    
-    await setDoc(userDocRef, { 
+
+    await setDoc(userDocRef, {
         encryptionSalt: salt,
-        encryptedMasterKey: encryptedMasterKey, 
-        encryptedValidator: validationPayload 
+        encryptedMasterKey: encryptedMasterKey,
+        encryptedValidator: validationPayload,
+        kdf: "argon2id"
     }, { merge: true });
 
     return { status: 'success', masterKey, isNew: true };
-  } 
+  }
 
   // B. UNLOCK FLOW (Existing Vault)
   try {
-    const wrapperKey = await deriveKeyFromPasskey(password, salt);
+    const kdf = userData.kdf || "pbkdf2";
+    const wrapperKey = kdf === "argon2id"
+      ? await deriveKeyArgon2id(password, salt)
+      : await deriveKeyFromPasskey(password, salt, userData.iterations);
     const masterKeyJWK = await decryptData(encryptedBlob, wrapperKey);
-    
+
     if (!masterKeyJWK) throw new Error("WRONG_PASSWORD");
-    
+
     masterKey = await importMasterKey(masterKeyJWK);
-    
+
     if (userData.encryptedValidator) {
         const check = await decryptData(userData.encryptedValidator, masterKey);
         if (!check || check.check !== "VALID") throw new Error("INTEGRITY_FAIL");

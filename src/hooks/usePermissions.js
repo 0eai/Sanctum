@@ -7,9 +7,11 @@ export const usePermissions = (item) => {
         return { isOwner: false, canDelete: false, canShare: false };
     }
 
-    // Determine ownership: if ownerId is explicitly set, check it;
-    // otherwise, for legacy items without an ownerId created by the user, assume ownership.
-    const isOwner = item.ownerId === user.uid || !item.ownerId;
+    // Shared items must have an explicit ownerUid match — never fall back to "no ownerId" logic
+    // since a shared item always has ownerUid set and we must not grant ownership to non-owners.
+    const isOwner = item.isShared
+        ? item.ownerUid === user.uid
+        : (item.ownerId === user.uid || !item.ownerId);
 
     return {
         isOwner,

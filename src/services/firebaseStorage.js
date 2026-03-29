@@ -8,6 +8,9 @@ import { encryptData, decryptData } from '../lib/crypto';
 // Helper to determine the actual storage path to use.
 // If fileId/scope contains a slash, it's treated as a relative scoped path.
 const getStoragePath = (fileIdOrScope, appName) => {
+    if (fileIdOrScope && /(?:^|\/)\.\.(?:\/|$)/.test(fileIdOrScope)) {
+        throw new Error('Invalid file path: path traversal detected');
+    }
     if (!fileIdOrScope) return `artifacts/${appId}/${appName}/unknown`;
     if (fileIdOrScope.includes('/')) {
         // e.g., workspaces/123/notes/uuid-1234

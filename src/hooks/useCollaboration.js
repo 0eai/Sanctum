@@ -36,6 +36,8 @@ export default function useCollaboration(user, cryptoKey, appType) {
     const [sharedDocs, setSharedDocs] = useState([]);
     const [isWorkspacePanelOpen, setIsWorkspacePanelOpen] = useState(false);
     const [collaborateModalItem, setCollaborateModalItem] = useState(null);
+    const [isNamingWorkspace, setIsNamingWorkspace] = useState(false);
+    const [workspaceNameDraft, setWorkspaceNameDraft] = useState('');
 
     // --- Computed ---
     const ctx = useMemo(
@@ -67,13 +69,9 @@ export default function useCollaboration(user, cryptoKey, appType) {
         }
     }, [workspaces, activeWorkspace]);
 
-    // 4. Fetch workspace AES key when workspace changes
+    // 4. Fetch workspace AES key when workspace ID changes (not object reference)
     useEffect(() => {
-        if (!activeWorkspace) {
-            setWorkspaceKey(null);
-            return;
-        }
-        if (!privateKey) {
+        if (!activeWorkspace?.id || !privateKey) {
             setWorkspaceKey(null);
             return;
         }
@@ -82,7 +80,7 @@ export default function useCollaboration(user, cryptoKey, appType) {
             if (isMounted) setWorkspaceKey(key);
         });
         return () => { isMounted = false; };
-    }, [activeWorkspace, user, privateKey]);
+    }, [activeWorkspace?.id, user, privateKey]);
 
     // 5. Listen to shared docs (only when not in a workspace)
     useEffect(() => {
@@ -123,16 +121,21 @@ export default function useCollaboration(user, cryptoKey, appType) {
 
     // --- Pre-built props for UI components ---
 
+    const confirmNewWorkspace = useCallback(async () => {
+        const name = workspaceNameDraft.trim();
+        if (!name) return;
+        setIsNamingWorkspace(false);
+        setWorkspaceNameDraft('');
+        await createNewWorkspace(name);
+    }, [workspaceNameDraft, createNewWorkspace]);
+
     /** Spread onto <WorkspaceSwitcher> */
     const switcherProps = useMemo(() => ({
         workspaces,
         activeWorkspace,
         onSelect: switchWorkspace,
-        onCreateNew: async () => {
-            const name = prompt("Workspace Name:");
-            if (name) await createNewWorkspace(name);
-        }
-    }), [workspaces, activeWorkspace, switchWorkspace, createNewWorkspace]);
+        onCreateNew: () => { setWorkspaceNameDraft(''); setIsNamingWorkspace(true); }
+    }), [workspaces, activeWorkspace, switchWorkspace]);
 
     /** Spread onto <WorkspacePanel> (only render when activeWorkspace is truthy) */
     const workspacePanelProps = useMemo(() => ({
@@ -158,6 +161,11 @@ export default function useCollaboration(user, cryptoKey, appType) {
         isWorkspacePanelOpen,
         setIsWorkspacePanelOpen,
         collaborateModalItem,
+        isNamingWorkspace,
+        setIsNamingWorkspace,
+        workspaceNameDraft,
+        setWorkspaceNameDraft,
+        confirmNewWorkspace,
 
         // Actions
         switchWorkspace,

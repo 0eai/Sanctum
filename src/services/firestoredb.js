@@ -2,23 +2,18 @@ import {
   collection, query, getDocs, writeBatch, doc, setDoc, deleteField, onSnapshot
 } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
+import { APP_COLLECTIONS, STATS_COLLECTIONS } from '../lib/appCollections';
+import { deleteInChunks } from '../lib/firestore';
 
 // Hard Reset: Deletes all user collections and resets keys
 export const resetUserVault = async (userId) => {
-  const appCollections = [
-    'notes', 'bookmarks', 'checklists', 'counters',
-    'tasks', 'passwords', 'banking', 'finance', 'reminders', 'authenticator'
-  ];
-
-  // 1. Delete all documents in sub-collections
-  for (const colName of appCollections) {
+  // 1. Delete all documents in sub-collections (chunked for >500 docs)
+  for (const colName of APP_COLLECTIONS) {
     const q = query(collection(db, 'artifacts', appId, 'users', userId, colName));
     const snapshot = await getDocs(q);
 
     if (!snapshot.empty) {
-      const batch = writeBatch(db);
-      snapshot.forEach((doc) => batch.delete(doc.ref));
-      await batch.commit();
+      await deleteInChunks(snapshot.docs.map(d => d.ref));
     }
   }
 
@@ -47,7 +42,7 @@ export const initializeUserKeys = async (userId, salt, encryptedMasterKey, encry
 
 // Listener for App Stats (Launcher)
 export const listenToAppStats = (userId, callback) => {
-  const cols = ['counters', 'checklists', 'tasks', 'passwords', 'banking', 'finance', 'reminders', 'authenticator'];
+  const cols = STATS_COLLECTIONS;
   const unsubs = cols.map(col =>
     onSnapshot(query(collection(db, 'artifacts', appId, 'users', userId, col)),
       snap => callback(col, snap.size))
