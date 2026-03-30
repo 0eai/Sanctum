@@ -97,8 +97,10 @@ export const saveTask = async (userId, cryptoKey, taskData, ctx = null) => {
     deadline: taskData.deadline || "",
     notes: taskData.notes || "",
     subtasks: taskData.subtasks || [],
+    tags: taskData.tags || [],
     sharedId: taskData.sharedId || null,
-    shareUrlKey: taskData.shareUrlKey || null
+    shareUrlKey: taskData.shareUrlKey || null,
+    collabShareId: taskData.collabShareId || null
   };
 
   const encrypted = await encryptData(payload, key);

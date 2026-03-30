@@ -1,5 +1,5 @@
 // src/components/ui/MarkdownViewer.jsx
-import React from "react";
+import React, { Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -7,8 +7,30 @@ import rehypeKatex from "rehype-katex";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import "katex/dist/katex.min.css";
 
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+// Dynamic import breaks the static import chain that causes Rollup TDZ crashes
+// (react-syntax-highlighter has circular ESM deps that confuse Rollup's module
+// initialization order). React.lazy ensures the library is only resolved after
+// all static modules have fully initialised.
+const LazySyntaxHighlighter = React.lazy(() =>
+  Promise.all([
+    import('react-syntax-highlighter').then(m => m.Prism),
+    // Import only the specific theme file to enable treeshaking (avoids bundling
+    // all ~100 Prism themes that ship in the top-level styles/prism index file)
+    import('react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus').then(m => m.default ?? m),
+  ]).then(([Prism, vscDarkPlus]) => ({
+    default: ({ language, children, ...props }) => (
+      <Prism
+        {...props}
+        style={vscDarkPlus}
+        language={language}
+        PreTag="div"
+        customStyle={{ margin: 0, padding: '1.25rem', backgroundColor: '#0d1117' }}
+      >
+        {children}
+      </Prism>
+    ),
+  }))
+);
 
 const MarkdownViewer = ({ content }) => {
   if (!content) {
@@ -100,17 +122,18 @@ const MarkdownViewer = ({ content }) => {
               const match = /language-(\w+)/.exec(className || "");
 
               if (match) {
+                const code = String(children).replace(/\n$/, "");
                 return (
                   <div className="rounded-lg overflow-hidden my-4 shadow-sm border border-gray-700/50">
-                    <SyntaxHighlighter
-                      {...props}
-                      style={vscDarkPlus}
-                      language={match[1]}
-                      PreTag="div"
-                      customStyle={{ margin: 0, padding: "1.25rem", backgroundColor: "#0d1117" }}
-                    >
-                      {String(children).replace(/\n$/, "")}
-                    </SyntaxHighlighter>
+                    <Suspense fallback={
+                      <pre className="bg-[#0d1117] text-gray-100 p-5 overflow-x-auto m-0">
+                        <code>{code}</code>
+                      </pre>
+                    }>
+                      <LazySyntaxHighlighter language={match[1]} {...props}>
+                        {code}
+                      </LazySyntaxHighlighter>
+                    </Suspense>
                   </div>
                 );
               }

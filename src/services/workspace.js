@@ -58,6 +58,7 @@ export const createWorkspace = async (name, ownerUid) => {
         name,
         createdBy: ownerUid,
         memberUids: [ownerUid],
+        viewerUids: [],
         createdAt: serverTimestamp()
     });
 
@@ -114,13 +115,23 @@ export const inviteMember = async (wsId, newUid, wsKey, role = 'editor') => {
         joinedAt: serverTimestamp()
     });
 
-    // Update memberUids array
+    // Update memberUids and viewerUids arrays
     const wsRef = doc(db, 'artifacts', appId, 'workspaces', wsId);
     const snap = await getDoc(wsRef);
     if (snap.exists()) {
         const existing = snap.data().memberUids || [];
+        const existingViewers = snap.data().viewerUids || [];
+        const updatePayload = {};
         if (!existing.includes(newUid)) {
-            await updateDoc(wsRef, { memberUids: [...existing, newUid] });
+            updatePayload.memberUids = [...existing, newUid];
+        }
+        if (role === 'viewer' && !existingViewers.includes(newUid)) {
+            updatePayload.viewerUids = [...existingViewers, newUid];
+        } else if (role !== 'viewer' && existingViewers.includes(newUid)) {
+            updatePayload.viewerUids = existingViewers.filter(u => u !== newUid);
+        }
+        if (Object.keys(updatePayload).length > 0) {
+            await updateDoc(wsRef, updatePayload);
         }
     }
 };
@@ -140,7 +151,8 @@ export const removeMember = async (wsId, uid) => {
     if (!snap.exists()) return null;
 
     const remaining = (snap.data().memberUids || []).filter(u => u !== uid);
-    await updateDoc(wsRef, { memberUids: remaining });
+    const remainingViewers = (snap.data().viewerUids || []).filter(u => u !== uid);
+    await updateDoc(wsRef, { memberUids: remaining, viewerUids: remainingViewers });
 
     if (remaining.length === 0) return null;
 

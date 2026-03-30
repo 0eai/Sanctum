@@ -1,9 +1,9 @@
 // src/apps/checklist/Checklist.jsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, Trash2, CheckSquare, Check, X, Plus, AlertCircle,
+  Trash2, CheckSquare, Check, X, Plus, AlertCircle,
   Bell, Clock, RotateCcw, Edit2, RefreshCw, Settings, MoveUp, MoveDown,
-  Globe, Link, CloudOff, Users
+  Users, Star
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
@@ -13,10 +13,9 @@ import { formatDate } from '../../lib/dateUtils';
 import {
   listenToChecklists, listenToItems, createChecklist,
   updateChecklistEntity, addChecklistItem, toggleChecklistItem,
-  resetChecklist, deleteChecklistEntity, exportChecklists,
-  importChecklists, reorderList, reorderItem, fetchChecklistItemsForShare
+  resetChecklist, deleteChecklistEntity, reorderList, reorderItem,
+  toggleChecklistPin
 } from './services/checklist';
-import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
 
 import useCollaboration from '../../hooks/useCollaboration';
 
@@ -47,10 +46,6 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [formDueDate, setFormDueDate] = useState("");
   const [formRepeat, setFormRepeat] = useState("none");
 
-  // State for loading indicator during import/export
-  const [processing, setProcessing] = useState(false);
-  const [shareModal, setShareModal] = useState(null);
-  const [shareTTL, setShareTTL] = useState(0);
 
   // Collaboration (all state + effects handled by the hook)
   const collab = useCollaboration(user, cryptoKey, 'checklist');
@@ -60,7 +55,6 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const allAvailableLists = useMemo(() => [...lists, ...sharedDocs], [lists, sharedDocs]);
 
   // --- URL-Driven State ---
-  const isSettingsOpen = route.query?.modal === 'settings';
   const currentBasePath = activeList ? `#checklist/list/${activeList.id}` : `#checklist`;
 
   // --- Helpers ---
@@ -238,33 +232,12 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     }
   };
 
-  // --- Sharing Handlers ---
-  const handleShareChecklist = async (list) => {
-    try {
-      const fetchedItems = await fetchChecklistItemsForShare(user.uid, list.id, cryptoKey);
-      const payload = {
-        sharedType: 'checklist',
-        title: list.title,
-        items: fetchedItems,
-        progress: list.itemCount > 0 ? Math.round(((list.completedCount || 0) / list.itemCount) * 100) : 0,
-        date: new Date().toISOString()
-      };
-      const { sharedId, shareUrlKey } = await shareItem(payload, shareTTL);
-      const url = buildShareUrl(sharedId, shareUrlKey);
-      setShareModal({ isOpen: true, list, link: url, sharedId, shareUrlKey });
-    } catch (e) {
-      console.error(e);
-      alert('Sharing failed.');
-    }
-  };
-
-  const handleStopShareChecklist = async () => {
-    if (!shareModal?.sharedId) return;
-    await unshareItem(shareModal.sharedId);
-    setShareModal(null);
-  };
-
-  const filteredLists = lists.filter(l => l.title.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredLists = lists
+    .filter(l => l.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
   const filteredSharedDocs = sharedDocs.filter(d => d.title.toLowerCase().includes(searchQuery.toLowerCase()));
 
   // --- Dynamic headerConfig ---
@@ -307,7 +280,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 <Edit2 size={16} />
               </button>
             )}
-            {activeList.isSharedDoc && !ctx && (
+            {!activeList.isSharedDoc && !ctx && (
               <button onClick={() => collab.openCollaborateModal(activeList)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
                 <Users size={16} />
               </button>
@@ -360,6 +333,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <SharedDocsView
                 sharedDocs={filteredSharedDocs}
                 appType="checklist"
+                currentUserUid={user.uid}
                 onOpenDoc={(doc) => navigate(`#checklist/list/${doc.id}`)}
               />
             </div>
@@ -390,7 +364,11 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    {isOwner && <button onClick={(e) => { e.stopPropagation(); handleShareChecklist(list); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50" title="Share"><Globe size={16} /></button>}
+                    {isOwner && (
+                      <button onClick={(e) => { e.stopPropagation(); toggleChecklistPin(user.uid, list.id, list.isPinned, ctx); }} className={`p-2 rounded-full hover:bg-gray-50 ${list.isPinned ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}`}>
+                        <Star size={16} fill={list.isPinned ? 'currentColor' : 'none'} />
+                      </button>
+                    )}
                     <button onClick={(e) => { e.stopPropagation(); openEditModal({ type: 'list', ...list }); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50"><Edit2 size={16} /></button>
                     {isOwner && <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ type: 'list', data: list }); }} className="p-2 text-gray-300 hover:text-red-500 rounded-full hover:bg-gray-50"><Trash2 size={16} /></button>}
                   </div>
@@ -526,33 +504,6 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </div>
       </Modal>
 
-      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Checklist" zIndex={100}>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-            {shareModal?.link && <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>}
-            <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            {!shareModal?.link && (
-              <select value={shareTTL} onChange={(e) => setShareTTL(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 mb-2">
-                <option value={0}>Never expire</option>
-                <option value={60}>Expire in 1 Hour</option>
-                <option value={1440}>Expire in 1 Day</option>
-                <option value={10080}>Expire in 7 Days</option>
-              </select>
-            )}
-            {shareModal?.link ? (
-              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
-            ) : (
-              <Button onClick={() => handleShareChecklist(shareModal.list)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
-            )}
-            {shareModal?.link && (
-              <Button variant="danger" onClick={handleStopShareChecklist} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
-            )}
-          </div>
-        </div>
-      </Modal>
-
       <WorkspacePanel
         {...collab.workspacePanelProps}
         onDelete={async () => {
@@ -567,24 +518,36 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         docId={collab.collaborateModalItem?.id}
         docTitle={collab.collaborateModalItem?.title || 'Untitled'}
         fullDocData={collab.collaborateModalItem}
-        shareId={collab.collaborateModalItem?.sharedId || null}
+        shareId={collab.collaborateModalItem?.collabShareId || null}
         docKey={collab.collaborateModalItem?.docKey || null}
+        publicSharedId={collab.collaborateModalItem?.sharedId || null}
+        publicShareUrlKey={collab.collaborateModalItem?.shareUrlKey || null}
         appType="checklist"
         currentUser={user}
         privateKey={privateKey}
         cryptoKey={cryptoKey}
         onShareCreated={async (newShareId) => {
           if (collab.collaborateModalItem) {
-            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: newShareId };
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, collabShareId: newShareId };
             await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
-            setLists(lists.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
           }
         }}
         onShareDeleted={async () => {
           if (collab.collaborateModalItem) {
-            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: null };
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, collabShareId: null };
             await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
-            setLists(lists.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+          }
+        }}
+        onPublicLinkCreated={async (id, key) => {
+          if (collab.collaborateModalItem) {
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: id, shareUrlKey: key };
+            await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
+          }
+        }}
+        onPublicLinkRevoked={async () => {
+          if (collab.collaborateModalItem) {
+            const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, sharedId: null, shareUrlKey: null };
+            await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
           }
         }}
       />

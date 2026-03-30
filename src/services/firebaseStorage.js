@@ -103,6 +103,40 @@ export const downloadEncryptedFile = async (fileId, masterKey, accessToken, appN
     return URL.createObjectURL(decryptedBlob);
 };
 
+// Re-encrypts all Storage attachment files for an item in-place (same Storage path, new key).
+// Used when moving a document between Personal Vault and a workspace context.
+// If a file fails re-encryption it is skipped (logged) and the move continues.
+export const reEncryptStorageFilesForMove = async (item, sourceKey, destKey, appName) => {
+    const processPath = async (storagePath) => {
+        try {
+            const fileRef = ref(storage, storagePath);
+            const buf = await (await getBlob(fileRef)).arrayBuffer();
+            const iv = new Uint8Array(buf.slice(0, 12));
+            const plain = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv }, sourceKey, new Uint8Array(buf.slice(12)));
+            const newIv = crypto.getRandomValues(new Uint8Array(12));
+            const reEnc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: newIv }, destKey, plain);
+            const out = new Uint8Array(12 + reEnc.byteLength);
+            out.set(newIv);
+            out.set(new Uint8Array(reEnc), 12);
+            await uploadBytesResumable(
+                fileRef,
+                new Blob([out], { type: 'application/octet-stream' }),
+                { contentType: 'application/octet-stream' }
+            );
+        } catch (e) {
+            console.warn(`[reEncryptStorageFilesForMove] ${storagePath}:`, e);
+        }
+    };
+
+    const jobs = [];
+    for (const att of (item.attachments || [])) {
+        if (att.driveFileId) jobs.push(processPath(getStoragePath(att.driveFileId, appName)));
+    }
+    if (item.driveFileId) jobs.push(processPath(getStoragePath(item.driveFileId, appName)));
+    await Promise.all(jobs);
+};
+
 export const deleteFirebaseFile = async (fileId, appName = 'misc') => {
     if (!fileId) return;
     const storageRef = ref(storage, getStoragePath(fileId, appName));

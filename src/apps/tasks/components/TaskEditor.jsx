@@ -1,13 +1,14 @@
 // src/apps/tasks/components/TaskEditor.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChevronLeft, Star, Trash2, CheckSquare, Square, Clock, RotateCcw,
   AlertCircle, Plus, X, FileText, Move, Globe, Users
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useYjsCollab } from '../../../hooks/useYjsCollab';
 
-const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollaborate, readOnly }) => {
+const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollaborate, readOnly, cryptoKey, user }) => {
   const { canShare, canDelete } = usePermissions(task);
   const [data, setData] = useState({
     ...task,
@@ -15,8 +16,10 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
     deadline: task.deadline || '',
     repeat: task.repeat || 'none',
     subtasks: task.subtasks || [],
+    tags: task.tags || [],
     notes: task.notes || ''
   });
+  const [tagInput, setTagInput] = useState('');
 
   const reminderRef = useRef(null);
   const repeatRef = useRef(null);
@@ -51,12 +54,13 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
         deadline: task.deadline || '',
         repeat: task.repeat || 'none',
         subtasks: task.subtasks || [],
+        tags: task.tags || [],
         notes: task.notes || ''
       });
       setLastSavedHash(JSON.stringify({
         title: task.title || '', isPinned: task.isPinned || false, completed: task.completed || false,
         dueDate: task.dueDate || '', deadline: task.deadline || '', repeat: task.repeat || 'none',
-        subtasks: task.subtasks || [], notes: task.notes || ''
+        subtasks: task.subtasks || [], tags: task.tags || [], notes: task.notes || ''
       }));
     }
   }, [task?.id]);
@@ -73,6 +77,58 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
     }
   }, [task?.sharedId, task?.docKey, task?.memberUids?.length]);
 
+  // CRDT — active for shared tasks (sharedId set + at least one collaborator)
+  const crdtEnabled = !!task?.sharedId && !!task?.memberUids?.length;
+  const { ydocRef, ytextRef } = useYjsCollab({
+    shareId: task?.sharedId,
+    docKey:  cryptoKey,
+    uid:     user?.uid,
+    enabled: crdtEnabled,
+  });
+
+  // CRDT: mirror remote Y.Text changes → notes field
+  useEffect(() => {
+    const ytext = ytextRef.current;
+    if (!ytext || !crdtEnabled) return;
+    const observer = (_, tx) => {
+      if (tx.origin !== 'remote') return;
+      setData(prev => ({ ...prev, notes: ytext.toString() }));
+    };
+    ytext.observe(observer);
+    return () => ytext.unobserve(observer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crdtEnabled, ytextRef.current]);
+
+  // CRDT: flush notes to Firestore every 30 s for non-CRDT readers
+  useEffect(() => {
+    if (!crdtEnabled) return;
+    const id = setInterval(() => {
+      const notes = ytextRef.current?.toString();
+      if (notes !== undefined) onSave({ ...data, notes });
+    }, 30_000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crdtEnabled]);
+
+  // CRDT: apply minimal delta to Y.Doc on user edits to the notes textarea
+  const handleNotesChange = useCallback((newVal) => {
+    if (crdtEnabled && ytextRef.current && ydocRef.current) {
+      const ytext = ytextRef.current;
+      const old   = ytext.toString();
+      if (old !== newVal) {
+        let s = 0;
+        while (s < old.length && s < newVal.length && old[s] === newVal[s]) s++;
+        let eO = old.length, eN = newVal.length;
+        while (eO > s && eN > s && old[eO - 1] === newVal[eN - 1]) { eO--; eN--; }
+        ydocRef.current.transact(() => {
+          if (eO > s) ytext.delete(s, eO - s);
+          if (eN > s) ytext.insert(s, newVal.slice(s, eN));
+        });
+      }
+    }
+    setData(prev => ({ ...prev, notes: newVal }));
+  }, [crdtEnabled, ytextRef, ydocRef]);
+
   const update = (patch) => {
     const newData = { ...data, ...patch };
     setData(newData);
@@ -86,12 +142,15 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
       const currentPayloadObj = {
         title: debouncedData.title, isPinned: debouncedData.isPinned, completed: debouncedData.completed,
         dueDate: debouncedData.dueDate, deadline: debouncedData.deadline, repeat: debouncedData.repeat,
-        subtasks: debouncedData.subtasks, notes: debouncedData.notes
+        subtasks: debouncedData.subtasks, tags: debouncedData.tags, notes: debouncedData.notes
       };
       const currentHash = JSON.stringify(currentPayloadObj);
 
       if (currentHash !== lastSavedHash) {
-        const savePayload = { ...debouncedData };
+        // When CRDT is active, suppress notes from auto-save — 30 s flush handles it
+        const savePayload = crdtEnabled
+          ? { ...debouncedData, notes: undefined }
+          : { ...debouncedData };
         Promise.resolve(onSave(savePayload)).then(() => {
           setLastSavedHash(currentHash);
         }).catch(e => console.error("Auto-save failed", e));
@@ -290,6 +349,35 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
               </div>
             </div>
 
+            <div className="flex flex-wrap gap-1.5 items-center pl-10">
+              {data.tags?.map(tag => (
+                <span key={tag} className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">
+                  #{tag}
+                  {!readOnly && (
+                    <button onClick={() => update({ tags: data.tags.filter(t => t !== tag) })} className="hover:text-red-500 ml-0.5">
+                      <X size={10} />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {!readOnly && (
+                <input
+                  value={tagInput}
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
+                      e.preventDefault();
+                      const tag = tagInput.trim().toLowerCase().replace(/\s+/g, '-');
+                      if (!data.tags?.includes(tag)) update({ tags: [...(data.tags || []), tag] });
+                      setTagInput('');
+                    }
+                  }}
+                  placeholder="Add tag..."
+                  className="text-xs outline-none bg-transparent text-gray-400 placeholder-gray-300 w-20 min-w-0"
+                />
+              )}
+            </div>
+
             <div className="flex flex-col gap-2 pl-2 md:pl-10">
               {data.subtasks && data.subtasks.map((sub, i) => (
                 <div key={sub.id} className="flex items-start gap-2 group w-full">
@@ -363,7 +451,7 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
                 ref={notesRef}
                 value={data.notes}
                 disabled={readOnly}
-                onChange={(e) => update({ notes: e.target.value })}
+                onChange={(e) => handleNotesChange(e.target.value)}
                 placeholder="Add details..."
                 className="w-full outline-none resize-none text-gray-700 leading-relaxed text-base bg-transparent pb-32 overflow-hidden disabled:opacity-80"
                 style={{ minHeight: '40vh' }}

@@ -72,8 +72,14 @@ service cloud.firestore {
     // --- Per-Document Collaboration ---
     match /artifacts/{appId}/shared_docs/{shareId} {
       allow create: if request.auth != null;
-      allow read, update: if request.auth != null
+      allow read: if request.auth != null
         && request.auth.uid in resource.data.memberUids;
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.memberUids
+        && (
+          !('viewerUids' in resource.data)
+          || !(request.auth.uid in resource.data.viewerUids)
+        );
       allow delete: if request.auth != null
         && resource.data.ownerUid == request.auth.uid;
 
@@ -97,8 +103,14 @@ service cloud.firestore {
       }
 
       match /{collectionName}/{document=**} {
-        allow read, write: if request.auth != null
+        allow read: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/workspaces/$(wsId)).data.memberUids;
+        allow write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/workspaces/$(wsId)).data.memberUids
+          && (
+            !('viewerUids' in get(/databases/$(database)/documents/artifacts/$(appId)/workspaces/$(wsId)).data)
+            || !(request.auth.uid in get(/databases/$(database)/documents/artifacts/$(appId)/workspaces/$(wsId)).data.viewerUids)
+          );
       }
     }
   }

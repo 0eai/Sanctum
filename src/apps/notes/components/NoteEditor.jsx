@@ -1,8 +1,8 @@
 // src/apps/notes/components/NoteEditor.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     ChevronLeft, Bell, Share2, Star, X, Tag, Paperclip, FileText,
-    Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer, Users
+    Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer, Users, Download, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
@@ -10,9 +10,26 @@ import FileViewer from '../../../components/ui/FileViewer';
 import { uploadEncryptedFile as uploadToFirebase, downloadEncryptedFile as downloadFromFirebase } from '../../../services/firebaseStorage';
 import TextareaAutosize from 'react-textarea-autosize';
 import { usePermissions } from '../../../hooks/usePermissions';
+import usePresence from '../../../hooks/usePresence';
+import PresenceDots from '../../../components/ui/PresenceDots';
+import { useYjsCollab } from '../../../hooks/useYjsCollab';
 
 const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate, onCollaborate, readOnly }) => {
     const { canShare } = usePermissions(note);
+    const presenceUsers = usePresence({
+        shareId: note?.shareId || null,
+        uid: user?.uid,
+        enabled: !!note?.isSharedDoc,
+    });
+
+    // CRDT — only active for shared docs with a collabShareId
+    const crdtEnabled = !!note?.isSharedDoc && !!note?.collabShareId;
+    const { ydocRef, ytextRef } = useYjsCollab({
+        shareId: note?.collabShareId,
+        docKey:  cryptoKey,
+        uid:     user?.uid,
+        enabled: crdtEnabled,
+    });
     const [data, setData] = useState({
         title: '', content: '', tags: [], attachments: [], isPinned: false,
         dueDate: null, repeat: 'none', ...note
@@ -21,6 +38,23 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
     const [isTagInputVisible, setIsTagInputVisible] = useState(false);
     const [viewingAttachment, setViewingAttachment] = useState(null);
     const [lastSavedHash, setLastSavedHash] = useState(null);
+    const [remoteUpdateDetected, setRemoteUpdateDetected] = useState(false);
+    const baseVersionRef = useRef(note?.versionId ?? 0);
+
+    // Detect remote saves on shared docs
+    useEffect(() => {
+        if (!note?.isSharedDoc) return;
+        const incoming = note?.versionId ?? 0;
+        if (incoming > baseVersionRef.current && saveStatus !== 'saving') {
+            setRemoteUpdateDetected(true);
+        }
+        baseVersionRef.current = incoming;
+    }, [note?.versionId]);
+
+    // Clear banner while we are saving (our own snapshot will arrive after)
+    useEffect(() => {
+        if (saveStatus === 'saving') setRemoteUpdateDetected(false);
+    }, [saveStatus]);
 
     const textAreaRef = useRef(null);
     const scrollRef = useRef(null);
@@ -51,6 +85,49 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
         }
     }, [note?.sharedId, note?.docKey, note?.memberUids?.length]);
 
+    // CRDT: mirror remote Y.Text changes → React state
+    useEffect(() => {
+        const ytext = ytextRef.current;
+        if (!ytext || !crdtEnabled) return;
+        const observer = (_, tx) => {
+            if (tx.origin !== 'remote') return;
+            setData(prev => ({ ...prev, content: ytext.toString() }));
+        };
+        ytext.observe(observer);
+        return () => ytext.unobserve(observer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [crdtEnabled, ytextRef.current]);
+
+    // CRDT: flush Y.Doc content to Firestore every 30 s so non-CRDT readers stay in sync
+    useEffect(() => {
+        if (!crdtEnabled) return;
+        const id = setInterval(() => {
+            const content = ytextRef.current?.toString();
+            if (content !== undefined) onSave({ ...data, content });
+        }, 30_000);
+        return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [crdtEnabled]);
+
+    // CRDT: apply minimal delta to Y.Doc on user edits, then update React state
+    const handleContentChange = useCallback((newVal) => {
+        if (crdtEnabled && ytextRef.current && ydocRef.current) {
+            const ytext = ytextRef.current;
+            const old   = ytext.toString();
+            if (old !== newVal) {
+                let s = 0;
+                while (s < old.length && s < newVal.length && old[s] === newVal[s]) s++;
+                let eO = old.length, eN = newVal.length;
+                while (eO > s && eN > s && old[eO - 1] === newVal[eN - 1]) { eO--; eN--; }
+                ydocRef.current.transact(() => {
+                    if (eO > s) ytext.delete(s, eO - s);
+                    if (eN > s) ytext.insert(s, newVal.slice(s, eN));
+                });
+            }
+        }
+        setData(prev => ({ ...prev, content: newVal }));
+    }, [crdtEnabled, ytextRef, ydocRef]);
+
     // Auto-Save Trigger
     const debouncedData = useDebounce(data, 1000);
     useEffect(() => {
@@ -75,13 +152,16 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                     isCreatingRef.current = true;
                 }
 
-                const savePayload = { ...debouncedData, id: activeId, attachments: cleanAttachments };
+                // When CRDT is active, suppress content from auto-save — Y.Doc 30 s flush handles it
+                const savePayload = crdtEnabled
+                    ? { ...debouncedData, id: activeId, attachments: cleanAttachments, content: undefined, title: undefined }
+                    : { ...debouncedData, id: activeId, attachments: cleanAttachments };
                 // Call onSave which in NotesApp is an async handleSaveNote function
                 Promise.resolve(onSave(savePayload)).then(() => {
                     setLastSavedHash(currentHash);
                 }).catch(e => {
                     console.error("Auto-save failed", e);
-                    if (!data.id) isCreatingRef.current = false;
+                    isCreatingRef.current = false;
                 });
             }
         }
@@ -114,6 +194,11 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
     }, [data.content]);
 
     // Helper to format date for the pill
+    const handleRetry = () => {
+        const cleanAttachments = data.attachments.map(({ url, ...rest }) => rest);
+        onSave({ ...data, attachments: cleanAttachments });
+    };
+
     const formatAlertDate = (isoString) => {
         if (!isoString) return '';
         return new Date(isoString).toLocaleString('en-US', {
@@ -153,11 +238,34 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                     <div className="no-print sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
                         <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
                         <div className="flex gap-2 items-center">
-                            <span className="text-xs text-gray-400 mr-2 uppercase tracking-wider font-medium">
-                                {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'error' ? 'Error' : 'Saved'}
-                            </span>
+                            <PresenceDots users={presenceUsers} />
+                            {saveStatus === 'error' ? (
+                                <button onClick={handleRetry} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium mr-2 transition-colors">
+                                    <AlertCircle size={13} /> Error · <RefreshCw size={11} /> Retry
+                                </button>
+                            ) : (
+                                <span className="text-xs text-gray-400 mr-2 uppercase tracking-wider font-medium">
+                                    {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
+                                </span>
+                            )}
                             <button onClick={() => window.print()} className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors" title="Print note">
                                 <Printer size={20} />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const content = data.title ? `# ${data.title}\n\n${data.content || ''}` : (data.content || '');
+                                    const blob = new Blob([content], { type: 'text/markdown' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${data.title || 'Untitled'}.md`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                }}
+                                className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
+                                title="Export as Markdown"
+                            >
+                                <Download size={20} />
                             </button>
                             {onCollaborate && (
                                 <button onClick={(e) => onCollaborate(e, data)} className={`p-2 transition-colors rounded-full ${data.memberUids?.length > 0 ? 'text-blue-500 bg-blue-50' : 'text-gray-400 hover:text-blue-500'}`} title="Collaborators">
@@ -174,6 +282,13 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                             </button>
                         </div>
                     </div>
+
+                    {remoteUpdateDetected && (
+                        <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700">
+                            <span>A collaborator saved this document. Saving will overwrite their changes.</span>
+                            <button onClick={() => setRemoteUpdateDetected(false)} className="ml-4 text-amber-500 hover:text-amber-700 font-medium">Dismiss</button>
+                        </div>
+                    )}
 
                     {/* Content - Scrolls independently */}
                     <div className="flex-1 w-full">
@@ -347,7 +462,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                             <textarea
                                 ref={textAreaRef}
                                 value={data.content}
-                                onChange={e => setData(s => ({ ...s, content: e.target.value }))}
+                                onChange={e => handleContentChange(e.target.value)}
                                 placeholder="Start writing..."
                                 disabled={readOnly}
                                 className="w-full outline-none resize-none text-gray-700 leading-relaxed text-lg bg-transparent pb-32 overflow-hidden disabled:opacity-80"

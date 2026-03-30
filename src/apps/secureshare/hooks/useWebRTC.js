@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { getRecipientPublicKey, getMyPrivateKey } from '../services/secureshare';
 import { encryptData, decryptData, encryptRSA, decryptRSA, deriveECDHSharedSecret } from '../../../lib/crypto';
 import { rtdb, appId } from '../../../lib/firebase';
-import { ref, push, set, onChildAdded, remove, onDisconnect, serverTimestamp, get, off } from 'firebase/database';
+import { ref, push, set, onChildAdded, remove, onDisconnect, serverTimestamp } from 'firebase/database';
 
 export const useWebRTC = (currentUid, cryptoKey) => {
     const [callState, setCallState] = useState('IDLE'); // IDLE, INCOMING, CALLING, CONNECTED
@@ -137,14 +137,6 @@ export const useWebRTC = (currentUid, cryptoKey) => {
 
     const sendSignal = async (to, type, data) => {
         try {
-            // Check presence first to immediately fail if user is offline
-            const presenceSnap = await get(ref(rtdb, `artifacts/${appId}/presence/${to}`));
-            if (!presenceSnap.exists() && type === 'offer') {
-                alert("User is currently offline. Call cannot be established.");
-                cleanupCall();
-                return;
-            }
-
             const encryptedData = await encryptSignal(data, to);
 
             // Push to target's signal queue in RTDB
@@ -180,18 +172,20 @@ export const useWebRTC = (currentUid, cryptoKey) => {
             setIncomingCallData({ from, offer: data.offer });
             setCallState('INCOMING');
         } else if (type === 'answer') {
-            if (peerConnection.current) {
-                await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+            const pc = peerConnection.current;
+            if (pc && pc.signalingState === 'have-local-offer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
                 // Process any queued candidates
-                pendingCandidates.current.forEach(cand => {
-                    peerConnection.current.addIceCandidate(new RTCIceCandidate(cand));
-                });
+                for (const cand of pendingCandidates.current) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (_) { }
+                }
                 pendingCandidates.current = [];
             }
         } else if (type === 'ice-candidate') {
-            if (peerConnection.current && peerConnection.current.remoteDescription) {
-                await peerConnection.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-            } else {
+            const pc = peerConnection.current;
+            if (pc && pc.signalingState !== 'closed' && pc.remoteDescription) {
+                try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (_) { }
+            } else if (pc && pc.signalingState !== 'closed') {
                 pendingCandidates.current.push(data.candidate);
             }
         } else if (type === 'busy') {

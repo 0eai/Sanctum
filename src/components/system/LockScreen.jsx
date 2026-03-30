@@ -9,6 +9,7 @@ import {
 } from '../../lib/crypto';
 import { resetUserVault, initializeUserKeys } from '../../services/firestoredb';
 import { logActivity } from '../../services/activityLog';
+import { verifyWasmIntegrity } from '../../lib/wasmIntegrity';
 
 // --- Rate Limiting (exponential backoff) ---
 // After N failures: 0→0s, 1→5s, 2→10s, 3→30s, 4→60s, 5→300s, 6→600s, 7→1800s, 8→3600s, 9→14400s, 10+→86400s
@@ -126,9 +127,12 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
 
     setIsDeriving(true);
     setErrorShake(false);
-    setStatus("Accessing vault...");
+    setStatus("Verifying security...");
 
     try {
+      // WASM integrity check — aborts if Argon2id output doesn't match known-answer test
+      await verifyWasmIntegrity();
+
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
       const userData = userDoc.exists() ? userDoc.data() : {};

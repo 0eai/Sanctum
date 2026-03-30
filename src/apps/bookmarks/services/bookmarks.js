@@ -63,7 +63,8 @@ export const saveBookmarkItem = async (userId, cryptoKey, itemData, ctx = null) 
     title: itemData.title,
     type: itemData.type,
     sharedId: itemData.sharedId || null,
-    shareUrlKey: itemData.shareUrlKey || null
+    shareUrlKey: itemData.shareUrlKey || null,
+    collabShareId: itemData.collabShareId || null
   };
   payload.parentId = itemData.parentId;
 

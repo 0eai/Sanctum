@@ -274,6 +274,7 @@ export const shareDocument = async (ownerUid, personalKey, docData, appType, doc
             docType,
             ownerUid,
             memberUids,
+            viewerUids: [],
             sharedFolderId,
             parentShareId,
             isPinned: docData.isPinned || false,
@@ -318,13 +319,23 @@ export const addDocCollaborator = async (shareId, newUid, docKey, role = 'editor
         joinedAt: serverTimestamp()
     });
 
-    // Update memberUids on the share doc
+    // Update memberUids and viewerUids on the share doc
     const shareRef = doc(db, 'artifacts', appId, 'shared_docs', shareId);
     const snap = await getDoc(shareRef);
     if (snap.exists()) {
         const existing = snap.data().memberUids || [];
+        const existingViewers = snap.data().viewerUids || [];
+        const updatePayload = {};
         if (!existing.includes(newUid)) {
-            await updateDoc(shareRef, { memberUids: [...existing, newUid] });
+            updatePayload.memberUids = [...existing, newUid];
+        }
+        if (role === 'viewer' && !existingViewers.includes(newUid)) {
+            updatePayload.viewerUids = [...existingViewers, newUid];
+        } else if (role !== 'viewer' && existingViewers.includes(newUid)) {
+            updatePayload.viewerUids = existingViewers.filter(u => u !== newUid);
+        }
+        if (Object.keys(updatePayload).length > 0) {
+            await updateDoc(shareRef, updatePayload);
         }
     }
 };
@@ -376,6 +387,7 @@ export const removeDocCollaborator = async (shareId, uid, currentDocKey) => {
         transaction.update(shareRef, {
             ...newEncrypted,
             memberUids: remaining,
+            viewerUids: (freshSnap.data().viewerUids || []).filter(u => u !== uid),
             keyVersion: (freshSnap.data().keyVersion || 1) + 1,
             updatedAt: serverTimestamp()
         });
@@ -450,6 +462,15 @@ export const listenToSharedDocs = (uid, appType, privateKey, callback) => {
                 const decrypted = await decryptData(raw, docKey);
                 if (!decrypted) continue;
 
+                // Fetch the current user's role from the members subcollection
+                let memberRole = raw.ownerUid === uid ? 'owner' : 'editor';
+                try {
+                    const memberSnap = await getDoc(
+                        doc(db, 'artifacts', appId, 'shared_docs', d.id, 'members', uid)
+                    );
+                    if (memberSnap.exists()) memberRole = memberSnap.data().role || 'editor';
+                } catch (_) { /* role defaults to editor on error */ }
+
                 docs.push({
                     id: d.id,
                     shareId: d.id,
@@ -462,8 +483,9 @@ export const listenToSharedDocs = (uid, appType, privateKey, callback) => {
                     sharedFolderId: raw.sharedFolderId || null,
                     parentShareId: raw.parentShareId || null,
                     isPinned: raw.isPinned || false,
-                    isShared: true,
+                    isSharedDoc: true,
                     isOwner: raw.ownerUid === uid,
+                    role: memberRole,
                     updatedAt: raw.updatedAt?.toDate() || new Date(),
                     createdAt: raw.createdAt?.toDate() || new Date()
                 });
@@ -486,12 +508,76 @@ export const listenToSharedDocs = (uid, appType, privateKey, callback) => {
                     sharedFolderId: raw.sharedFolderId || null,
                     parentShareId: raw.parentShareId || null,
                     isPinned: raw.isPinned || false,
-                    isShared: true,
+                    isSharedDoc: true,
                     isOwner: raw.ownerUid === uid,
+                    role: raw.ownerUid === uid ? 'owner' : 'editor',
                     updatedAt: raw.updatedAt?.toDate() || new Date(),
                     createdAt: raw.createdAt?.toDate() || new Date(),
                     pdfHash: null // Prevent "Cannot read properties of null (reading 'pdfHash')"
                 });
+            }
+        }
+        docs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        callback(docs);
+    });
+};
+
+/**
+ * Listen to all shared documents where the current user is a member,
+ * across ALL app types. Used by the Global Shared Hub.
+ */
+export const listenToAllSharedDocs = (uid, privateKey, callback) => {
+    const q = query(
+        collection(db, 'artifacts', appId, 'shared_docs'),
+        where('memberUids', 'array-contains', uid)
+    );
+
+    const keyCache = {};
+
+    return onSnapshot(q, async (snapshot) => {
+        const docs = [];
+        for (const d of snapshot.docs) {
+            const raw = d.data();
+            try {
+                const currentVersion = raw.keyVersion || 1;
+                if (!keyCache[d.id] || keyCache[d.id].version !== currentVersion) {
+                    const fetchedKey = await getDocumentKey(d.id, uid, privateKey);
+                    if (fetchedKey) keyCache[d.id] = { key: fetchedKey, version: currentVersion };
+                    else delete keyCache[d.id];
+                }
+                const docKey = keyCache[d.id]?.key;
+                if (!docKey) continue;
+
+                const decrypted = await decryptData(raw, docKey);
+                if (!decrypted) continue;
+
+                let memberRole = raw.ownerUid === uid ? 'owner' : 'editor';
+                try {
+                    const memberSnap = await getDoc(
+                        doc(db, 'artifacts', appId, 'shared_docs', d.id, 'members', uid)
+                    );
+                    if (memberSnap.exists()) memberRole = memberSnap.data().role || 'editor';
+                } catch (_) { /* role defaults to editor on error */ }
+
+                docs.push({
+                    id: d.id,
+                    shareId: d.id,
+                    ...decrypted,
+                    docKey,
+                    appType: raw.appType,
+                    docType: raw.docType,
+                    ownerUid: raw.ownerUid,
+                    memberUids: raw.memberUids,
+                    isSharedDoc: true,
+                    isOwner: raw.ownerUid === uid,
+                    role: memberRole,
+                    updatedAt: raw.updatedAt?.toDate() || new Date(),
+                    createdAt: raw.createdAt?.toDate() || new Date()
+                });
+            } catch (e) {
+                const msg = e.message || '';
+                if (msg.includes('permission') || msg.includes('Permission')) continue;
+                console.warn('Failed to decrypt shared doc', d.id, msg);
             }
         }
         callback(docs);
@@ -506,7 +592,7 @@ export const listenToSharedDocs = (uid, appType, privateKey, callback) => {
  * Save/update a shared document (encrypt with doc key).
  */
 export const saveSharedDoc = async (shareId, docKey, data) => {
-    const { id, shareId: _sid, isShared, isOwner, ownerUid, memberUids,
+    const { id, shareId: _sid, isSharedDoc, isOwner, role, ownerUid, memberUids,
         appType, docType, sharedFolderId, parentShareId, updatedAt, createdAt, ...cleanData } = data;
 
     const encrypted = await encryptData(cleanData, docKey);

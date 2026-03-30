@@ -186,7 +186,7 @@ const CounterEditor = ({ counter, onSave, onBack }) => {
                                     {/* Only cover the non-button area or z-index trickery */}
                                     <input
                                         type="datetime-local"
-                                        value={data.dueDate}
+                                        value={data.dueDate ? data.dueDate.slice(0, 16) : ''}
                                         onChange={(e) => update({ dueDate: e.target.value })}
                                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                                     />

@@ -20,6 +20,7 @@ const AVAILABLE_APPS = [
     { id: 'passwords', name: 'Passwords', icon: 'Key' },
     { id: 'authenticator', name: 'Authenticator', icon: 'ShieldCheck' },
     { id: 'secureshare', name: 'Chat', icon: 'MessageCircle' },
+    { id: 'shared', name: 'Shared With Me', icon: 'Share2' },
     { id: 'banking', name: 'Wallet', icon: 'CreditCard' },
     { id: 'finance', name: 'Finance', icon: 'PieChart' },
     { id: 'research', name: 'Research', icon: 'GraduationCap' },

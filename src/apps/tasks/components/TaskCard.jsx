@@ -58,6 +58,9 @@ const TaskCard = ({ task, index, totalActiveCount, onToggle, onOpen, setDeleteCo
             </span>
           )}
           {task.notes && <FileText size={12} className="text-gray-400" />}
+          {task.tags?.map(tag => (
+            <span key={tag} className="text-[10px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded">#{tag}</span>
+          ))}
         </div>
       </div>
 

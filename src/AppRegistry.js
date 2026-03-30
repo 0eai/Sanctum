@@ -20,6 +20,7 @@ const registry = {
     authenticator: React.lazy(() => import('./apps/authenticator/Authenticator')),
     secureshare: React.lazy(() => import('./apps/secureshare/SecureShare')),
     research: React.lazy(() => import('./apps/research/ResearchApp')),
+    shared: React.lazy(() => import('./apps/shared/SharedHub')),
 };
 
 /** Shared Note viewer (separate — renders without auth) */

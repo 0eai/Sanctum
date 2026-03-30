@@ -1,15 +1,34 @@
 import React from 'react';
 import { Tag, X, FileText, Paperclip, Cpu, Settings } from 'lucide-react';
 
+const STATUS_CONFIG = {
+    unread:   { label: 'Unread',   cls: 'bg-gray-100 text-gray-500 border-gray-200',             next: 'reading' },
+    reading:  { label: 'Reading',  cls: 'bg-blue-50 text-blue-600 border-blue-200',               next: 'read'    },
+    read:     { label: 'Read ✓',   cls: 'bg-emerald-50 text-emerald-600 border-emerald-200',      next: 'unread'  },
+};
+
 const PaperMetaBar = ({
     tags, setTags, isTagInputVisible, setIsTagInputVisible,
     isPreviewMode, hasPdf, setHasPdf, setTempPdfPath, setAiSummary,
     isDecrypting, handleReadPdf, handlePdfUpload,
     isPrivate, setIsPrivate, isEncrypted, setIsEncrypted,
     isUploading, uploadProgress,
-    isGeneratingAi, handleGenerateAi, setIsPromptModalOpen
-}) => (
+    isGeneratingAi, handleGenerateAi, setIsPromptModalOpen,
+    status, setStatus,
+    readOnly
+}) => {
+    const statusCfg = STATUS_CONFIG[status] || STATUS_CONFIG.unread;
+    return (
     <div className="flex flex-wrap gap-2 items-center text-xs">
+        {/* Reading Status */}
+        <button
+            onClick={() => !readOnly && setStatus && setStatus(statusCfg.next)}
+            className={`px-2.5 py-1.5 rounded-full border font-medium transition-colors ${statusCfg.cls} ${!readOnly && setStatus ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+            title={readOnly ? undefined : `Mark as ${STATUS_CONFIG[statusCfg.next]?.label}`}
+        >
+            {statusCfg.label}
+        </button>
+
         {/* Tags */}
         {tags.map((tag, i) => (
             <span key={i} className="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-full flex items-center gap-1 font-medium">
@@ -35,7 +54,7 @@ const PaperMetaBar = ({
         {hasPdf ? (
             <div className="bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-full flex items-center gap-1.5 font-medium group relative overflow-hidden">
                 <FileText size={12} />
-                <span className="cursor-pointer" onClick={isPreviewMode ? handleReadPdf : undefined}>
+                <span className="cursor-pointer" onClick={handleReadPdf}>
                     {isDecrypting ? "Decrypting..." : "PDF Attached"}
                 </span>
                 {!isPreviewMode && (
@@ -81,7 +100,7 @@ const PaperMetaBar = ({
         )}
 
         {/* AI Actions */}
-        {!isPreviewMode && hasPdf && !isPrivate && (
+        {!isPreviewMode && !readOnly && hasPdf && !isPrivate && (
             <>
                 <button
                     onClick={handleGenerateAi}
@@ -99,6 +118,7 @@ const PaperMetaBar = ({
             </>
         )}
     </div>
-);
+    );
+};
 
 export default PaperMetaBar;

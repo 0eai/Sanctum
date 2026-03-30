@@ -1,7 +1,7 @@
 // src/apps/markdown/components/MarkdownCard.jsx
 import React from 'react';
 import {
-    FileText, Folder, Star, X, Move, Paperclip, Clock, Globe, Users
+    FileText, Folder, Star, X, ArrowRightLeft, Paperclip, Clock, Globe, Users
 } from 'lucide-react';
 import { usePermissions } from '../../../hooks/usePermissions';
 
@@ -98,12 +98,15 @@ const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare, onCollab
                             )}
                         </>
                     )}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onMove(item); }}
-                        className="text-gray-300 hover:text-blue-500 p-1"
-                    >
-                        <Move size={14} />
-                    </button>
+                    {item.type !== 'folder' && onMove && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onMove(item); }}
+                            className="p-1 text-gray-400 hover:text-green-500"
+                            title="Move to workspace / vault"
+                        >
+                            <ArrowRightLeft size={14} />
+                        </button>
+                    )}
                     {canDelete && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onDelete(item); }}

@@ -1,8 +1,7 @@
 // src/apps/tasks/Tasks.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home,
-  Link, Globe, Check, CloudOff, Users
+  Plus, X, Star, Clock, CheckSquare, ChevronDown, ChevronRight, Folder, Settings, Move, Home
 } from 'lucide-react';
 
 import { Modal, Button, Input, LoadingSpinner } from '../../components/ui';
@@ -13,8 +12,6 @@ import {
   toggleTaskCompletion, deleteTaskEntity, reorderTasks,
   exportTasks, importTasks
 } from './services/tasks';
-import { shareItem, unshareItem, buildShareUrl } from '../../services/sharing';
-
 import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
@@ -42,9 +39,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [shareModal, setShareModal] = useState(null);
-  const [shareTTL, setShareTTL] = useState(0);
-  const [processing, setProcessing] = useState(false);
 
   // Collaboration (all state + effects handled by the hook)
   const collab = useCollaboration(user, cryptoKey, 'tasks');
@@ -118,7 +112,11 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     let filtered = tasks;
 
     if (searchQuery.trim()) {
-      filtered = tasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()));
+      const q = searchQuery.toLowerCase();
+      filtered = tasks.filter(t =>
+        t.title.toLowerCase().includes(q) ||
+        t.tags?.some(tag => tag.toLowerCase().includes(q))
+      );
     } else {
       switch (currentTab) {
         case 'starred':
@@ -232,30 +230,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     await reorderTasks(user.uid, list[index], list[targetIndex], ctx);
   };
 
-  // --- Sharing Handlers ---
-  const handleShareTask = async (task) => {
-    try {
-      const payload = {
-        sharedType: 'task',
-        title: task.title,
-        notes: task.notes || '',
-        subtasks: task.subtasks || [],
-        dueDate: task.dueDate || null,
-        completed: task.completed || false,
-        date: new Date().toISOString()
-      };
-      const { sharedId, shareUrlKey } = await shareItem(payload);
-      const url = buildShareUrl(sharedId, shareUrlKey);
-      setShareModal({ isOpen: true, task, link: url, sharedId, shareUrlKey });
-    } catch (e) { alert('Sharing failed.'); }
-  };
-
-  const handleStopShareTask = async () => {
-    if (!shareModal?.sharedId) return;
-    await unshareItem(shareModal.sharedId);
-    setShareModal(null);
-  };
-
   // --- Swipe Logic ---
   const handleTouchStart = (e) => {
     setTouchEnd(null);
@@ -315,10 +289,10 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             setItemToMove(item);
             setIsMoveModalOpen(true);
           }}
-          onShare={!ctx && !editorTask.isSharedDoc ? (task) => handleShareTask(task) : null}
-          onCollaborate={!ctx ? ((task) => collab.openCollaborateModal(task)) : null}
+          onCollaborate={!ctx && !editorTask.isSharedDoc ? ((task) => collab.openCollaborateModal(task)) : null}
           cryptoKey={editorTask.isSharedDoc && !activeWorkspace ? editorTask.docKey : (ctx?.key || cryptoKey)}
           readOnly={editorTask.isSharedDoc && editorTask.role === 'viewer'}
+          user={user}
         />
       ) : (
         /* LIST VIEW */
@@ -371,6 +345,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <SharedDocsView
                 sharedDocs={sharedDocs}
                 appType="tasks"
+                currentUserUid={user.uid}
                 onOpenDoc={(doc) => navigate(`${currentBasePath}?edit=${doc.id}`)}
               />
             </div>
@@ -467,33 +442,6 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </div>
       </Modal>
 
-      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Task" zIndex={100}>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-            {shareModal?.link && <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>}
-            <div className="text-xs text-gray-500 break-all">{shareModal?.link || 'Link not generated yet.'}</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            {!shareModal?.link && (
-              <select value={shareTTL} onChange={(e) => setShareTTL(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 mb-2">
-                <option value={0}>Never expire</option>
-                <option value={60}>Expire in 1 Hour</option>
-                <option value={1440}>Expire in 1 Day</option>
-                <option value={10080}>Expire in 7 Days</option>
-              </select>
-            )}
-            {shareModal?.link ? (
-              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert('Copied!'); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
-            ) : (
-              <Button onClick={() => handleShareTask(shareModal.task)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate Link</Button>
-            )}
-            {shareModal?.link && (
-              <Button variant="danger" onClick={handleStopShareTask} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
-            )}
-          </div>
-        </div>
-      </Modal>
-
       {/* Collaboration Modals */}
       {collab.isWorkspacePanelOpen && activeWorkspace && (
         <WorkspacePanel
@@ -511,8 +459,10 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           docId={collab.collaborateModalItem.id}
           docTitle={collab.collaborateModalItem.title || 'Untitled'}
           fullDocData={collab.collaborateModalItem}
-          shareId={collab.collaborateModalItem.sharedId || null}
+          shareId={collab.collaborateModalItem.collabShareId || null}
           docKey={collab.collaborateModalItem.docKey || null}
+          publicSharedId={collab.collaborateModalItem.sharedId || null}
+          publicShareUrlKey={collab.collaborateModalItem.shareUrlKey || null}
           appType="tasks"
           currentUser={user}
           privateKey={privateKey}
@@ -520,14 +470,22 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           onClose={() => collab.closeCollaborateModal()}
           onShareCreated={async (newShareId) => {
             if (collab.collaborateModalItem) {
-              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, ctx);
-              setTasks(tasks.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: newShareId }, ctx);
             }
           }}
           onShareDeleted={async () => {
             if (collab.collaborateModalItem) {
-              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, ctx);
-              setTasks(tasks.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: null }, ctx);
+            }
+          }}
+          onPublicLinkCreated={async (id, key) => {
+            if (collab.collaborateModalItem) {
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: id, shareUrlKey: key }, ctx);
+            }
+          }}
+          onPublicLinkRevoked={async () => {
+            if (collab.collaborateModalItem) {
+              await saveTask(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null, shareUrlKey: null }, ctx);
             }
           }}
         />

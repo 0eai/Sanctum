@@ -109,9 +109,14 @@ export const createChecklist = async (userId, cryptoKey, { title, dueDate, repea
         createdAt: serverTimestamp(),
         itemCount: 0,
         completedCount: 0,
+        isPinned: false,
         order: Date.now()
     });
     return ref.id;
+};
+
+export const toggleChecklistPin = async (userId, listId, isPinned, ctx = null) => {
+    await updateDoc(getClDoc(userId, listId, ctx), { isPinned: !isPinned });
 };
 
 export const updateChecklistEntity = async (userId, listId, itemId, cryptoKey, payload, isList, ctx = null) => {

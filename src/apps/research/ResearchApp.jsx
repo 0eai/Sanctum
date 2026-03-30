@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, FolderPlus, Grid, List, BookOpen, Folder } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Plus, FolderPlus, Grid, List, BookOpen, Folder, Download, Upload } from 'lucide-react';
 import { Button, Modal, Input } from '../../components/ui';
 import StandardAppLayout from '../../components/ui/StandardAppLayout';
-import { listenToPapers, createFolder, updateFolder, deletePaper, savePaper } from './services/research';
+import { listenToPapers, createFolder, updateFolder, deletePaper, savePaper, formatCitation, parseMultiBibTeX } from './services/research';
+import { fetchMarkdownDocById, moveMarkdownDoc } from '../markdown/services/markdown';
+import { fetchNoteById, moveNoteDoc } from '../notes/services/notes';
 import useCollaboration from '../../hooks/useCollaboration';
 
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
-import SharedDocsView from '../../components/ui/SharedDocsView';
+import MoveToContextModal from '../../components/ui/MoveToContextModal';
 
 import PaperEditor from './components/PaperEditor';
 import PaperCard from './components/PaperCard';
@@ -99,6 +101,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     const [isLoading, setIsLoading] = useState(true);
     const [viewMode, setViewMode] = useState('grid');
     const [editingPaper, setEditingPaper] = useState(null);
+    const [notesView, setNotesView] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [currentFolder, setCurrentFolder] = useState(null);
 
@@ -106,10 +109,50 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     const [folderModal, setFolderModal] = useState({ isOpen: false, initialName: '', editingId: null });
     const [moveModal, setMoveModal] = useState({ isOpen: false, item: null });
     const [deleteModal, setDeleteModal] = useState({ isOpen: false, item: null });
+    const [contextMoveItem, setContextMoveItem] = useState(null);
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [importModal, setImportModal] = useState({ isOpen: false, text: '', isImporting: false, result: null });
 
     // Collaboration (all state + effects handled by the hook)
     const collab = useCollaboration(user, cryptoKey, 'research');
     const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+
+    // When moving a research paper, also move its linked markdown (AI reviews) and note
+    // docs to the same destination context so they remain accessible there.
+    const handleMovePaperToContext = useCallback(async (item, collectionName, destCtx, personalKey) => {
+        // Move the paper (or folder child) via the standard hook function
+        await collab.moveItemToContext(item, collectionName, destCtx, personalKey);
+
+        if (collectionName !== 'research' || item.type === 'folder') return;
+
+        const mdKey = personalKey || cryptoKey;
+        const sourceCtx = ctx; // source context for linked docs = Research app's current context
+
+        const moveLinkedMarkdown = async (docId) => {
+            try {
+                const decrypted = await fetchMarkdownDocById(user.uid, mdKey, docId, sourceCtx);
+                if (!decrypted) return;
+                await moveMarkdownDoc(user.uid, mdKey, { ...decrypted, id: docId }, sourceCtx, destCtx);
+            } catch (e) {
+                console.warn(`[movePaper] Failed to move linked markdown doc ${docId}:`, e);
+            }
+        };
+
+        const moveLinkedNote = async (docId) => {
+            try {
+                const decrypted = await fetchNoteById(user.uid, mdKey, docId, sourceCtx);
+                if (!decrypted) return;
+                await moveNoteDoc(user.uid, mdKey, { ...decrypted, id: docId }, sourceCtx, destCtx);
+            } catch (e) {
+                console.warn(`[movePaper] Failed to move linked note doc ${docId}:`, e);
+            }
+        };
+
+        await Promise.all([
+            ...(item.markdownIds || []).map(id => moveLinkedMarkdown(id)),
+            ...(item.noteId ? [moveLinkedNote(item.noteId)] : []),
+        ]);
+    }, [collab, ctx, user, cryptoKey]);
 
     // Data Listener
     useEffect(() => {
@@ -131,23 +174,30 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
         if (resource === 'folder' && resourceId) {
             setCurrentFolder(resourceId);
             setEditingPaper(null);
+            setNotesView(false);
             setSearchQuery('');
+            setStatusFilter('all');
         } else if (resource === 'paper' && resourceId) {
             if (resourceId === 'new') {
                 setEditingPaper({ parentId: currentFolder, initialPreview: false });
+                setNotesView(false);
             } else {
                 const targetPaper = papers.find(p => p.id === resourceId) || sharedDocs.find(p => p.id === resourceId);
                 if (targetPaper) {
+                    const isNotesRoute = action === 'notes';
                     setEditingPaper({ ...targetPaper, initialPreview: action !== 'edit' });
+                    setNotesView(isNotesRoute);
                     setCurrentFolder(targetPaper.parentId || null);
                 } else if (papers.length > 0 || sharedDocs.length > 0) {
                     setCurrentFolder(null);
                     setEditingPaper(null);
+                    setNotesView(false);
                 }
             }
         } else {
             setCurrentFolder(null);
             setEditingPaper(null);
+            setNotesView(false);
         }
     }, [route, papers, isLoading]);
 
@@ -190,6 +240,47 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
         }
     };
 
+    const handleBibTexImport = async () => {
+        const entries = await parseMultiBibTeX(importModal.text);
+        if (!entries.length) return;
+        setImportModal(s => ({ ...s, isImporting: true }));
+        let imported = 0;
+        for (const entry of entries) {
+            try {
+                await savePaper(user.uid, cryptoKey, {
+                    ...entry,
+                    tags: [],
+                    isPrivate: false,
+                    status: 'unread',
+                    hasPdf: false,
+                    parentId: currentFolder || null,
+                }, currentFolder || null, ctx);
+                imported++;
+            } catch (e) {
+                console.error('Failed to import entry', entry.title, e);
+            }
+        }
+        setImportModal({ isOpen: false, text: '', isImporting: false, result: `Imported ${imported} of ${entries.length} papers.` });
+    };
+
+    const handleBulkExport = async () => {
+        const papersToExport = displayedItems.filter(p => p.type !== 'folder');
+        if (papersToExport.length === 0) return;
+        const citations = await Promise.all(papersToExport.map(p => formatCitation(p, 'BibTeX')));
+        const bibtexEntries = citations.filter(Boolean).join('\n\n');
+        const blob = new Blob([bibtexEntries], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `research_export_${papersToExport.length}_papers.bib`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handlePinPaper = async (paper) => {
+        await savePaper(user.uid, cryptoKey, { ...paper, isPinned: !paper.isPinned }, paper.parentId, ctx);
+    };
+
     const handleDeleteConfirm = async () => {
         if (!deleteModal.item) return;
         const isFolder = deleteModal.item.type === 'folder';
@@ -226,12 +317,18 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                 (p.venue || '').toLowerCase().includes(q)
             );
         }
-        return p.parentId === currentFolder;
+        if (p.parentId !== currentFolder) return false;
+        if (statusFilter !== 'all' && p.type !== 'folder') {
+            return (p.status || 'unread') === statusFilter;
+        }
+        return true;
     });
 
     displayedItems.sort((a, b) => {
         if (a.type === 'folder' && b.type !== 'folder') return -1;
         if (a.type !== 'folder' && b.type === 'folder') return 1;
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
 
         const timeA = a.updatedAt?.toMillis?.() || new Date(a.addedAt || 0).getTime();
         const timeB = b.updatedAt?.toMillis?.() || new Date(b.addedAt || 0).getTime();
@@ -243,6 +340,12 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             label: "New Folder",
             icon: <FolderPlus size={20} />,
             onClick: () => setFolderModal({ isOpen: true, initialName: '', editingId: null }),
+            variant: 'secondary'
+        },
+        {
+            label: "Import BibTeX",
+            icon: <Upload size={20} />,
+            onClick: () => setImportModal({ isOpen: true, text: '', isImporting: false, result: null }),
             variant: 'secondary'
         },
         {
@@ -262,10 +365,12 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                 ctx={editingPaper.isSharedDoc && !activeWorkspace ? null : ctx}
                 paper={editingPaper}
                 papers={papers}
+                notesView={notesView}
                 onClose={handleCloseEditor}
                 onOpenApp={onOpenApp}
                 navigate={navigate}
-                onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
+                onCollaborate={!ctx && !editingPaper.isSharedDoc ? ((p) => collab.openCollaborateModal(p)) : null}
+                onPin={!editingPaper.isSharedDoc ? handlePinPaper : null}
                 readOnly={editingPaper.isSharedDoc && editingPaper.role === 'viewer'}
             />
         );
@@ -306,21 +411,25 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                         onSelect: handleBreadcrumbClick,
                     } : undefined,
                     customActions: (
-                        <button onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
-                            {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
-                        </button>
+                        <>
+                            {displayedItems.some(p => p.type !== 'folder') && (
+                                <button onClick={handleBulkExport} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title="Export all as BibTeX">
+                                    <Download size={20} />
+                                </button>
+                            )}
+                            <button onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
+                                {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
+                            </button>
+                        </>
                     ),
                 }}
                 fabConfig={{ actions: fabActions }}
             >
-                {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && (
-                    <div className="mb-8">
-                        <SharedDocsView
-                            sharedDocs={sharedDocs}
-                            appType="research"
-                            onOpenDoc={(doc) => navigate(`#research/paper/${doc.id}`)}
-                        />
-                    </div>
+
+                {!searchQuery && !!activeWorkspace && (
+                    <p className="text-xs text-gray-400 px-1 mb-4">
+                        Shared items are not visible in workspace mode. Switch to Personal Vault to view them.
+                    </p>
                 )}
 
                 {!searchQuery && !activeWorkspace && currentFolder === null && sharedDocs.length > 0 && displayedItems.length > 0 && (
@@ -329,6 +438,24 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                             Personal Vault
                         </span>
+                    </div>
+                )}
+
+                {!searchQuery && (
+                    <div className="flex gap-2 px-1 mb-3 flex-wrap">
+                        {['all', 'unread', 'reading', 'read'].map(s => {
+                            const count = s === 'all' ? null : papers.filter(p => p.type !== 'folder' && p.parentId === currentFolder && (p.status || 'unread') === s).length;
+                            return (
+                                <button
+                                    key={s}
+                                    onClick={() => setStatusFilter(s)}
+                                    className={`px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors ${statusFilter === s ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                                >
+                                    {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                                    {count != null && count > 0 && <span className="ml-1 opacity-80">{count}</span>}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 
@@ -362,11 +489,14 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                                 key={item.id}
                                 item={item}
                                 papers={papers}
+                                cryptoKey={ctx?.key || cryptoKey}
                                 viewMode={viewMode}
                                 onClick={() => handleEditPaper(item)}
                                 onMove={() => setMoveModal({ isOpen: true, item })}
+                                onMoveToContext={!item.isSharedDoc ? () => setContextMoveItem(item) : null}
                                 onDelete={() => setDeleteModal({ isOpen: true, item })}
-                                onCollaborate={!ctx ? ((p) => collab.openCollaborateModal(p)) : null}
+                                onCollaborate={!ctx && !item.isSharedDoc ? ((p) => collab.openCollaborateModal(p)) : null}
+                                onPin={!item.isSharedDoc ? handlePinPaper : null}
                             />
                         ))}
                     </div>
@@ -396,6 +526,62 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                 onConfirm={handleDeleteConfirm}
             />
 
+            <MoveToContextModal
+                isOpen={!!contextMoveItem}
+                onClose={() => setContextMoveItem(null)}
+                item={contextMoveItem}
+                collectionName="research"
+                allItems={papers}
+                workspaces={collab.workspaces}
+                activeWorkspaceId={activeWorkspace?.id || null}
+                user={user}
+                privateKey={privateKey}
+                cryptoKey={cryptoKey}
+                ctx={ctx}
+                onMoveItemToContext={handleMovePaperToContext}
+            />
+
+            {importModal.isOpen && (
+                <Modal isOpen={true} title="Import BibTeX" onClose={() => setImportModal({ isOpen: false, text: '', isImporting: false, result: null })}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-500">Paste a BibTeX file with one or more entries, or upload a <code>.bib</code> file. Each entry will become a separate paper.</p>
+                        <label className="flex items-center gap-2 text-sm text-indigo-600 font-medium cursor-pointer">
+                            <Upload size={14} />
+                            Upload .bib file
+                            <input type="file" accept=".bib,.txt" className="hidden" onChange={e => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = ev => setImportModal(s => ({ ...s, text: ev.target.result }));
+                                reader.readAsText(file);
+                            }} />
+                        </label>
+                        <textarea
+                            className="w-full px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50"
+                            rows={8}
+                            placeholder={"@article{key,\n  title = {Paper Title},\n  author = {Smith, John},\n  year = {2024},\n  journal = {Nature}\n}\n\n@inproceedings{...}"}
+                            value={importModal.text}
+                            onChange={e => setImportModal(s => ({ ...s, text: e.target.value }))}
+                        />
+                        {importModal.text.trim() && (
+                            <p className="text-xs text-gray-400">
+                                {(() => { const n = (importModal.text.match(/@\w+\s*\{/g) || []).length; return `${n} entr${n === 1 ? 'y' : 'ies'} detected`; })()}
+                            </p>
+                        )}
+                        <div className="flex justify-end gap-2 pt-2">
+                            <Button variant="ghost" onClick={() => setImportModal({ isOpen: false, text: '', isImporting: false, result: null })}>Cancel</Button>
+                            <Button
+                                variant="primary"
+                                onClick={handleBibTexImport}
+                                disabled={importModal.isImporting || !importModal.text.trim()}
+                            >
+                                {importModal.isImporting ? 'Importing...' : 'Import'}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
             {/* Collaboration Modals */}
             {collab.isWorkspacePanelOpen && activeWorkspace && (
                 <WorkspacePanel
@@ -413,8 +599,10 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                     docId={collab.collaborateModalItem.id}
                     docTitle={collab.collaborateModalItem.title || 'Untitled'}
                     fullDocData={collab.collaborateModalItem}
-                    shareId={collab.collaborateModalItem.sharedId || null}
+                    shareId={collab.collaborateModalItem.collabShareId || null}
                     docKey={collab.collaborateModalItem.docKey || null}
+                    publicSharedId={collab.collaborateModalItem.sharedId || null}
+                    publicShareUrlKey={collab.collaborateModalItem.shareUrlKey || null}
                     appType="research"
                     currentUser={user}
                     privateKey={privateKey}
@@ -422,14 +610,22 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
                     onClose={() => collab.closeCollaborateModal()}
                     onShareCreated={async (newShareId) => {
                         if (collab.collaborateModalItem) {
-                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, null, ctx);
-                            setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: newShareId }, null, ctx);
                         }
                     }}
                     onShareDeleted={async () => {
                         if (collab.collaborateModalItem) {
-                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, null, ctx);
-                            setPapers(papers.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: null }, null, ctx);
+                        }
+                    }}
+                    onPublicLinkCreated={async (id, key) => {
+                        if (collab.collaborateModalItem) {
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: id, shareUrlKey: key }, null, ctx);
+                        }
+                    }}
+                    onPublicLinkRevoked={async () => {
+                        if (collab.collaborateModalItem) {
+                            await savePaper(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null, shareUrlKey: null }, null, ctx);
                         }
                     }}
                 />

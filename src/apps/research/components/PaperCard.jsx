@@ -1,16 +1,19 @@
-import React from 'react';
+import { Suspense, lazy } from 'react';
 import {
-    FileText, Folder, Star, X, Move, ChevronRight, Users
+    FileText, Folder, Star, X, Move, Users, ArrowRightLeft
 } from 'lucide-react';
 import { usePermissions } from '../../../hooks/usePermissions';
 
-const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) => {
+// Lazy-load PdfThumbnail so pdfjs-dist is not in the initial bundle
+const PdfThumbnail = lazy(() => import('./PdfThumbnail'));
+
+const PaperCard = ({ item, papers, cryptoKey, onClick, onMove, onMoveToContext, onDelete, onCollaborate, onPin }) => {
     const isFolder = item.type === 'folder';
     const { canDelete } = usePermissions(item);
+    const hasThumbnail = !isFolder && item.hasPdf && item.driveFileId && cryptoKey;
 
     const formatDateTime = (dateVal) => {
         if (!dateVal) return '';
-        // Handle Firestore Timestamp objects which have a toMillis() method
         const ms = typeof dateVal.toMillis === 'function' ? dateVal.toMillis() : dateVal;
         const date = new Date(ms);
         if (isNaN(date.getTime())) return '';
@@ -23,8 +26,20 @@ const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) =
             onClick={onClick}
             className={`p-4 rounded-xl shadow-sm border transition-all cursor-pointer group flex flex-col h-44 relative ${isFolder ? 'bg-blue-50 border-blue-100' : 'bg-white border-gray-100 hover:shadow-md'}`}
         >
+            {/* PDF first-page thumbnail — absolute top-right, fades in when ready */}
+            {hasThumbnail && (
+                <Suspense fallback={null}>
+                    <PdfThumbnail
+                        driveFileId={item.driveFileId}
+                        cryptoKey={cryptoKey}
+                        isEncrypted={item.isEncrypted}
+                        className="absolute top-3 right-3 w-10 h-14 object-cover rounded shadow-sm border border-gray-200 opacity-80"
+                    />
+                </Suspense>
+            )}
+
             <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2 flex-1 pr-2">
+                <div className={`flex items-center gap-2 flex-1 ${hasThumbnail ? 'pr-14' : 'pr-2'}`}>
                     {isFolder ? (
                         <Folder size={18} className="text-[#4285f4]" />
                     ) : (
@@ -44,7 +59,7 @@ const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) =
                 </div>
             ) : (
                 <>
-                    <p className="text-xs text-gray-400 font-mono line-clamp-2 flex-1 opacity-70 mb-2">
+                    <p className={`text-xs text-gray-400 font-mono line-clamp-2 flex-1 opacity-70 mb-2 ${hasThumbnail ? 'pr-14' : ''}`}>
                         {item.authors || "Unknown Authors"}
                         <br />
                         {[item.year, item.venue].filter(Boolean).join(" • ")}
@@ -56,6 +71,8 @@ const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) =
                                 #{item.tags[0]} {item.tags.length > 1 && `+${item.tags.length - 1}`}
                             </span>
                         )}
+                        {item.status === 'reading' && <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">Reading</span>}
+                        {item.status === 'read' && <span className="text-[10px] bg-emerald-50 text-emerald-500 px-1.5 py-0.5 rounded">Read ✓</span>}
                         {item.isPrivate && <span className="text-[10px] bg-rose-50 text-rose-500 px-1.5 py-0.5 rounded">Private</span>}
                         {item.hasPdf && <span className="text-[10px] bg-emerald-50 text-emerald-500 px-1.5 py-0.5 rounded">PDF</span>}
                         {item.aiSummary && <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded">AI</span>}
@@ -68,14 +85,24 @@ const PaperCard = ({ item, papers, onClick, onMove, onDelete, onCollaborate }) =
                     {formatDateTime(item.updatedAt || item.addedAt)}
                 </span>
                 <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    {onPin && !isFolder && (
+                        <button onClick={(e) => { e.stopPropagation(); onPin(item); }} className={`p-1 ${item.isPinned ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-500'}`} title="Pin paper">
+                            <Star size={14} fill={item.isPinned ? 'currentColor' : 'none'} />
+                        </button>
+                    )}
                     {onCollaborate && !isFolder && (
                         <button onClick={(e) => { e.stopPropagation(); onCollaborate(item); }} className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}>
                             <Users size={14} />
                         </button>
                     )}
-                    <button onClick={(e) => { e.stopPropagation(); onMove(item); }} className="text-gray-300 hover:text-blue-500 p-1">
+                    <button onClick={(e) => { e.stopPropagation(); onMove(item); }} className="text-gray-300 hover:text-blue-500 p-1" title="Move to folder">
                         <Move size={14} />
                     </button>
+                    {onMoveToContext && (
+                        <button onClick={(e) => { e.stopPropagation(); onMoveToContext(item); }} className="text-gray-300 hover:text-indigo-500 p-1" title="Move to workspace/vault">
+                            <ArrowRightLeft size={14} />
+                        </button>
+                    )}
                     {canDelete && (
                         <button onClick={(e) => { e.stopPropagation(); onDelete(item); }} className="text-gray-300 hover:text-red-500 p-1">
                             <X size={14} />

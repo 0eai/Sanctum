@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Edit2, Trash2, CheckCircle2, EyeOff, Eye } from 'lucide-react';
+import { Copy, Edit2, Trash2, CheckCircle2 } from 'lucide-react';
 import * as OTPAuth from 'otpauth';
+import SecureText from '../../../components/ui/SecureText';
 
 const AuthCard = ({ item, onEdit, onDelete }) => {
     const [token, setToken] = useState('');
@@ -99,11 +100,24 @@ const AuthCard = ({ item, onEdit, onDelete }) => {
 
             <div className="flex items-center justify-between mt-2">
                 <div
-                    className={`text-3xl font-mono font-bold tracking-widest cursor-pointer select-none flex items-center gap-3 transition-all ${!isVisible ? 'text-gray-300 blur-sm' : isWarning ? 'text-red-500 animate-pulse' : 'text-[#4285f4]'}`}
+                    className="cursor-pointer select-none flex items-center gap-3"
                     onClick={(e) => { e.stopPropagation(); setIsVisible(!isVisible); }}
                     title="Click to reveal/hide"
                 >
-                    {isVisible ? formattedToken : '••• •••'}
+                    {isVisible ? (
+                        /* Canvas rendering prevents extension DOM scrapers from reading the TOTP code */
+                        <SecureText
+                            value={formattedToken}
+                            font={`bold 30px monospace`}
+                            color={isWarning ? '#ef4444' : '#4285f4'}
+                            height={40}
+                            ariaLabel="TOTP code — use Copy button to copy"
+                        />
+                    ) : (
+                        <span className="text-3xl font-mono font-bold tracking-widest text-gray-300 blur-sm">
+                            ••• •••
+                        </span>
+                    )}
                 </div>
 
                 <button

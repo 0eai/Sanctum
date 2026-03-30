@@ -1,12 +1,12 @@
 // src/apps/bookmarks/components/ViewBookmarkModal.jsx
 import React from 'react';
 import {
-    Globe, Folder, Copy, ExternalLink, Trash2, Pencil, Check
+    Globe, Folder, Copy, ExternalLink, Trash2, Pencil, Check, Move
 } from 'lucide-react';
 import { Modal, Button } from '../../../components/ui';
 import { normalizeUrl } from '../../../lib/bookmarkUtils';
 
-const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, copyUtils, readOnly }) => {
+const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, onMove, copyUtils, readOnly }) => {
     if (!item) return null;
 
     const { copy, copiedId } = copyUtils;
@@ -71,6 +71,15 @@ const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, copyUtils, readOnl
                         >
                             <Pencil size={16} className="mr-2" /> Edit
                         </Button>
+                        {onMove && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => { onClose(); onMove(item); }}
+                                className="flex-1 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm"
+                            >
+                                <Move size={16} className="mr-2" /> Move
+                            </Button>
+                        )}
                         <Button
                             variant="danger"
                             onClick={() => { onClose(); onDelete(item); }}

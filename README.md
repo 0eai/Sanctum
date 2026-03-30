@@ -42,7 +42,7 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 | **Reminders** | Date/time reminders with recurring schedules |
 | **Alerts** | Alert/notification manager |
 | **Research** | Academic paper vault with PDF storage, AI summaries, and BibTeX |
-| **SecureShare** | E2E encrypted messaging with ECDH forward secrecy, groups, WebRTC calls |
+| **SecureShare** | E2E encrypted messaging with ECDH forward secrecy, groups, WebRTC calls (mute/camera/timer) |
 | **Counter** | Tally counter with multiple counters and history |
 | **Transfer** | Encrypted file transfer with room-based sharing |
 
@@ -52,12 +52,13 @@ A privacy-first, end-to-end encrypted personal vault built with React and Fireba
 - **Per-doc encryption keys** — each shared document gets its own AES-256 key, RSA-wrapped per collaborator
 - **Key rotation** — new key generated on collaborator removal, doc re-encrypted
 - **File re-encryption** — attachments copied to shared storage and re-encrypted with doc key
-- **Workspace sharing** — workspace-level collaboration with shared AES key
+- **Workspace sharing** — workspace-level collaboration with shared AES key; inline workspace naming
 - **Role-based access** — owner, editor, viewer roles per collaborator
+- **Vault ↔ Workspace transfers** — move any item between personal vault and workspace (decrypt + re-encrypt in browser)
 
 ### 🔗 Public Sharing
 
-Notes, Markdown, Tasks, and Checklists can be shared via encrypted public links. The decryption key is in the URL fragment (never sent to the server).
+Any document can be shared via an encrypted public link directly from the **Share** modal (Public Link tab). The decryption key lives only in the URL fragment — never sent to any server. Links support configurable TTL (1 day / 7 days / 30 days / never) and can be revoked at any time.
 
 ### ⚙️ Settings
 
@@ -181,12 +182,14 @@ src/
 ├── components/
 │   ├── system/
 │   │   ├── LockScreen.jsx       # Vault lock/unlock with Argon2id + rate limiting
-│   │   └── Launcher.jsx         # App grid with folders (iOS-style)
+│   │   └── Launcher.jsx         # App grid: per-app colors, category sections, greeting
 │   └── ui/
-│       ├── CollaborateModal.jsx # Per-doc collaboration (add/remove collaborators)
+│       ├── CollaborateModal.jsx # Share modal: Collaborators tab + Public Link tab
+│       ├── WorkspaceSwitcher.jsx # Workspace dropdown with inline naming
 │       ├── SharedDocsView.jsx   # Shared documents viewer
+│       ├── SecureText.jsx       # Canvas-rendered text (defeats extension DOM scrapers)
 │       ├── MarkdownViewer.jsx   # Markdown renderer with KaTeX + syntax highlighting
-│       └── ...                  # Button, Modal, Input, etc.
+│       └── ...                  # Button, Modal, Input, StandardAppLayout, etc.
 │
 ├── services/
 │   ├── collaboration.js         # Per-document E2EE sharing (AES+RSA key management)
@@ -205,12 +208,17 @@ src/
 ├── lib/
 │   ├── crypto.js                # AES-GCM, RSA-OAEP, ECDH, Argon2id, PBKDF2
 │   ├── firebase.js              # Firebase config + App Check
+│   ├── wasmIntegrity.js         # Argon2id WASM known-answer test (supply-chain guard)
+│   ├── extensionGuard.js        # Browser extension detection warning
+│   ├── appCollections.js        # Single source-of-truth collection names
+│   ├── firestore.js             # deleteInChunks batch helper
 │   ├── dateUtils.js             # Date formatting helpers
 │   ├── fileUtils.js             # File helpers
-│   ├── passwordUtils.js         # Password generation
+│   ├── passwordUtils.js         # Password generation (crypto.getRandomValues)
 │   └── bookmarkUtils.js         # Bookmark HTML parsing
 │
 ├── hooks/
+│   ├── useCollaboration.js      # Workspace + shared-doc lifecycle; moveItemToContext
 │   ├── useHashRoute.js          # Hash-based routing
 │   └── useDebounce.js           # Debounce hook
 │

@@ -3,18 +3,18 @@ import {
     initRSAKeys, listenToContacts as listenToChatUsers, listenToMessages, sendMessage,
     getChatId, getMyPrivateKey, getRecipientPublicKey,
     listenToGroups, getGroupKey, sendGroupMessage, listenToGroupMessages,
-    importArtifact, createGroup, deleteExpiredMessages,
+    importArtifact, createGroup,
     listenToChatUnreadCount, markChatMessagesAsRead, deleteMessage
 } from './services/secureshare';
 import { listenToContacts as listenToMyContacts } from '../contacts/services/contacts';
 import { appId } from '../../lib/firebase';
-import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Home, Plus, Users, Info, X, ChevronLeft, Reply, Phone, Video, PhoneOff, VideoOff, PhoneCall } from 'lucide-react';
+import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Plus, Users, Info, X, ChevronLeft, Reply, Phone, Video } from 'lucide-react';
 import MessageBubble from './components/MessageBubble';
 import CreateGroupModal from './components/CreateGroupModal';
 import GroupInfoPanel from './components/GroupInfoPanel';
 import ShareMenu from './components/ShareMenu';
 import { uploadShareableFile as uploadToFirebaseShareable, deleteFirebaseFile } from '../../services/firebaseStorage';
-import { useWebRTC } from './hooks/useWebRTC';
+import { useWebRTCContext } from '../../context/WebRTCContext';
 
 const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
     const [isInitializing, setIsInitializing] = useState(true);
@@ -39,33 +39,8 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
     const initialUnreadInfo = useRef(null); // { firstUnreadId, count } — snapshot when chat opens
     const [showUnreadDivider, setShowUnreadDivider] = useState(false);
 
-    // --- WebRTC ---
-    const {
-        callState,
-        incomingCallData,
-        localStream,
-        remoteStream,
-        activeCallTarget,
-        callUser,
-        acceptCall,
-        rejectCall,
-        endCall
-    } = useWebRTC(user?.uid, cryptoKey);
-
-    const localVideoRef = useRef(null);
-    const remoteVideoRef = useRef(null);
-
-    useEffect(() => {
-        if (localVideoRef.current && localStream) {
-            localVideoRef.current.srcObject = localStream;
-        }
-    }, [localStream]);
-
-    useEffect(() => {
-        if (remoteVideoRef.current && remoteStream) {
-            remoteVideoRef.current.srcObject = remoteStream;
-        }
-    }, [remoteStream]);
+    // --- WebRTC (callUser only — overlay lives in IncomingCallOverlay at app level) ---
+    const { callUser } = useWebRTCContext();
 
     // --- URL-driven chat selection (defined after contacts) ---
     const chatType = route?.resource; // 'dm' or 'group'
@@ -760,93 +735,6 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                         }
                     }}
                 />
-            )}
-
-            {/* --- WEBRTC CALL OVERLAYS --- */}
-            {callState === 'INCOMING' && incomingCallData && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-sm mx-4 text-center shadow-2xl animate-in zoom-in-95 duration-200">
-                        <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 relative">
-                            <PhoneCall size={32} className="text-blue-600 animate-pulse" />
-                            <div className="absolute inset-0 rounded-full border-4 border-blue-400 animate-ping opacity-20"></div>
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-1">Incoming Call</h2>
-                        <p className="text-sm text-gray-500 mb-8">
-                            {contacts.find(c => c.id === incomingCallData.from)?.displayName || 'Someone'} is calling you.
-                        </p>
-                        <div className="flex justify-center gap-4">
-                            <button
-                                onClick={rejectCall}
-                                className="flex-1 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors"
-                            >
-                                <PhoneOff size={18} /> Decline
-                            </button>
-                            <button
-                                onClick={() => acceptCall(true)}
-                                className="flex-1 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-green-200"
-                            >
-                                <Phone size={18} className="animate-bounce" /> Accept
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {(callState === 'CALLING' || callState === 'CONNECTED') && (
-                <div className="fixed inset-4 md:inset-10 z-[90] bg-gray-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col pointer-events-auto border border-gray-800">
-                    {/* Call Header */}
-                    <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/60 to-transparent flex justify-between items-start z-10">
-                        <div className="text-white drop-shadow-md">
-                            <h3 className="font-bold text-lg">{contacts.find(c => c.id === activeCallTarget)?.displayName || 'Contact'}</h3>
-                            <p className="text-sm text-gray-200 opacity-90 tracking-wide font-medium">
-                                {callState === 'CALLING' ? 'Calling...' : 'Connected • E2E Encrypted'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Video Area */}
-                    <div className="flex-1 relative bg-black flex items-center justify-center">
-                        {remoteStream ? (
-                            <video
-                                ref={remoteVideoRef}
-                                autoPlay
-                                playsInline
-                                className="w-full h-full object-cover"
-                            />
-                        ) : (
-                            <div className="w-24 h-24 rounded-full bg-gray-800 flex items-center justify-center">
-                                <User size={48} className="text-gray-600" />
-                            </div>
-                        )}
-
-                        {/* Local PIP Video */}
-                        <div className="absolute bottom-24 right-4 md:bottom-20 md:right-8 w-24 h-36 md:w-32 md:h-48 bg-gray-800 rounded-xl overflow-hidden border-2 border-gray-700 shadow-xl z-20">
-                            {localStream ? (
-                                <video
-                                    ref={localVideoRef}
-                                    autoPlay
-                                    playsInline
-                                    muted
-                                    className="w-full h-full object-cover transform -scale-x-100"
-                                />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                                    <VideoOff size={24} className="text-gray-700" />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Call Controls */}
-                    <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent flex justify-center items-center gap-6 z-10 pb-8 md:pb-6">
-                        <button
-                            onClick={endCall}
-                            className="w-14 h-14 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-lg transition-transform hover:scale-105"
-                        >
-                            <PhoneOff size={24} />
-                        </button>
-                    </div>
-                </div>
             )}
 
         </div>

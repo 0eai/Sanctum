@@ -5,7 +5,8 @@ import {
     FileText, AlertCircle, Loader, Tag, Paperclip, Download, Calendar, X, ZoomIn,
     FileCode, CheckSquare, ListChecks, Check, Circle
 } from 'lucide-react';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
+import { ref, getDownloadURL } from 'firebase/storage';
 import { decryptData, keyFromUrlString } from '../lib/crypto';
 import MarkdownViewer from '../components/ui/MarkdownViewer';
 
@@ -14,6 +15,8 @@ const SharedNote = () => {
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
     const [viewingImage, setViewingImage] = useState(null);
+    // Cache of resolved attachment data URLs: storagePath → data URL
+    const [attachmentCache, setAttachmentCache] = useState({});
 
     useEffect(() => {
         const fetchNote = async () => {
@@ -38,12 +41,33 @@ const SharedNote = () => {
                     throw new Error("This shared link has expired.");
                 }
 
-                const shareKey = await keyFromUrlString(keyString);
-                const decrypted = await decryptData(snapshotData.data, shareKey);
+                const key = await keyFromUrlString(keyString);
+                const decrypted = await decryptData(snapshotData.data, key);
 
                 if (!decrypted) throw new Error("Decryption failed. Invalid Key.");
 
                 setData(decrypted);
+
+                // Pre-fetch and decrypt any Storage attachments
+                if (decrypted.attachments) {
+                    const storageAtts = decrypted.attachments.filter(a => a.storagePath);
+                    if (storageAtts.length > 0) {
+                        const resolved = {};
+                        await Promise.all(storageAtts.map(async (att) => {
+                            try {
+                                const url = await getDownloadURL(ref(storage, att.storagePath));
+                                const resp = await fetch(url);
+                                const encryptedJson = await resp.text();
+                                const encryptedObj = JSON.parse(encryptedJson);
+                                const plain = await decryptData(encryptedObj, key);
+                                if (plain?.data) resolved[att.storagePath] = plain.data;
+                            } catch {
+                                // Individual attachment failure is non-fatal
+                            }
+                        }));
+                        setAttachmentCache(resolved);
+                    }
+                }
             } catch (err) {
                 console.error(err);
                 setError(err.message);
@@ -55,10 +79,15 @@ const SharedNote = () => {
         fetchNote();
     }, []);
 
+    // Resolve the data URL for an attachment — either inline (legacy) or from Storage cache (new).
+    const resolveAttData = (att) => att.storagePath ? attachmentCache[att.storagePath] : att.data;
+
     const downloadAttachment = (e, att) => {
         e.stopPropagation();
+        const dataUrl = resolveAttData(att);
+        if (!dataUrl) return;
         const link = document.createElement('a');
-        link.href = att.data;
+        link.href = dataUrl;
         link.download = att.name || 'download';
         document.body.appendChild(link);
         link.click();
@@ -101,7 +130,7 @@ const SharedNote = () => {
             {viewingImage && (
                 <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setViewingImage(null)}>
                     <button onClick={() => setViewingImage(null)} className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white"><X size={24} /></button>
-                    <img src={viewingImage.data} alt={viewingImage.name} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+                    <img src={resolveAttData(viewingImage)} alt={viewingImage.name} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 text-sm bg-black/50 px-4 py-2 rounded-full">{viewingImage.name}</div>
                 </div>
             )}
@@ -221,7 +250,7 @@ const SharedNote = () => {
                                         <div className="aspect-square flex items-center justify-center bg-gray-100 relative">
                                             {isImage ? (
                                                 <>
-                                                    <img src={att.data} alt={att.name} className="w-full h-full object-cover" />
+                                                    <img src={resolveAttData(att)} alt={att.name} className="w-full h-full object-cover" />
                                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all">
                                                         <ZoomIn className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md" size={24} />
                                                     </div>

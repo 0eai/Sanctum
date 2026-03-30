@@ -14,18 +14,22 @@ import { registerDevice, updateDeviceActivity } from './services/deviceTracker';
 
 import { useVault } from './context/VaultContext';
 import { useHashRoute } from './hooks/useHashRoute';
+import { detectSuspiciousExtensions } from './lib/extensionGuard';
 
 // System Components
 import LockScreen from './components/system/LockScreen';
 import Launcher from './components/system/Launcher';
 import AppErrorBoundary from './components/system/AppErrorBoundary';
+import IncomingCallOverlay from './components/system/IncomingCallOverlay';
+import { WebRTCProvider } from './context/WebRTCContext';
 
 // App Registry (replaces 17 individual lazy imports)
 import appRegistry, { SharedNote } from './AppRegistry';
 
 export default function App() {
-  const { user, cryptoKey, loading, lockReason, setAuthUser, unlockVault, lockVault, setCryptoKey } = useVault();
+  const { user, cryptoKey, loading, lockReason, setAuthUser, unlockVault, lockVault } = useVault();
   const [enabledApps, setEnabledApps] = React.useState(null);
+  const [extensionWarnings, setExtensionWarnings] = React.useState([]);
 
   // --- 1. Router Hook ---
   const { route, navigate } = useHashRoute();
@@ -36,7 +40,7 @@ export default function App() {
 
     const getTimeout = () => {
       const saved = localStorage.getItem('sanctum_autolock');
-      const minutes = saved ? parseInt(saved) : 60;
+      const minutes = saved ? parseInt(saved) : 1200;
       return minutes === 0 ? null : minutes * 60000; // 0 = Never
     };
 
@@ -87,6 +91,13 @@ export default function App() {
     return () => clearInterval(interval);
   }, [cryptoKey, user]);
 
+  // --- Extension detection (runs once on vault unlock) ---
+  useEffect(() => {
+    if (!cryptoKey) return;
+    const detected = detectSuspiciousExtensions();
+    if (detected.length > 0) setExtensionWarnings(detected);
+  }, [cryptoKey]);
+
   useEffect(() => {
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -120,6 +131,9 @@ export default function App() {
     unlockVault(key);
     logActivity(user.uid, 'Vault Unlocked', 'success', 'Lock', key);
     registerDevice(user.uid, key);
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   };
 
   const handleLogin = async () => {
@@ -168,10 +182,24 @@ export default function App() {
   }
 
   return (
-    <AppErrorBoundary>
-      <Suspense fallback={<div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>}>
-        {AppRenderer}
-      </Suspense>
-    </AppErrorBoundary>
+    <WebRTCProvider user={user} cryptoKey={cryptoKey}>
+      <AppErrorBoundary>
+        {extensionWarnings.length > 0 && (
+          <div className="fixed top-0 left-0 right-0 z-[9999] bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-amber-800 text-xs">
+            <span className="font-bold shrink-0">⚠ Extension detected:</span>
+            <span className="flex-1">{extensionWarnings.join(', ')} can read page content. Consider using a dedicated browser profile for your vault.</span>
+            <button
+              onClick={() => setExtensionWarnings([])}
+              className="shrink-0 font-bold text-amber-600 hover:text-amber-900 ml-2"
+              aria-label="Dismiss"
+            >✕</button>
+          </div>
+        )}
+        <Suspense fallback={<div className="h-[100dvh] w-full flex items-center justify-center"><LoadingSpinner /></div>}>
+          {AppRenderer}
+        </Suspense>
+        <IncomingCallOverlay />
+      </AppErrorBoundary>
+    </WebRTCProvider>
   );
 }

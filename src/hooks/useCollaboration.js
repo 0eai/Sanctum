@@ -16,11 +16,17 @@
 //   // collab.workspacePanelProps → spread onto <WorkspacePanel>
 //   // collab.switcherProps → spread onto <WorkspaceSwitcher>
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { listenToWorkspaces, getWorkspaceKey, createWorkspace, deleteWorkspace } from '../services/workspace';
 import { listenToSharedDocs } from '../services/collaboration';
 import { getPersistedWorkspaceId, persistWorkspaceId } from '../components/ui/WorkspaceSwitcher';
 import { getMyPrivateKey } from '../apps/secureshare/services/secureshare';
+import { encryptData } from '../lib/crypto';
+import {
+    collection, doc, deleteDoc, setDoc, serverTimestamp
+} from 'firebase/firestore';
+import { reEncryptStorageFilesForMove } from '../services/firebaseStorage';
+import { db, appId } from '../lib/firebase';
 
 /**
  * @param {object} user - Firebase user object (must have .uid)
@@ -34,6 +40,7 @@ export default function useCollaboration(user, cryptoKey, appType) {
     const [activeWorkspace, setActiveWorkspace] = useState(null);
     const [workspaceKey, setWorkspaceKey] = useState(null);
     const [sharedDocs, setSharedDocs] = useState([]);
+    const prevSharedIdsRef = useRef(null); // null = initial load not yet seen
     const [isWorkspacePanelOpen, setIsWorkspacePanelOpen] = useState(false);
     const [collaborateModalItem, setCollaborateModalItem] = useState(null);
     const [isNamingWorkspace, setIsNamingWorkspace] = useState(false);
@@ -85,7 +92,20 @@ export default function useCollaboration(user, cryptoKey, appType) {
     // 5. Listen to shared docs (only when not in a workspace)
     useEffect(() => {
         if (!user || !privateKey || activeWorkspace) return;
-        return listenToSharedDocs(user.uid, appType, privateKey, setSharedDocs);
+        return listenToSharedDocs(user.uid, appType, privateKey, (docs) => {
+            const incomingIds = new Set(docs.map(d => d.id));
+            if (prevSharedIdsRef.current !== null) {
+                // Detect genuinely new shares (not present on initial load)
+                const newIds = docs.filter(d => !prevSharedIdsRef.current.has(d.id) && d.role !== 'owner');
+                if (newIds.length > 0) {
+                    const stored = parseInt(localStorage.getItem('sanctum_new_shares') || '0');
+                    localStorage.setItem('sanctum_new_shares', String(stored + newIds.length));
+                    window.dispatchEvent(new CustomEvent('sanctum_new_shares'));
+                }
+            }
+            prevSharedIdsRef.current = incomingIds;
+            setSharedDocs(docs);
+        });
     }, [user, privateKey, activeWorkspace, appType]);
 
     // --- Actions ---
@@ -119,6 +139,68 @@ export default function useCollaboration(user, cryptoKey, appType) {
         setCollaborateModalItem(null);
     }, []);
 
+    /**
+     * Move (or copy) a decrypted item between personal vault and a workspace.
+     * @param {object} item - The already-decrypted item (from the app's state array)
+     * @param {string} collectionName - e.g. 'notes', 'tasks'
+     * @param {object|null} destCtx - destination context { workspaceId, key } or null for personal vault
+     * @param {CryptoKey} personalKey - user's personal master key
+     * @param {boolean} [deleteSource=true] - whether to remove the item from the source
+     */
+    const moveItemToContext = useCallback(async (item, collectionName, destCtx, personalKey, deleteSource = true) => {
+        const uid = user?.uid;
+        if (!uid) throw new Error('moveItemToContext: user not authenticated');
+
+        const sourceCtx = ctx; // current context at call time
+        const sourceKey = sourceCtx?.key ?? personalKey;
+        const destKey   = destCtx?.key  ?? personalKey;
+
+        // Build destination collection ref
+        const destCol = destCtx?.workspaceId
+            ? collection(db, 'artifacts', appId, 'workspaces', destCtx.workspaceId, collectionName)
+            : collection(db, 'artifacts', appId, 'users', uid, collectionName);
+
+        // Re-encrypt with destination key — preserve original document ID so parentId
+        // references remain valid when moving a folder tree.
+        // Strip field-level encrypted blobs, legacy blob, and raw metadata — they'll
+        // be written separately so the destination doc has the same structure as a
+        // freshly-saved item (metadata at top level, content in encrypted fields).
+        const {
+            id: docId,
+            // field-level encrypted blobs (Session 9 format)
+            encryptedTitle, encryptedContent, encryptedTags, encryptedAttachments, encryptedMeta,
+            // legacy single-blob fields
+            data: _data, iv: _iv,
+            // Firestore metadata — stored separately, not in the encrypted payload
+            isPinned, type, parentId, updatedAt: _updatedAt, createdAt: _createdAt, versionId,
+            // Collaboration listener fields — not persisted to Firestore
+            isSharedDoc, role, docKey,
+            ...cleanPayload
+        } = item;
+        const encrypted = await encryptData(cleanPayload, destKey);
+        await setDoc(doc(destCol, docId), {
+            ...encrypted,
+            // Write metadata fields explicitly so they're accessible without decryption
+            isPinned: isPinned || false,
+            type: type || 'note',
+            parentId: parentId || null,
+            versionId: versionId || 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        });
+
+        // Re-encrypt Storage attachment files in-place with the destination key.
+        await reEncryptStorageFilesForMove(item, sourceKey, destKey, collectionName);
+
+        // Remove from source
+        if (deleteSource && docId) {
+            const srcColRef = sourceCtx?.workspaceId
+                ? collection(db, 'artifacts', appId, 'workspaces', sourceCtx.workspaceId, collectionName)
+                : collection(db, 'artifacts', appId, 'users', uid, collectionName);
+            await deleteDoc(doc(srcColRef, docId));
+        }
+    }, [ctx, user]);
+
     // --- Pre-built props for UI components ---
 
     const confirmNewWorkspace = useCallback(async () => {
@@ -134,8 +216,13 @@ export default function useCollaboration(user, cryptoKey, appType) {
         workspaces,
         activeWorkspace,
         onSelect: switchWorkspace,
-        onCreateNew: () => { setWorkspaceNameDraft(''); setIsNamingWorkspace(true); }
-    }), [workspaces, activeWorkspace, switchWorkspace]);
+        onCreateNew: () => { setWorkspaceNameDraft(''); setIsNamingWorkspace(true); },
+        isNamingWorkspace,
+        workspaceNameDraft,
+        onNameDraftChange: setWorkspaceNameDraft,
+        onConfirmName: confirmNewWorkspace,
+        onCancelName: () => { setIsNamingWorkspace(false); setWorkspaceNameDraft(''); },
+    }), [workspaces, activeWorkspace, switchWorkspace, isNamingWorkspace, workspaceNameDraft, confirmNewWorkspace]);
 
     /** Spread onto <WorkspacePanel> (only render when activeWorkspace is truthy) */
     const workspacePanelProps = useMemo(() => ({
@@ -173,6 +260,7 @@ export default function useCollaboration(user, cryptoKey, appType) {
         deleteActiveWorkspace,
         openCollaborateModal,
         closeCollaborateModal,
+        moveItemToContext,
 
         // Pre-built component props
         switcherProps,

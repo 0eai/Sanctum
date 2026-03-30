@@ -67,44 +67,74 @@ CRITICAL RULES FOR TAGGING:
 If the paper explicitly mentions "COCO", "WIDERFACE", "imagenet-1k", "VOC", or "bitvehicle", you MUST include those exact strings in the Tags bullet point.
 `;
 
+const blobToBase64 = async (fileBlob) => {
+    const buffer = await fileBlob.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunk = 8192;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+};
+
 export const analyzePaperWithGemini = async (apiKey, fileBlob, mimeType = 'application/pdf', customPrompt = null) => {
     if (!apiKey) throw new Error("Gemini API key is required");
 
-    // Initialize the library with the provided key
     const genAI = new GoogleGenerativeAI(apiKey);
-
-    // Choose the vision-capable model
     const model = genAI.getGenerativeModel({
         model: "gemini-2.5-flash",
         systemInstruction: customPrompt || DEFAULT_SYSTEM_INSTRUCTION
     });
 
     try {
-        // Convert Blob to Base64 safely without blowing up the call stack for large files
-        const buffer = await fileBlob.arrayBuffer();
-        let binary = '';
-        const bytes = new Uint8Array(buffer);
-        const chunk = 8192;
-        for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-        }
-        const base64Data = btoa(binary);
+        const base64Data = await blobToBase64(fileBlob);
 
         const result = await model.generateContent([
-            {
-                inlineData: {
-                    data: base64Data,
-                    mimeType
-                }
-            },
+            { inlineData: { data: base64Data, mimeType } },
             "Please analyze this paper and extract the required structured data."
         ]);
 
-        const responseText = result.response.text();
-
-        return responseText;
+        return result.response.text();
     } catch (e) {
         console.error("Gemini Analysis Error:", e);
+        throw new Error("Failed to analyze paper. Ensure your API key is valid and the file is readable.");
+    }
+};
+
+/**
+ * Streaming variant — calls onChunk(partialText) as tokens arrive.
+ * Returns the full accumulated text when complete.
+ */
+export const analyzePaperWithGeminiStream = async (apiKey, fileBlob, mimeType = 'application/pdf', customPrompt = null, onChunk = null) => {
+    if (!apiKey) throw new Error("Gemini API key is required");
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        systemInstruction: customPrompt || DEFAULT_SYSTEM_INSTRUCTION
+    });
+
+    try {
+        const base64Data = await blobToBase64(fileBlob);
+
+        const streamResult = await model.generateContentStream([
+            { inlineData: { data: base64Data, mimeType } },
+            "Please analyze this paper and extract the required structured data."
+        ]);
+
+        let accumulated = '';
+        for await (const chunk of streamResult.stream) {
+            const text = chunk.text();
+            if (text) {
+                accumulated += text;
+                onChunk?.(accumulated);
+            }
+        }
+
+        return accumulated;
+    } catch (e) {
+        console.error("Gemini Streaming Error:", e);
         throw new Error("Failed to analyze paper. Ensure your API key is valid and the file is readable.");
     }
 };

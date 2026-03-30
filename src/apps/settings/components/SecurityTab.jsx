@@ -8,11 +8,13 @@ import { auth } from '../../../lib/firebase';
 import { listenToActivityLog } from '../../../services/activityLog';
 import { exportRecoveryKey, fetchLockSettings, saveLockSettings } from '../services/settings';
 import { Button } from '../../../components/ui/Button';
+import SecureText from '../../../components/ui/SecureText';
 
 const AUTO_LOCK_OPTIONS = [
     { value: 5, label: '5 min' },
     { value: 15, label: '15 min' },
     { value: 60, label: '1 hour' },
+    { value: 1200, label: '20 hours' },
     { value: 0, label: 'Never' },
 ];
 
@@ -65,7 +67,7 @@ const CollapsibleCard = ({ title, icon: Icon, children, defaultOpen = false, bad
 const SecurityTab = ({ user, cryptoKey, setMessage }) => {
     const [autoLock, setAutoLock] = useState(() => {
         const saved = localStorage.getItem('sanctum_autolock');
-        return saved ? parseInt(saved) : 60;
+        return saved ? parseInt(saved) : 1200;
     });
     const [lockOnHidden, setLockOnHidden] = useState(() => {
         return localStorage.getItem('sanctum_lock_on_hidden') === 'true';
@@ -289,12 +291,20 @@ const SecurityTab = ({ user, cryptoKey, setMessage }) => {
                     ) : (
                         <div className="flex flex-col gap-3">
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Your Encrypted Recovery Key</label>
-                            <textarea
-                                readOnly
-                                value={recoveryKeyString}
-                                className="w-full h-32 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs font-mono text-gray-700 outline-none resize-none break-all"
-                                onClick={(e) => e.target.select()}
-                            />
+                            {/* Canvas rendering prevents extension DOM scrapers from reading the key */}
+                            <div className="w-full min-h-[80px] p-3 rounded-lg bg-gray-50 border border-gray-200 overflow-x-auto flex flex-wrap gap-y-1">
+                                {recoveryKeyString.match(/.{1,40}/g)?.map((chunk, i) => (
+                                    <SecureText
+                                        key={i}
+                                        value={chunk}
+                                        font="12px monospace"
+                                        color="#374151"
+                                        height={22}
+                                        className="block"
+                                        ariaLabel={i === 0 ? 'Encrypted recovery key (use Copy button)' : ''}
+                                    />
+                                ))}
+                            </div>
                             <div className="flex gap-2">
                                 <Button onClick={copyRecoveryKey} className="flex-1 flex items-center justify-center gap-2">
                                     <FileText size={16} /> Copy to Clipboard

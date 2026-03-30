@@ -1,8 +1,8 @@
 // src/apps/notes/Notes.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Plus, FolderPlus, LayoutGrid, List,
-  Loader, Link, Globe, Check, CloudOff, Folder, Users
+  Loader, Folder
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
@@ -11,12 +11,12 @@ import StandardAppLayout from '../../components/ui/StandardAppLayout';
 import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
-import SharedDocsView from '../../components/ui/SharedDocsView';
+import MoveToContextModal from '../../components/ui/MoveToContextModal';
 import useCollaboration from '../../hooks/useCollaboration';
 
 import {
   listenToNotes, saveNote, createFolder, updateFolder, deleteNoteItem,
-  togglePin, rescheduleNote, shareNote, stopSharingNote
+  togglePin, rescheduleNote, moveNoteDoc
 } from './services/notes';
 
 import NoteCard from './components/NoteCard';
@@ -43,13 +43,8 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [folderModalMode, setFolderModalMode] = useState('create');
   const [folderToEdit, setFolderToEdit] = useState(null);
-  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
-  const [itemToMove, setItemToMove] = useState(null);
+  const [contextMoveItem, setContextMoveItem] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
-  const [shareModal, setShareModal] = useState(null);
-  const [shareTTL, setShareTTL] = useState(0);
-  const [processing, setProcessing] = useState(false);
-  const currentBasePath = route.resourceId ? `#notes/${route.resource}/${route.resourceId}` : `#notes`;
 
   // --- 1. Data listener ---
 
@@ -178,33 +173,15 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     setIsFolderModalOpen(false);
   };
 
+  const handleMoveNote = useCallback(async (item, _collectionName, destCtx, personalKey) => {
+    await moveNoteDoc(user.uid, personalKey || cryptoKey, item, ctx, destCtx);
+  }, [ctx, user, cryptoKey]);
+
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
     await deleteNoteItem(user.uid, deleteConfirmation, items, ctx);
     setDeleteConfirmation(null);
   };
-
-  const handleMove = async (targetFolderId) => {
-    await saveNote(user.uid, cryptoKey, { ...itemToMove, parentId: targetFolderId }, currentFolderId, ctx);
-    setIsMoveModalOpen(false);
-    setItemToMove(null);
-  };
-
-  const handleShare = async (note) => {
-    try {
-      const { sharedId, shareUrlKey } = await shareNote(user.uid, cryptoKey, note, shareTTL);
-      const url = `${window.location.origin}/#view?id=${sharedId}&k=${shareUrlKey}`;
-      if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId, shareUrlKey }));
-      setShareModal({ isOpen: true, note: { ...note, sharedId, shareUrlKey }, link: url });
-    } catch (e) { alert("Sharing failed."); }
-  };
-
-  const handleStopShare = async (note) => {
-    await stopSharingNote(user.uid, cryptoKey, note);
-    if (editorState?.id === note.id) setEditorState(s => ({ ...s, sharedId: null, shareUrlKey: null }));
-    setShareModal(null);
-  };
-
 
 
   // --- Navigation Handlers ---
@@ -250,8 +227,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           onSave={handleSaveNote}
           onBack={handleBack}
           onPin={(e, item) => togglePin(user.uid, item.id, item.isPinned, ctx)}
-          onShare={!ctx && !editorState.isSharedDoc ? ((e, item) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
-          onCollaborate={!ctx ? ((e, item) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
+          onCollaborate={!ctx && !editorState.isSharedDoc ? ((e, item) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
           saveStatus={saveStatus}
           user={user}
           navigate={navigate}
@@ -284,14 +260,11 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           }}
           fabConfig={{ actions: fabActions }}
         >
-          {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && (
-            <div className="mb-8">
-              <SharedDocsView
-                sharedDocs={sharedDocs}
-                appType="notes"
-                onOpenDoc={(doc) => navigate(`#notes/doc/${doc.id}/edit`)}
-              />
-            </div>
+
+          {!searchQuery && !!activeWorkspace && (
+            <p className="text-xs text-gray-400 px-1 mb-4">
+              Shared items are not visible in workspace mode. Switch to Personal Vault to view them.
+            </p>
           )}
 
           {!searchQuery && !activeWorkspace && !currentFolderId && sharedDocs.length > 0 && displayedItems.length > 0 && (
@@ -317,12 +290,11 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                   onOpen={() => navigate(`#notes/doc/${item.id}/edit`)}
                   onFolderOpen={() => navigate(`#notes/folder/${item.id}`)}
                   onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned, ctx); }}
-                  onMove={(e) => { e.stopPropagation(); setItemToMove(item); setIsMoveModalOpen(true); }}
+                  onMove={(e) => { e.stopPropagation(); setContextMoveItem(item); }}
                   onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}
                   onDelete={(e) => { e.stopPropagation(); setDeleteConfirmation(item); }}
-                  onShare={!ctx ? ((e) => { e.stopPropagation(); const url = item.sharedId ? `${window.location.origin}/#view?id=${item.sharedId}&k=${item.shareUrlKey}` : null; setShareModal({ isOpen: true, note: item, link: url }); }) : null}
                   onReschedule={(e) => { e.stopPropagation(); rescheduleNote(user.uid, cryptoKey, item, ctx); }}
-                  onCollaborate={!ctx ? ((e) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
+                  onCollaborate={!ctx && !item.isSharedDoc ? ((e) => { e.stopPropagation(); collab.openCollaborateModal(item); }) : null}
                   folderCounts={folderCounts}
                   readOnly={item.isSharedDoc && item.role === 'viewer'}
                 />
@@ -340,48 +312,28 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </form>
       </Modal>
 
-      <Modal isOpen={isMoveModalOpen} onClose={() => { setIsMoveModalOpen(false); setItemToMove(null); }} title="Move to Folder">
-        <div className="flex flex-col gap-2">
-          <button onClick={() => handleMove(null)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> Home</button>
-          {items.filter(i => i.type === 'folder' && i.id !== itemToMove?.id).map(f => (
-            <button key={f.id} onClick={() => handleMove(f.id)} className="p-3 text-left hover:bg-blue-50 rounded-lg text-sm font-medium text-gray-700 border border-transparent hover:border-blue-100 flex items-center gap-2"><Folder size={16} /> {f.title}</button>
-          ))}
-        </div>
-      </Modal>
 
 
+
+      <MoveToContextModal
+        isOpen={!!contextMoveItem}
+        onClose={() => setContextMoveItem(null)}
+        item={contextMoveItem}
+        collectionName="notes"
+        allItems={items}
+        workspaces={collab.workspaces}
+        activeWorkspaceId={activeWorkspace?.id || null}
+        user={user}
+        privateKey={privateKey}
+        cryptoKey={cryptoKey}
+        ctx={ctx}
+        onMoveItemToContext={handleMoveNote}
+      />
 
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Delete Item">
         <div className="flex flex-col gap-4">
           <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">Are you sure? {deleteConfirmation?.type === 'folder' && "This deletes everything inside!"}</div>
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDeleteConfirmation(null)}>Cancel</Button><Button variant="danger" onClick={handleDelete}>Delete</Button></div>
-        </div>
-      </Modal>
-
-      <Modal isOpen={!!shareModal} onClose={() => setShareModal(null)} title="Share Note" zIndex={100}>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-            {shareModal?.link && <div className="flex items-center gap-2 text-green-600 text-sm font-bold"><Check size={16} /> Public Link Active</div>}
-            <div className="text-xs text-gray-500 break-all">{shareModal?.link || "Link not generated yet."}</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            {!shareModal?.link && (
-              <select value={shareTTL} onChange={(e) => setShareTTL(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 mb-2">
-                <option value={0}>Never expire</option>
-                <option value={60}>Expire in 1 Hour</option>
-                <option value={1440}>Expire in 1 Day</option>
-                <option value={10080}>Expire in 7 Days</option>
-              </select>
-            )}
-            {shareModal?.link ? (
-              <Button onClick={() => { navigator.clipboard.writeText(shareModal.link); alert("Copied!"); }} className="w-full flex items-center justify-center gap-2"><Link size={16} /> Copy Link</Button>
-            ) : (
-              <Button onClick={() => handleShare(shareModal.note)} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200"><Globe size={16} /> Generate New Link</Button>
-            )}
-            {shareModal?.link && (
-              <Button variant="danger" onClick={() => handleStopShare(shareModal.note)} className="w-full flex items-center justify-center gap-2"><CloudOff size={16} /> Stop Sharing</Button>
-            )}
-          </div>
         </div>
       </Modal>
 
@@ -402,8 +354,10 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           docId={collab.collaborateModalItem.id}
           docTitle={collab.collaborateModalItem.title || 'Untitled'}
           fullDocData={collab.collaborateModalItem}
-          shareId={collab.collaborateModalItem.sharedId || null}
+          shareId={collab.collaborateModalItem.collabShareId || null}
           docKey={collab.collaborateModalItem.docKey || null}
+          publicSharedId={collab.collaborateModalItem.sharedId || null}
+          publicShareUrlKey={collab.collaborateModalItem.shareUrlKey || null}
           appType="notes"
           currentUser={user}
           privateKey={privateKey}
@@ -411,12 +365,22 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           onClose={() => collab.closeCollaborateModal()}
           onShareCreated={async (newShareId) => {
             if (collab.collaborateModalItem) {
-              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: newShareId });
+              await handleSaveNote({ ...collab.collaborateModalItem, collabShareId: newShareId });
             }
           }}
           onShareDeleted={async () => {
             if (collab.collaborateModalItem) {
-              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: null });
+              await handleSaveNote({ ...collab.collaborateModalItem, collabShareId: null });
+            }
+          }}
+          onPublicLinkCreated={async (id, key) => {
+            if (collab.collaborateModalItem) {
+              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: id, shareUrlKey: key });
+            }
+          }}
+          onPublicLinkRevoked={async () => {
+            if (collab.collaborateModalItem) {
+              await handleSaveNote({ ...collab.collaborateModalItem, sharedId: null, shareUrlKey: null });
             }
           }}
         />

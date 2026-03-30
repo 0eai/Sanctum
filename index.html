@@ -6,6 +6,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Sanctum</title>
 
+  <!--
+    Content Security Policy — browser extension defense layer.
+    - script-src 'self' 'wasm-unsafe-eval': allows only bundled scripts + WASM (Argon2id); no inline eval.
+    - 'unsafe-inline' for script-src is intentionally ABSENT (inline scripts moved below use separate tags).
+    - style-src 'unsafe-inline': required for Tailwind CSS utility classes.
+    - frame-ancestors 'none': prevents clickjacking from any parent frame.
+    - frame-src: allows reCAPTCHA invisible iframe only.
+    - object-src 'none': blocks Flash and legacy plugins.
+    - base-uri 'self': prevents <base> tag injection by extensions.
+    Note: frame-ancestors only works via HTTP header; the meta tag covers script/object/base-uri.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com https://www.google.com https://*.firebasedatabase.app;
+    style-src 'self' 'unsafe-inline';
+    connect-src 'self'
+      https://*.googleapis.com
+      https://*.firebaseio.com
+      wss://*.firebaseio.com
+      https://*.firebasedatabase.app
+      wss://*.firebasedatabase.app
+      https://*.google.com
+      https://generativelanguage.googleapis.com
+      https://storage.googleapis.com;
+    font-src 'self' data:;
+    img-src 'self' data: blob: https://lh3.googleusercontent.com;
+    media-src 'self' blob:;
+    worker-src 'self' blob:;
+    frame-src https://www.google.com https://recaptcha.google.com;
+    object-src 'none';
+    base-uri 'self';
+  " />
+
   <!-- PWA -->
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#4285f4" />
@@ -18,14 +51,7 @@
   <meta name="apple-mobile-web-app-title" content="Sanctum" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
-  <script>
-    window.onerror = function (message, source, lineno, colno, error) {
-      alert("Error: " + message);
-    };
-    window.addEventListener('unhandledrejection', function (event) {
-      alert("Promise Error: " + event.reason);
-    });
-  </script>
+  <script src="/init-error.js"></script>
 </head>
 
 <body>
@@ -33,13 +59,7 @@
   <script type="module" src="/src/main.jsx"></script>
 
   <!-- Register PWA Service Worker -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/pwa-sw.js', { scope: '/' });
-      });
-    }
-  </script>
+  <script src="/sw-register.js"></script>
 </body>
 
 </html>

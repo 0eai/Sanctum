@@ -1,7 +1,7 @@
 // src/apps/bookmarks/Bookmarks.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Folder, FolderPlus, Plus, Settings
+  Folder, FolderPlus, Plus, Settings, Download, Grid, List
 } from 'lucide-react';
 
 import { Button, LoadingSpinner, Modal } from '../../components/ui';
@@ -13,7 +13,7 @@ import SharedDocsView from '../../components/ui/SharedDocsView';
 import useCollaboration from '../../hooks/useCollaboration';
 
 import { useClipboard } from '../../hooks/useClipboard';
-import { getDomain, parseNetscapeHtml } from '../../lib/bookmarkUtils';
+import { getDomain, parseNetscapeHtml, exportBookmarksToNetscapeHtml } from '../../lib/bookmarkUtils';
 import {
   listenToBookmarks, saveBookmarkItem, deleteBookmarkItem, importBookmarksFromHtml
 } from './services/bookmarks';
@@ -21,6 +21,49 @@ import {
 import BookmarkCard from './components/BookmarkCard';
 import AddBookmarkModal from './components/AddBookmarkModal';
 import ViewBookmarkModal from './components/ViewBookmarkModal';
+
+const MoveModal = ({ isOpen, onClose, item, allFolders, onMove }) => {
+  if (!isOpen || !item) return null;
+
+  const getDescendants = (folderId) => {
+    let descendants = [];
+    allFolders.filter(f => f.parentId === folderId).forEach(child => {
+      descendants.push(child.id);
+      descendants = descendants.concat(getDescendants(child.id));
+    });
+    return descendants;
+  };
+
+  const invalidIds = item.type === 'folder' ? [item.id, ...getDescendants(item.id)] : [];
+  const validFolders = allFolders.filter(f => !invalidIds.includes(f.id));
+
+  return (
+    <Modal isOpen={true} title={`Move "${item.title || 'Item'}"`} onClose={onClose}>
+      <div className="space-y-2 max-h-96 overflow-y-auto">
+        <div
+          className={`p-3 rounded-lg border cursor-pointer hover:bg-blue-50 flex items-center gap-3 ${item.parentId === null ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'}`}
+          onClick={() => { onMove(null); onClose(); }}
+        >
+          <Folder size={18} className="text-gray-400" />
+          <span className="font-medium text-gray-800">Home</span>
+        </div>
+        {validFolders.map(folder => (
+          <div
+            key={folder.id}
+            onClick={() => { onMove(folder.id); onClose(); }}
+            className={`p-3 rounded-lg border cursor-pointer hover:bg-blue-50 flex items-center gap-3 ${item.parentId === folder.id ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'}`}
+          >
+            <Folder size={18} className="text-blue-500" />
+            <span className="font-medium text-gray-800">{folder.title}</span>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end pt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </Modal>
+  );
+};
 
 // FIXED: Accept route and navigate from props
 const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
@@ -34,6 +77,8 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // UI States
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const [moveItem, setMoveItem] = useState(null);
+  const [viewMode, setViewMode] = useState('list');
 
   const copyUtils = useClipboard();
 
@@ -140,6 +185,12 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     navigate(currentBasePath); // Close Modal
   };
 
+  const handleMoveItem = async (newParentId) => {
+    if (!moveItem) return;
+    await saveBookmarkItem(user.uid, cryptoKey, { ...moveItem, parentId: newParentId }, ctx);
+    setMoveItem(null);
+  };
+
   const handleDelete = async () => {
     if (!deleteConfirmation) return;
     await deleteBookmarkItem(user.uid, deleteConfirmation, allItems, ctx);
@@ -183,9 +234,28 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             onSelect: handleBreadcrumbClick,
           } : undefined,
           customActions: (
-            <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
-              <Settings size={20} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white" title={`Switch to ${viewMode === 'grid' ? 'list' : 'grid'} view`}>
+                {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
+              </button>
+              <button
+                onClick={() => {
+                  const html = exportBookmarksToNetscapeHtml(allItems);
+                  const blob = new Blob([html], { type: 'text/html' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = 'bookmarks.html'; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white"
+                title="Export bookmarks"
+              >
+                <Download size={20} />
+              </button>
+              <button onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="p-2 hover:bg-white/20 rounded-full transition-colors text-blue-100 hover:text-white">
+                <Settings size={20} />
+              </button>
+            </div>
           ),
         }}
         fabConfig={{ actions: fabActions }}
@@ -195,6 +265,7 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             <SharedDocsView
               sharedDocs={sharedDocs}
               appType="bookmarks"
+              currentUserUid={user.uid}
               onOpenDoc={(doc) => navigate(`#bookmarks?view=${doc.id}`)}
             />
           </div>
@@ -218,7 +289,7 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             {!searchQuery && <Button variant="ghost" onClick={() => navigate(`${currentBasePath}?modal=settings`)} className="text-[#4285f4]">Import from Browser</Button>}
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "grid gap-3"}>
             {viewItems.map(item => (
               <BookmarkCard
                 key={item.id}
@@ -247,8 +318,17 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         onClose={() => navigate(currentBasePath)}
         onEdit={(item) => navigate(`${currentBasePath}?edit=${item.id}`)}
         onDelete={(item) => setDeleteConfirmation(item)}
+        onMove={(item) => setMoveItem(item)}
         copyUtils={copyUtils}
         readOnly={viewingItem?.isSharedDoc && viewingItem?.role === 'viewer'}
+      />
+
+      <MoveModal
+        isOpen={!!moveItem}
+        item={moveItem}
+        allFolders={allItems.filter(i => i.type === 'folder')}
+        onClose={() => setMoveItem(null)}
+        onMove={handleMoveItem}
       />
 
       <Modal isOpen={!!deleteConfirmation} onClose={() => setDeleteConfirmation(null)} title="Delete Item">
@@ -278,8 +358,10 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           docId={collab.collaborateModalItem.id}
           docTitle={collab.collaborateModalItem.title || 'Untitled'}
           fullDocData={collab.collaborateModalItem}
-          shareId={collab.collaborateModalItem.sharedId || null}
+          shareId={collab.collaborateModalItem.collabShareId || null}
           docKey={collab.collaborateModalItem.docKey || null}
+          publicSharedId={collab.collaborateModalItem.sharedId || null}
+          publicShareUrlKey={collab.collaborateModalItem.shareUrlKey || null}
           appType="bookmarks"
           currentUser={user}
           privateKey={privateKey}
@@ -287,14 +369,22 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           onClose={() => collab.closeCollaborateModal()}
           onShareCreated={async (newShareId) => {
             if (collab.collaborateModalItem) {
-              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: newShareId }, ctx);
-              setAllItems(allItems.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: newShareId } : i));
+              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: newShareId }, ctx);
             }
           }}
           onShareDeleted={async () => {
             if (collab.collaborateModalItem) {
-              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null }, ctx);
-              setAllItems(allItems.map(i => i.id === collab.collaborateModalItem.id ? { ...i, sharedId: null } : i));
+              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, collabShareId: null }, ctx);
+            }
+          }}
+          onPublicLinkCreated={async (id, key) => {
+            if (collab.collaborateModalItem) {
+              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: id, shareUrlKey: key }, ctx);
+            }
+          }}
+          onPublicLinkRevoked={async () => {
+            if (collab.collaborateModalItem) {
+              await saveBookmarkItem(user.uid, cryptoKey, { ...collab.collaborateModalItem, sharedId: null, shareUrlKey: null }, ctx);
             }
           }}
         />

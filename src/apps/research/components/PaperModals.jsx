@@ -9,7 +9,7 @@ const PaperModals = ({
     isDeleteModalOpen, setIsDeleteModalOpen, handleDelete,
     // AI config modal
     isPromptModalOpen, setIsPromptModalOpen,
-    aiService, setAiService, aiModel, setAiModel,
+    aiModel, setAiModel,
     aiPrompts, selectedPromptId, setSelectedPromptId,
     // Prompt editor
     isEditingPrompt, setIsEditingPrompt,
@@ -37,28 +37,16 @@ const PaperModals = ({
         <Modal isOpen={isPromptModalOpen} onClose={() => setIsPromptModalOpen(false)} title="Configure AI Review">
             <div className="space-y-6">
                 <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">AI Service</label>
+                    <label className="block text-sm font-semibold text-gray-700">Model Selection</label>
                     <select
-                        value={aiService}
-                        onChange={(e) => setAiService(e.target.value)}
+                        value={aiModel}
+                        onChange={(e) => setAiModel(e.target.value)}
                         className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
                     >
-                        <option value="gemini">Google Gemini</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Coming soon)</option>
                     </select>
                 </div>
-                {aiService === 'gemini' && (
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-gray-700">Model Selection</label>
-                        <select
-                            value={aiModel}
-                            onChange={(e) => setAiModel(e.target.value)}
-                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                        >
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro (Coming soon)</option>
-                        </select>
-                    </div>
-                )}
                 <div className="space-y-2">
                     <label className="block text-sm font-semibold text-gray-700">AI Prompt</label>
                     <select
