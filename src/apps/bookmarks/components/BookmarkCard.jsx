@@ -1,9 +1,9 @@
 // src/apps/bookmarks/components/BookmarkCard.jsx
 import React from 'react';
-import { Folder, Globe, ExternalLink, MoreHorizontal } from 'lucide-react';
+import { Folder, Globe, ExternalLink, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
 import { normalizeUrl, getDomain } from '../../../lib/bookmarkUtils';
 
-const BookmarkCard = ({ item, onEnterFolder, onViewDetails }) => {
+const BookmarkCard = ({ item, onEnterFolder, onViewDetails, onMoveContext }) => {
   
   const handleCardClick = () => {
       if (item.type === 'folder') {
@@ -55,13 +55,24 @@ const BookmarkCard = ({ item, onEnterFolder, onViewDetails }) => {
         {item.type === 'folder' && <p className="text-xs text-blue-400 font-medium mt-1">Folder</p>}
       </div>
 
-      {/* Action Button (Opens Detail View) */}
-      <button 
-        onClick={(e) => { e.stopPropagation(); onViewDetails(item); }}
-        className="p-2 text-gray-300 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0"
-      >
-        <MoreHorizontal size={20} />
-      </button>
+      {/* Action Buttons */}
+      <div className="flex items-center gap-0.5 flex-shrink-0">
+        {onMoveContext && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMoveContext(item); }}
+            className="p-2 text-gray-300 hover:text-green-500 hover:bg-gray-100 rounded-full transition-colors"
+            title="Move to workspace"
+          >
+            <ArrowRightLeft size={16} />
+          </button>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onViewDetails(item); }}
+          className="p-2 text-gray-300 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+        >
+          <MoreHorizontal size={20} />
+        </button>
+      </div>
     </div>
   );
 };

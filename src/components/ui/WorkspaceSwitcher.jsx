@@ -1,7 +1,7 @@
 // src/components/ui/WorkspaceSwitcher.jsx
 // Header dropdown to switch between Personal vault and shared Workspaces
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Users, Plus, Lock, Check, X } from 'lucide-react';
+import { ChevronDown, Users, Plus, Lock, Check, X, Edit3 } from 'lucide-react';
 
 const WS_STORAGE_KEY = 'sanctum_active_workspace_id';
 
@@ -22,10 +22,18 @@ const WorkspaceSwitcher = ({
     onNameDraftChange,
     onConfirmName,
     onCancelName,
+    // Rename inline UI props
+    isRenamingWorkspace,
+    workspaceRenameDraft,
+    onRenameDraftChange,
+    onStartRename,
+    onConfirmRename,
+    onCancelRename,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const ref = useRef(null);
     const inputRef = useRef(null);
+    const renameInputRef = useRef(null);
 
     // Close on outside click
     useEffect(() => {
@@ -40,6 +48,23 @@ const WorkspaceSwitcher = ({
             setTimeout(() => inputRef.current?.focus(), 50);
         }
     }, [isNamingWorkspace, isOpen]);
+
+    // Focus rename input when rename state appears
+    useEffect(() => {
+        if (isRenamingWorkspace && isOpen) {
+            setTimeout(() => renameInputRef.current?.focus(), 50);
+        }
+    }, [isRenamingWorkspace, isOpen]);
+
+    const handleConfirmRename = () => {
+        onConfirmRename?.();
+        setIsOpen(false);
+    };
+
+    const handleRenameKeyDown = (e) => {
+        if (e.key === 'Enter') handleConfirmRename();
+        if (e.key === 'Escape') onCancelRename?.();
+    };
 
     const handleCreateNew = () => {
         onCreateNew();
@@ -104,20 +129,65 @@ const WorkspaceSwitcher = ({
                                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Workspaces</span>
                             </div>
                             {workspaces.map(ws => (
-                                <button
-                                    key={ws.id}
-                                    onClick={() => { onSelect(ws); setIsOpen(false); }}
-                                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors ${activeWorkspace?.id === ws.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
-                                >
-                                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                        {ws.name?.[0]?.toUpperCase() || 'W'}
-                                    </div>
-                                    <div className="text-left flex-1 min-w-0">
-                                        <p className="font-medium truncate">{ws.name}</p>
-                                        <p className="text-xs text-gray-400">{ws.memberUids?.length || 1} member{ws.memberUids?.length !== 1 ? 's' : ''}</p>
-                                    </div>
-                                    {activeWorkspace?.id === ws.id && <Check size={14} className="text-blue-500 flex-shrink-0" />}
-                                </button>
+                                <div key={ws.id}>
+                                    {isRenamingWorkspace && activeWorkspace?.id === ws.id ? (
+                                        <div className="px-3 py-2.5">
+                                            <p className="text-xs font-medium text-gray-500 mb-1.5">Rename workspace</p>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    ref={renameInputRef}
+                                                    type="text"
+                                                    value={workspaceRenameDraft}
+                                                    onChange={e => onRenameDraftChange?.(e.target.value)}
+                                                    onKeyDown={handleRenameKeyDown}
+                                                    placeholder="Workspace name"
+                                                    maxLength={40}
+                                                    className="flex-1 px-2.5 py-1.5 text-sm text-gray-900 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                />
+                                                <button
+                                                    onClick={handleConfirmRename}
+                                                    disabled={!workspaceRenameDraft?.trim()}
+                                                    className="p-1.5 bg-blue-600 text-white rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+                                                    title="Save"
+                                                >
+                                                    <Check size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => onCancelRename?.()}
+                                                    className="p-1.5 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200 transition-colors"
+                                                    title="Cancel"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            onClick={() => { onSelect(ws); setIsOpen(false); }}
+                                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors ${activeWorkspace?.id === ws.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
+                                        >
+                                            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                                {ws.name?.[0]?.toUpperCase() || 'W'}
+                                            </div>
+                                            <div className="text-left flex-1 min-w-0">
+                                                <p className="font-medium truncate">{ws.name}</p>
+                                                <p className="text-xs text-gray-400">{ws.memberUids?.length || 1} member{ws.memberUids?.length !== 1 ? 's' : ''}</p>
+                                            </div>
+                                            {activeWorkspace?.id === ws.id && (
+                                                <>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+                                                        className="p-1 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-600 transition-colors flex-shrink-0"
+                                                        title="Rename workspace"
+                                                    >
+                                                        <Edit3 size={12} />
+                                                    </button>
+                                                    <Check size={14} className="text-blue-500 flex-shrink-0" />
+                                                </>
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
                             ))}
                         </>
                     )}

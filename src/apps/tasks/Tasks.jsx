@@ -15,6 +15,7 @@ import {
 import WorkspaceSwitcher from '../../components/ui/WorkspaceSwitcher';
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
+import MoveToContextModal from '../../components/ui/MoveToContextModal';
 import SharedDocsView from '../../components/ui/SharedDocsView';
 import useCollaboration from '../../hooks/useCollaboration';
 
@@ -38,11 +39,13 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState(null);
+  const [contextMoveItem, setContextMoveItem] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [toast, setToast] = useState(null);
 
   // Collaboration (all state + effects handled by the hook)
-  const collab = useCollaboration(user, cryptoKey, 'tasks');
-  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+  const collab = useCollaboration(user, cryptoKey, 'tasks', route);
+  const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
 
   // --- URL-Driven State ---
   let currentTab = 'inbox';
@@ -102,11 +105,12 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
       name: f.name,
       icon: Folder,
       truncate: true,
+      onCollaborate: !ctx ? () => collab.openCollaborateModal(f) : undefined,
       onDelete: () => setDeleteConfirm({ type: 'folder', id: f.id, title: f.name }),
     }));
 
     return [...systemTabs, { type: 'separator' }, ...folderTabs];
-  }, [folders]);
+  }, [folders, ctx, collab]);
 
   const displayedItems = useMemo(() => {
     let filtered = tasks;
@@ -153,7 +157,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     if (!name) return;
     const id = await saveTaskFolder(user.uid, cryptoKey, name, ctx);
     setIsFolderModalOpen(false);
-    navigate(`#tasks/folder/${id}`);
+    navigate(wsLink(`#tasks/folder/${id}`));
   };
 
   const handleCreateNew = async () => {
@@ -200,7 +204,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const handleToggleTask = async (task) => {
     const didRepeat = await toggleTaskCompletion(user.uid, cryptoKey, task, ctx);
-    if (didRepeat) alert("Task repeated!");
+    if (didRepeat) { setToast("Task repeated!"); setTimeout(() => setToast(null), 2500); }
   };
 
   const handleDelete = async () => {
@@ -208,7 +212,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     await deleteTaskEntity(user.uid, deleteConfirm, tasks, ctx);
 
     if (deleteConfirm.type === 'folder' && currentTab === deleteConfirm.id) {
-      navigate(`#tasks/inbox`);
+      navigate(wsLink(`#tasks/inbox`));
     }
 
     setDeleteConfirm(null);
@@ -219,6 +223,10 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     await saveTask(user.uid, cryptoKey, { ...itemToMove, folderId: targetFolderId }, ctx);
     setIsMoveModalOpen(false);
     setItemToMove(null);
+  };
+
+  const handleMoveTaskToContext = async (item, collectionName, destCtx, personalKey) => {
+    await collab.moveItemToContext(item, collectionName, destCtx, personalKey);
   };
 
   const handleReorderTask = async (index, direction) => {
@@ -274,6 +282,12 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 relative">
+
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] bg-gray-800 text-white text-sm px-4 py-2 rounded-full shadow-lg pointer-events-none">
+          {toast}
+        </div>
+      )}
 
       {/* EDITOR VIEW */}
       {editTaskId && editorTask ? (
@@ -379,6 +393,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)}
                 setDeleteConfirm={setDeleteConfirm}
                 onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                onMoveContext={!task.isSharedDoc ? (item) => setContextMoveItem(item) : null}
                 onReorder={handleReorderTask}
                 isDraggable={true}
               />
@@ -402,6 +417,7 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                       onOpen={() => navigate(`${currentBasePath}?edit=${task.id}`)}
                       setDeleteConfirm={setDeleteConfirm}
                       onMove={(item) => { setItemToMove(item); setIsMoveModalOpen(true); }}
+                      onMoveContext={!task.isSharedDoc ? (item) => setContextMoveItem(item) : null}
                       isDraggable={false}
                     />
                   ))}
@@ -452,6 +468,21 @@ const TasksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           }}
         />
       )}
+
+      <MoveToContextModal
+        isOpen={!!contextMoveItem}
+        onClose={() => setContextMoveItem(null)}
+        item={contextMoveItem}
+        collectionName="tasks"
+        allItems={tasks}
+        workspaces={collab.workspaces}
+        activeWorkspaceId={activeWorkspace?.id || null}
+        user={user}
+        privateKey={privateKey}
+        cryptoKey={cryptoKey}
+        ctx={ctx}
+        onMoveItemToContext={handleMoveTaskToContext}
+      />
 
       {collab.collaborateModalItem && (
         <CollaborateModal

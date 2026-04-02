@@ -74,7 +74,10 @@ const NoteCard = ({ item, viewMode, onOpen, onFolderOpen, onPin, onMove, onEditF
                             <button onClick={(e) => onMove(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-green-500 active:scale-95"><ArrowRightLeft size={14} /></button>
                         </>
                     ) : (
-                        <button onClick={(e) => onEditFolder(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-blue-500 active:scale-95"><Edit2 size={14} /></button>
+                        <>
+                            {onCollaborate && <button onClick={(e) => onCollaborate(e, item)} className={`p-1.5 bg-white shadow-sm border border-gray-100 rounded-full ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-400'} hover:text-blue-600 active:scale-95`} title="Share Folder"><Users size={14} /></button>}
+                            <button onClick={(e) => onEditFolder(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-blue-500 active:scale-95"><Edit2 size={14} /></button>
+                        </>
                     )}
                     {canDelete && (
                         <button onClick={(e) => onDelete(e, item)} className="p-1.5 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 hover:text-red-500 active:scale-95"><Trash2 size={14} /></button>

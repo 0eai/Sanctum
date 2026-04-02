@@ -114,8 +114,8 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     const [importModal, setImportModal] = useState({ isOpen: false, text: '', isImporting: false, result: null });
 
     // Collaboration (all state + effects handled by the hook)
-    const collab = useCollaboration(user, cryptoKey, 'research');
-    const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+    const collab = useCollaboration(user, cryptoKey, 'research', route);
+    const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
 
     // When moving a research paper, also move its linked markdown (AI reviews) and note
     // docs to the same destination context so they remain accessible there.
@@ -132,7 +132,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             try {
                 const decrypted = await fetchMarkdownDocById(user.uid, mdKey, docId, sourceCtx);
                 if (!decrypted) return;
-                await moveMarkdownDoc(user.uid, mdKey, { ...decrypted, id: docId }, sourceCtx, destCtx);
+                await moveMarkdownDoc(user.uid, mdKey, { ...decrypted, id: docId, parentId: null }, sourceCtx, destCtx);
             } catch (e) {
                 console.warn(`[movePaper] Failed to move linked markdown doc ${docId}:`, e);
             }
@@ -142,7 +142,7 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
             try {
                 const decrypted = await fetchNoteById(user.uid, mdKey, docId, sourceCtx);
                 if (!decrypted) return;
-                await moveNoteDoc(user.uid, mdKey, { ...decrypted, id: docId }, sourceCtx, destCtx);
+                await moveNoteDoc(user.uid, mdKey, { ...decrypted, id: docId, parentId: null }, sourceCtx, destCtx);
             } catch (e) {
                 console.warn(`[movePaper] Failed to move linked note doc ${docId}:`, e);
             }
@@ -202,22 +202,22 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     }, [route, papers, isLoading]);
 
     const handleCreatePaper = () => {
-        navigate(`#research/paper/new/edit`);
+        navigate(wsLink(`#research/paper/new/edit`));
     };
 
     const handleEditPaper = (paper) => {
         if (paper.type === 'folder') {
-            navigate(`#research/folder/${paper.id}`);
+            navigate(wsLink(`#research/folder/${paper.id}`));
         } else {
-            navigate(`#research/paper/${paper.id}`);
+            navigate(wsLink(`#research/paper/${paper.id}`));
         }
     };
 
     const handleCloseEditor = () => {
         if (currentFolder) {
-            navigate(`#research/folder/${currentFolder}`);
+            navigate(wsLink(`#research/folder/${currentFolder}`));
         } else {
-            navigate(`#research`);
+            navigate(wsLink(`#research`));
         }
     };
 
@@ -379,8 +379,8 @@ const ResearchApp = ({ user, cryptoKey, onExit, onOpenApp, route, navigate }) =>
     const breadcrumbPath = getCurrentPath();
 
     const handleBreadcrumbClick = (index, folder) => {
-        if (folder.id === null) navigate(`#research`);
-        else navigate(`#research/folder/${folder.id}`);
+        if (folder.id === null) navigate(wsLink(`#research`));
+        else navigate(wsLink(`#research/folder/${folder.id}`));
     };
 
     return (

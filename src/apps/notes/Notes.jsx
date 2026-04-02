@@ -35,8 +35,8 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [viewMode, setViewMode] = useState('grid');
 
   // Collaboration (all state + effects handled by the hook)
-  const collab = useCollaboration(user, cryptoKey, 'notes');
-  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+  const collab = useCollaboration(user, cryptoKey, 'notes', route);
+  const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
 
   // Modal & Editor State
   const [editorState, setEditorState] = useState(null);
@@ -186,14 +186,14 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Navigation Handlers ---
   const handleBreadcrumbClick = (index, folder) => {
-    if (folder.id === null) navigate(`#notes`);
-    else navigate(`#notes/folder/${folder.id}`);
+    if (folder.id === null) navigate(wsLink(`#notes`));
+    else navigate(wsLink(`#notes/folder/${folder.id}`));
   };
 
   const handleBack = () => {
     if (editorState) {
-      if (currentFolderId) navigate(`#notes/folder/${currentFolderId}`);
-      else navigate(`#notes`);
+      if (currentFolderId) navigate(wsLink(`#notes/folder/${currentFolderId}`));
+      else navigate(wsLink(`#notes`));
     } else if (searchQuery) {
       setSearchQuery("");
     } else {
@@ -213,7 +213,7 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     {
       label: "New Note",
       icon: <Plus size={24} />,
-      onClick: () => navigate(`#notes/doc/new/edit`),
+      onClick: () => navigate(wsLink(`#notes/doc/new/edit`)),
       variant: 'primary'
     }
   ], [currentFolderId, navigate]);
@@ -287,8 +287,8 @@ const NotesApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                   key={item.id}
                   item={item}
                   viewMode={viewMode}
-                  onOpen={() => navigate(`#notes/doc/${item.id}/edit`)}
-                  onFolderOpen={() => navigate(`#notes/folder/${item.id}`)}
+                  onOpen={() => navigate(wsLink(`#notes/doc/${item.id}/edit`))}
+                  onFolderOpen={() => navigate(wsLink(`#notes/folder/${item.id}`))}
                   onPin={(e) => { e.stopPropagation(); togglePin(user.uid, item.id, item.isPinned, ctx); }}
                   onMove={(e) => { e.stopPropagation(); setContextMoveItem(item); }}
                   onEditFolder={(e) => { e.stopPropagation(); setFolderToEdit(item); setFolderModalMode('edit'); setIsFolderModalOpen(true); }}

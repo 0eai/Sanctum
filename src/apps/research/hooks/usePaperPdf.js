@@ -1,5 +1,6 @@
 // src/apps/research/hooks/usePaperPdf.js
 import { useState } from 'react';
+import { useToast } from '../../../contexts/ToastContext';
 import {
     uploadEncryptedFile as uploadToFirebase,
     downloadEncryptedFileBlob as downloadBlobFirebase,
@@ -13,6 +14,7 @@ import {
  * pass it directly to PDF.js without a fetch() call that would violate connect-src CSP.
  */
 const usePaperPdf = ({ paper, cryptoKey, user, papers, internalPaperId }) => {
+    const { showToast } = useToast();
     const [hasPdf, setHasPdf] = useState(paper?.hasPdf || false);
     const [pdfHash, setPdfHash] = useState(paper?.pdfHash || null);
     const [isUploading, setIsUploading] = useState(false);
@@ -29,7 +31,7 @@ const usePaperPdf = ({ paper, cryptoKey, user, papers, internalPaperId }) => {
         if (!file || file.type !== 'application/pdf') return;
 
         if (file.size > 50 * 1024 * 1024) {
-            alert("File is too large. Maximum size is 50MB.");
+            showToast("File is too large. Maximum size is 50MB.", 'error');
             e.target.value = null;
             return;
         }
@@ -75,7 +77,7 @@ const usePaperPdf = ({ paper, cryptoKey, user, papers, internalPaperId }) => {
             return file.name;
         } catch (error) {
             console.error('Upload failed:', error);
-            alert('Upload failed. Please try again.');
+            showToast('Upload failed. Please try again.', 'error');
         }
 
         setIsUploading(false);
@@ -107,7 +109,7 @@ const usePaperPdf = ({ paper, cryptoKey, user, papers, internalPaperId }) => {
             }
         } catch (error) {
             console.error('Failed to decrypt PDF:', error);
-            alert('Failed to decrypt PDF.');
+            showToast('Failed to decrypt PDF.', 'error');
         }
         setIsDecrypting(false);
     };

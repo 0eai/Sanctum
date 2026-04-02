@@ -90,8 +90,8 @@ const PaperCard = ({ item, papers, cryptoKey, onClick, onMove, onMoveToContext, 
                             <Star size={14} fill={item.isPinned ? 'currentColor' : 'none'} />
                         </button>
                     )}
-                    {onCollaborate && !isFolder && (
-                        <button onClick={(e) => { e.stopPropagation(); onCollaborate(item); }} className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}>
+                    {onCollaborate && (
+                        <button onClick={(e) => { e.stopPropagation(); onCollaborate(item); }} className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`} title={isFolder ? 'Share folder' : 'Collaborate'}>
                             <Users size={14} />
                         </button>
                     )}

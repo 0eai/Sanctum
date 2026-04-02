@@ -13,6 +13,7 @@ import {
 } from '../lib/crypto';
 import { ref, getBlob, uploadBytesResumable } from 'firebase/storage';
 import { storage } from '../lib/firebase';
+import { logActivity } from './activityLog';
 
 // =============================================
 // HELPERS
@@ -296,6 +297,8 @@ export const shareDocument = async (ownerUid, personalKey, docData, appType, doc
     // sourceKey falls back to personalKey when not in a workspace context
     await copyFilesForShare(shareRef.id, cleanData, sourceKey ?? personalKey, docKey);
 
+    logActivity(ownerUid, `Shared document with ${collaboratorUids.length} collaborator(s)`, 'success', 'Share2', personalKey);
+
     return { shareId: shareRef.id, docKey };
 };
 
@@ -403,6 +406,8 @@ export const removeDocCollaborator = async (shareId, uid, currentDocKey) => {
 
     // Re-encrypt Storage attachments with the new key (in-place, outside transaction)
     await reEncryptAttachments(shareId, currentData, currentDocKey, newKey);
+
+    logActivity(snap.data().ownerUid, 'Removed collaborator (key rotated)', 'info', 'UserMinus', null);
 
     return newKey;
 };

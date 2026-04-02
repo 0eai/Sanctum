@@ -7,9 +7,18 @@ import {
 import { useDebounce } from '../../../hooks/useDebounce';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useYjsCollab } from '../../../hooks/useYjsCollab';
+import usePresence from '../../../hooks/usePresence';
+import PresenceDots from '../../../components/ui/PresenceDots';
 
 const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollaborate, readOnly, cryptoKey, user }) => {
   const { canShare, canDelete } = usePermissions(task);
+
+  const presenceUsers = usePresence({
+    shareId: task?.shareId || null,
+    uid: user?.uid,
+    displayName: user?.displayName || user?.email || null,
+    enabled: !!task?.isSharedDoc,
+  });
   const [data, setData] = useState({
     ...task,
     dueDate: task.dueDate || '',
@@ -77,10 +86,10 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
     }
   }, [task?.sharedId, task?.docKey, task?.memberUids?.length]);
 
-  // CRDT — active for shared tasks (sharedId set + at least one collaborator)
-  const crdtEnabled = !!task?.sharedId && !!task?.memberUids?.length;
+  // CRDT — active for shared tasks (isSharedDoc + shareId available)
+  const crdtEnabled = !!task?.isSharedDoc && !!(task?.shareId || task?.id);
   const { ydocRef, ytextRef } = useYjsCollab({
-    shareId: task?.sharedId,
+    shareId: task?.shareId || task?.id || null,
     docKey:  cryptoKey,
     uid:     user?.uid,
     enabled: crdtEnabled,
@@ -210,7 +219,8 @@ const TaskEditor = ({ task, onSave, onClose, onDelete, onMove, onShare, onCollab
       <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col bg-white relative">
         <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-100 flex-none bg-white z-30">
           <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-600"><ChevronLeft /></button>
-          <div className="flex gap-1">
+          <div className="flex gap-1 items-center">
+            <PresenceDots users={presenceUsers} />
             {!readOnly && onMove && (
               <button onClick={() => onMove(data)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors">
                 <Move size={20} />

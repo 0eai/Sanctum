@@ -2,8 +2,23 @@
 import { useState, useEffect, useRef } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import FileViewer from '../../../components/ui/FileViewer';
-
 import { savePaper, deletePaper, parseBibTeX, formatCitation } from '../services/research';
+import { deleteFirebaseFile, downloadEncryptedFileBlob as downloadBlobFirebase, downloadNormalFileBlob as downloadNormalBlobFirebase } from '../../../services/firebaseStorage';
+import usePaperPdf from '../hooks/usePaperPdf';
+import { analyzePaperWithGeminiStream, DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
+import { fetchApiIntegrations } from '../../settings/services/settings';
+import { listenToNotes, saveNote, getOrCreateAiPromptsFolder } from '../../notes/services/notes';
+import { saveMarkdownDoc } from '../../markdown/services/markdown';
+import { useToast } from '../../../contexts/ToastContext';
+import { useDebounce } from '../../../hooks/useDebounce';
+import usePresence from '../../../hooks/usePresence';
+import { useYjsCollab } from '../../../hooks/useYjsCollab';
+import PaperEditorHeader from './PaperEditorHeader';
+import PaperMetaBar from './PaperMetaBar';
+import PaperMetadataForm from './PaperMetadataForm';
+import PaperAiSection from './PaperAiSection';
+import PaperNotesPanel from './PaperNotesPanel';
+import PaperModals from './PaperModals';
 
 const exportBibTeX = async (paper, title, authors, year, venue, url, bibtex) => {
     const content = await formatCitation({ title, authors, year, venue, url, bibtex: bibtex || paper?.bibtex }, 'BibTeX');
@@ -15,23 +30,9 @@ const exportBibTeX = async (paper, title, authors, year, venue, url, bibtex) => 
     a.click();
     URL.revokeObjectURL(url_);
 };
-import { deleteFirebaseFile, downloadEncryptedFileBlob as downloadBlobFirebase, downloadNormalFileBlob as downloadNormalBlobFirebase } from '../../../services/firebaseStorage';
-import usePaperPdf from '../hooks/usePaperPdf';
-import { analyzePaperWithGeminiStream, DEFAULT_SYSTEM_INSTRUCTION } from '../../../services/gemini';
-import { fetchApiIntegrations } from '../../settings/services/settings';
-import { listenToNotes, saveNote, getOrCreateAiPromptsFolder } from '../../notes/services/notes';
-import { saveMarkdownDoc } from '../../markdown/services/markdown';
-import { useDebounce } from '../../../hooks/useDebounce';
-import usePresence from '../../../hooks/usePresence';
-
-import PaperEditorHeader from './PaperEditorHeader';
-import PaperMetaBar from './PaperMetaBar';
-import PaperMetadataForm from './PaperMetadataForm';
-import PaperAiSection from './PaperAiSection';
-import PaperNotesPanel from './PaperNotesPanel';
-import PaperModals from './PaperModals';
 
 const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, notesView = false, onClose, navigate, onCollaborate, onPin, readOnly }) => {
+    const { showToast } = useToast();
     // Basic Meta
     const [internalPaperId, setInternalPaperId] = useState(paper?.id || null);
 
@@ -102,15 +103,61 @@ const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, notesVi
     const presenceUsers = usePresence({
         shareId: paper?.shareId || null,
         uid: user?.uid,
+        displayName: user?.displayName || user?.email || null,
         enabled: !!paper?.isSharedDoc,
     });
 
-    // Save / AI state — declared before the useEffects that reference isSaving in
-    // their dependency arrays; prevents a TDZ crash in production minified builds
-    // where Terser can merge const declarations and shift their ordering.
+    // Save / AI state — must be declared BEFORE the CRDT useEffect blocks that
+    // reference aiSummary/setAiSummary; prevents TDZ crash in production minified
+    // builds where the bundler can surface the const before its useState call.
     const [isSaving, setIsSaving] = useState(false);
     const [saveError, setSaveError] = useState(false);
     const [aiSummary, setAiSummary] = useState(paper?.aiSummary || null);
+
+    // CRDT — real-time aiSummary sync for shared papers via Y.js
+    const crdtEnabled = !!paper?.isSharedDoc && !!(paper?.shareId || paper?.id);
+    const { ydocRef, ytextRef } = useYjsCollab({
+        shareId: paper?.shareId || paper?.id || null,
+        docKey: (paper?.isSharedDoc && paper?.docKey) ? paper.docKey : cryptoKey,
+        uid: user?.uid,
+        enabled: crdtEnabled,
+        field: 'aiSummary',
+    });
+    const lastCrdtAiSummaryRef = useRef(null);
+
+    // CRDT: mirror remote Y.Text changes → aiSummary state
+    useEffect(() => {
+        const ytext = ytextRef.current;
+        if (!ytext || !crdtEnabled) return;
+        const observer = (_, tx) => {
+            if (tx.origin !== 'remote') return;
+            const val = ytext.toString();
+            lastCrdtAiSummaryRef.current = val;
+            setAiSummary(val || null);
+        };
+        ytext.observe(observer);
+        return () => ytext.unobserve(observer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [crdtEnabled, ytextRef.current]);
+
+    // CRDT: write aiSummary → Y.Text on local changes (skip if from remote)
+    useEffect(() => {
+        if (!crdtEnabled || !ytextRef.current || !ydocRef.current) return;
+        const serialized = aiSummary || '';
+        if (serialized === lastCrdtAiSummaryRef.current) return;
+        const ytext = ytextRef.current;
+        const old = ytext.toString();
+        if (old === serialized) return;
+        let s = 0;
+        while (s < old.length && s < serialized.length && old[s] === serialized[s]) s++;
+        let eO = old.length, eN = serialized.length;
+        while (eO > s && eN > s && old[eO - 1] === serialized[eN - 1]) { eO--; eN--; }
+        ydocRef.current.transact(() => {
+            if (eO > s) ytext.delete(s, eO - s);
+            if (eN > s) ytext.insert(s, serialized.slice(s, eN));
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [aiSummary, crdtEnabled]);
 
     // Stale-document detection
     const [remoteUpdateDetected, setRemoteUpdateDetected] = useState(false);
@@ -407,12 +454,12 @@ const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, notesVi
             onClose();
         } catch (error) {
             console.error('Failed to delete paper:', error);
-            alert('Failed to delete paper.');
+            showToast('Failed to delete paper.', 'error');
         }
     };
 
     const handleBibtexAutoFill = async () => {
-        if (!bibtex) return alert("Please paste a BibTeX entry first.");
+        if (!bibtex) { showToast("Please paste a BibTeX entry first.", 'error'); return; }
         const parsed = await parseBibTeX(bibtex);
         if (parsed) {
             if (!title) setTitle(parsed.title);
@@ -421,7 +468,7 @@ const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, notesVi
             if (!venue) setVenue(parsed.venue);
             if (!url) setUrl(parsed.url);
         } else {
-            alert("Could not parse BibTeX. Please check the format.");
+            showToast("Could not parse BibTeX. Please check the format.", 'error');
         }
     };
 
@@ -435,7 +482,7 @@ const PaperEditor = ({ user, personalKey, cryptoKey, ctx, paper, papers, notesVi
         await loadAiPrompts();
         const geminiKey = integrations?.gemini;
         if (!geminiKey) {
-            alert("Please add your Gemini API Key in Settings → Integrations.");
+            showToast("Please add your Gemini API Key in Settings → Integrations.", 'error');
             return;
         }
 

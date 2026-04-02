@@ -1,5 +1,6 @@
 // src/apps/counter/Counter.jsx
 import React, { useState, useEffect } from 'react';
+import { useToast } from '../../contexts/ToastContext';
 import { Plus, AlertCircle, Edit2, Trash2, Settings, History, PieChart } from 'lucide-react';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
 import StandardAppLayout from '../../components/ui/StandardAppLayout';
@@ -33,6 +34,7 @@ const getNextDate = (currentDateStr, frequency) => {
 };
 
 export default function CounterApp({ user, cryptoKey, onExit, route, navigate }) {
+  const { showToast } = useToast();
   const [counters, setCounters] = useState([]);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -187,7 +189,7 @@ export default function CounterApp({ user, cryptoKey, onExit, route, navigate })
       await reorderCounter(user.uid, counterId, direction, counters);
     } catch (e) {
       console.error("Reorder failed:", e);
-      alert("Failed to reorder: " + e.message);
+      showToast("Failed to reorder: " + e.message, 'error');
     }
   };
 

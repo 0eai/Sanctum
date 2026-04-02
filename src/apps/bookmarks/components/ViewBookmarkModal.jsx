@@ -5,8 +5,9 @@ import {
 } from 'lucide-react';
 import { Modal, Button } from '../../../components/ui';
 import { normalizeUrl } from '../../../lib/bookmarkUtils';
+import PresenceDots from '../../../components/ui/PresenceDots';
 
-const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, onMove, copyUtils, readOnly }) => {
+const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, onMove, copyUtils, readOnly, presenceUsers }) => {
     if (!item) return null;
 
     const { copy, copiedId } = copyUtils;
@@ -29,7 +30,10 @@ const ViewBookmarkModal = ({ item, onClose, onEdit, onDelete, onMove, copyUtils,
                         )}
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-lg text-gray-900 leading-snug break-words">{item.title}</h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-lg text-gray-900 leading-snug break-words flex-1">{item.title}</h3>
+                            {presenceUsers?.length > 0 && <PresenceDots users={presenceUsers} />}
+                        </div>
                         <p className="text-sm text-gray-500 font-medium mt-1 uppercase tracking-wider">{item.type}</p>
                     </div>
                 </div>

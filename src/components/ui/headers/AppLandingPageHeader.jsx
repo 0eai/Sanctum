@@ -133,6 +133,11 @@ const AppLandingPageHeader = ({
                           {tab.count}
                         </span>
                       )}
+                      {isActive && tab.onCollaborate && (
+                        <span onClick={(e) => { e.stopPropagation(); tab.onCollaborate(); }} className="ml-1 opacity-50 hover:opacity-100 hover:text-blue-400" title="Share folder">
+                          <Users size={12} />
+                        </span>
+                      )}
                       {isActive && tab.onDelete && (
                         <span onClick={(e) => { e.stopPropagation(); tab.onDelete(); }} className="ml-1 opacity-50 hover:opacity-100 hover:text-red-500">
                           <X size={12} />

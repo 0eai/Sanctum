@@ -8,6 +8,7 @@ import {
 } from './services/secureshare';
 import { listenToContacts as listenToMyContacts } from '../contacts/services/contacts';
 import { appId } from '../../lib/firebase';
+import { useToast } from '../../contexts/ToastContext';
 import { Send, Flame, Lock, User, ShieldCheck, ArrowLeft, Plus, Users, Info, X, ChevronLeft, Reply, Phone, Video } from 'lucide-react';
 import MessageBubble from './components/MessageBubble';
 import CreateGroupModal from './components/CreateGroupModal';
@@ -17,6 +18,7 @@ import { uploadShareableFile as uploadToFirebaseShareable, deleteFirebaseFile } 
 import { useWebRTCContext } from '../../context/WebRTCContext';
 
 const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
+    const { showToast } = useToast();
     const [isInitializing, setIsInitializing] = useState(true);
     const [groups, setGroups] = useState([]);
     const [messages, setMessages] = useState([]);
@@ -268,7 +270,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
             setShowCreateGroup(false);
         } catch (e) {
             console.error("Failed to create group:", e);
-            alert("Failed to create group");
+            showToast("Failed to create group.", 'error');
         }
     };
 
@@ -277,10 +279,10 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
         try {
             const docId = await importArtifact(user.uid, cryptoKey, artifact);
             setSavedArtifactIds(prev => new Set(prev).add(artifact.sharedTitle + ':' + artifact.appType));
-            alert("Saved to your " + (artifact.appType || "collection") + "!");
+            showToast("Saved to your " + (artifact.appType || "collection") + "!");
         } catch (e) {
             console.error("Failed to import artifact:", e);
-            alert("Failed to save item");
+            showToast("Failed to save item.", 'error');
         }
     };
 
@@ -592,7 +594,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                                                         await deleteMessage(chatOrGroupId, msg.id, selectedChat.isGroup);
                                                     } catch (e) {
                                                         console.error('Failed to delete message', e);
-                                                        alert('Failed to delete message.');
+                                                        showToast('Failed to delete message.', 'error');
                                                     }
                                                 }}
                                             />
@@ -706,7 +708,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                     onShare={handleShareArtifact}
                     onFileUpload={async (file) => {
                         if (file.size > 50 * 1024 * 1024) {
-                            alert("File is too large. Maximum size is 50MB.");
+                            showToast("File is too large. Maximum size is 50MB.", 'error');
                             return;
                         }
 
@@ -731,7 +733,7 @@ const SecureShare = ({ user, cryptoKey, onExit, route, navigate }) => {
                             await handleSend(null, artifact);
                         } catch (e) {
                             console.error("SecureShare Upload failed", e);
-                            alert(e.message);
+                            showToast(e.message || 'Upload failed.', 'error');
                         }
                     }}
                 />

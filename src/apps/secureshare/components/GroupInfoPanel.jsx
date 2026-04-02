@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, UserMinus, Users, Shield, Crown } from 'lucide-react';
 import { getGroupMembers, addGroupMember, removeGroupMember } from '../services/secureshare';
+import { useToast } from '../../../contexts/ToastContext';
 
 const GroupInfoPanel = ({ group, contacts, currentUser, groupKey, onClose }) => {
+    const { showToast } = useToast();
     const currentUid = currentUser?.uid;
     const [members, setMembers] = useState([]);
     const [showAddMember, setShowAddMember] = useState(false);
@@ -62,7 +64,7 @@ const GroupInfoPanel = ({ group, contacts, currentUser, groupKey, onClose }) => 
             loadMembers();
         } catch (e) {
             console.error("Failed to add member:", e);
-            alert("Failed to add member");
+            showToast("Failed to add member.", 'error');
         }
     };
 

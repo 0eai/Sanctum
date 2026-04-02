@@ -10,6 +10,7 @@ import {
 import { resetUserVault, initializeUserKeys } from '../../services/firestoredb';
 import { logActivity } from '../../services/activityLog';
 import { verifyWasmIntegrity } from '../../lib/wasmIntegrity';
+import { useToast } from '../../contexts/ToastContext';
 
 // --- Rate Limiting (exponential backoff) ---
 // After N failures: 0→0s, 1→5s, 2→10s, 3→30s, 4→60s, 5→300s, 6→600s, 7→1800s, 8→3600s, 9→14400s, 10+→86400s
@@ -39,6 +40,7 @@ const getStrength = (passkey) => {
 const MIN_PASSKEY_LENGTH = 8;
 
 const LockScreen = ({ user, onUnlock, initialMessage }) => {
+  const { showToast } = useToast();
   const [keyInput, setKeyInput] = useState("");
   const [confirmKeyInput, setConfirmKeyInput] = useState("");
   const [isDeriving, setIsDeriving] = useState(false);
@@ -103,11 +105,11 @@ const LockScreen = ({ user, onUnlock, initialMessage }) => {
     try {
       await resetUserVault(user.uid);
       logActivity(user.uid, 'Vault Reset', 'danger', 'AlertTriangle');
-      alert("Vault Reset Complete. All data erased.");
+      showToast("Vault reset complete. All data erased.");
       window.location.reload();
     } catch (e) {
       console.error(e);
-      alert("Reset Error: " + e.message);
+      showToast("Reset error: " + e.message, 'error');
       setIsDeriving(false);
       setStatus("");
     }

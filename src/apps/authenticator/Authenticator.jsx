@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useToast } from '../../contexts/ToastContext';
 import { Plus, ShieldCheck } from 'lucide-react';
 import { Modal, Button, LoadingSpinner } from '../../components/ui';
 import StandardAppLayout from '../../components/ui/StandardAppLayout';
@@ -11,6 +12,7 @@ import AuthCard from './components/AuthCard';
 import AuthEditor from './components/AuthEditor';
 
 const AuthenticatorApp = ({ user, cryptoKey, onExit, route, navigate }) => {
+    const { showToast } = useToast();
     const [authenticators, setAuthenticators] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -43,7 +45,7 @@ const AuthenticatorApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             setIsEditorOpen(false);
             setEditingItem(null);
         } catch (e) {
-            alert("Failed to save. Ensure the secret is valid Base32.");
+            showToast("Failed to save. Ensure the secret is valid Base32.", 'error');
         }
     };
 

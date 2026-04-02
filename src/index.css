@@ -16,5 +16,27 @@
     height: auto !important;
     overflow: visible !important;
   }
+
+  /* MarkdownEditor mounts as `fixed inset-0` — unfix it so content flows
+     across pages instead of being clipped to the viewport rectangle. */
+  .fixed {
+    position: static !important;
+  }
+
+  /* All scrollable containers must expand to their full content height
+     so the browser can paginate across them. */
+  .overflow-y-auto,
+  .overflow-y-scroll,
+  .overflow-auto,
+  .overflow-scroll {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  /* Prose / markdown content — allow natural page breaks */
+  .prose, .prose * {
+    max-width: none !important;
+  }
 }
 

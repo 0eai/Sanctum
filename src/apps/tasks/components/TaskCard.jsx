@@ -1,12 +1,12 @@
 // src/apps/tasks/components/TaskCard.jsx
 import React from 'react';
 import {
-  MoveUp, MoveDown, CheckSquare, Square, Star, RotateCcw, Clock, AlertCircle, FileText, Trash2, Move, Users
+  MoveUp, MoveDown, CheckSquare, Square, Star, RotateCcw, Clock, AlertCircle, FileText, Trash2, Move, Users, ArrowRightLeft
 } from 'lucide-react';
 import { usePermissions } from '../../../hooks/usePermissions';
 
 // FIXED: Accepts onOpen to route properly
-const TaskCard = ({ task, index, totalActiveCount, onToggle, onOpen, setDeleteConfirm, onMove, onReorder, isDraggable = true, onCollaborate }) => {
+const TaskCard = ({ task, index, totalActiveCount, onToggle, onOpen, setDeleteConfirm, onMove, onMoveContext, onReorder, isDraggable = true, onCollaborate }) => {
   const { canDelete } = usePermissions(task);
   return (
     <div
@@ -68,6 +68,11 @@ const TaskCard = ({ task, index, totalActiveCount, onToggle, onOpen, setDeleteCo
         {onCollaborate && (
           <button onClick={(e) => { e.stopPropagation(); onCollaborate(task); }} className={`p-1.5 ${task.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}>
             <Users size={16} />
+          </button>
+        )}
+        {onMoveContext && (
+          <button onClick={(e) => { e.stopPropagation(); onMoveContext(task); }} className="p-1.5 text-gray-300 hover:text-green-500" title="Move to workspace">
+            <ArrowRightLeft size={16} />
           </button>
         )}
         {onMove && (

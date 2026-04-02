@@ -232,7 +232,7 @@ const CollaboratorsTab = ({
 
 // ─── Tab 2: Public Link ──────────────────────────────────────────────────────
 
-const PublicLinkTab = ({ fullDocData, existingSharedId, existingShareUrlKey, onLinkCreated, onLinkRevoked }) => {
+const PublicLinkTab = ({ fullDocData, existingSharedId, existingShareUrlKey, onLinkCreated, onLinkRevoked, onPrepareData }) => {
     const [sharedId, setSharedId] = useState(existingSharedId || null);
     const [shareUrlKey, setShareUrlKey] = useState(existingShareUrlKey || null);
     const [ttlMinutes, setTtlMinutes] = useState(TTL_OPTIONS[1].minutes); // 7 days default
@@ -251,7 +251,8 @@ const PublicLinkTab = ({ fullDocData, existingSharedId, existingShareUrlKey, onL
         if (!fullDocData) { setError('No document data to share.'); return; }
         setLoading(true); setError(null);
         try {
-            const { sharedId: id, shareUrlKey: key } = await shareItem(fullDocData, ttlMinutes);
+            const payload = onPrepareData ? await onPrepareData(fullDocData) : fullDocData;
+            const { sharedId: id, shareUrlKey: key } = await shareItem(payload, ttlMinutes);
             setSharedId(id); setShareUrlKey(key);
             onLinkCreated?.(id, key);
         } catch (e) {
@@ -280,7 +281,8 @@ const PublicLinkTab = ({ fullDocData, existingSharedId, existingShareUrlKey, onL
         setLoading(true); setError(null);
         try {
             if (sharedId) await unshareItem(sharedId);
-            const { sharedId: id, shareUrlKey: key } = await shareItem(fullDocData, ttlMinutes);
+            const payload = onPrepareData ? await onPrepareData(fullDocData) : fullDocData;
+            const { sharedId: id, shareUrlKey: key } = await shareItem(payload, ttlMinutes);
             setSharedId(id); setShareUrlKey(key);
             onLinkCreated?.(id, key);
         } catch (e) {
@@ -394,7 +396,7 @@ const CollaborateModal = ({
     publicSharedId, publicShareUrlKey,
     // Common
     currentUid, onMembersChanged, onShareCreated, onShareDeleted,
-    onPublicLinkCreated, onPublicLinkRevoked,
+    onPublicLinkCreated, onPublicLinkRevoked, onPreparePublicShareData,
     // Default tab
     defaultTab,
 }) => {
@@ -464,6 +466,7 @@ const CollaborateModal = ({
                             existingShareUrlKey={publicShareUrlKey}
                             onLinkCreated={onPublicLinkCreated}
                             onLinkRevoked={onPublicLinkRevoked}
+                            onPrepareData={onPreparePublicShareData}
                         />
                     )}
                 </div>

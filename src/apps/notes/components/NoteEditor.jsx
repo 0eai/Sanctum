@@ -4,6 +4,7 @@ import {
     ChevronLeft, Bell, Share2, Star, X, Tag, Paperclip, FileText,
     Clock, RotateCcw, Calendar, PlayCircle, Music, File, Printer, Users, Download, AlertCircle, RefreshCw
 } from 'lucide-react';
+import { useToast } from '../../../contexts/ToastContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { toBase64 } from '../../../lib/fileUtils';
 import FileViewer from '../../../components/ui/FileViewer';
@@ -15,10 +16,12 @@ import PresenceDots from '../../../components/ui/PresenceDots';
 import { useYjsCollab } from '../../../hooks/useYjsCollab';
 
 const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatus, user, navigate, onCollaborate, readOnly }) => {
+    const { showToast } = useToast();
     const { canShare } = usePermissions(note);
     const presenceUsers = usePresence({
         shareId: note?.shareId || null,
         uid: user?.uid,
+        displayName: user?.displayName || user?.email || null,
         enabled: !!note?.isSharedDoc,
     });
 
@@ -26,7 +29,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
     const crdtEnabled = !!note?.isSharedDoc && !!note?.collabShareId;
     const { ydocRef, ytextRef } = useYjsCollab({
         shareId: note?.collabShareId,
-        docKey:  cryptoKey,
+        docKey:  (note?.isSharedDoc && note?.docKey) ? note.docKey : cryptoKey,
         uid:     user?.uid,
         enabled: crdtEnabled,
     });
@@ -386,7 +389,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                             if (!file) return;
 
                                             if (file.size > 50 * 1024 * 1024) {
-                                                alert("File is too large. Maximum size is 50MB.");
+                                                showToast("File is too large. Maximum size is 50MB.", 'error');
                                                 e.target.value = null;
                                                 return;
                                             }
@@ -408,7 +411,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                                 }));
                                             } catch (e) {
                                                 console.error("Upload failed", e);
-                                                alert(e.message);
+                                                showToast(e.message || 'Upload failed.', 'error');
                                             }
 
                                             // Reset input so the same file can be selected again
@@ -433,7 +436,7 @@ const NoteEditor = ({ note, cryptoKey, onSave, onBack, onPin, onShare, saveStatu
                                                         const url = await downloadFromFirebase(att.driveFileId, key, null, 'notes');
                                                         setViewingAttachment({ ...att, data: url });
                                                     } catch (e) {
-                                                        alert("Failed to decrypt file");
+                                                        showToast("Failed to decrypt file.", 'error');
                                                     }
                                                 }
                                             }}

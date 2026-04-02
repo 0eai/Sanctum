@@ -43,8 +43,10 @@ const VIEWER_MAP = {
 };
 
 import { downloadEncryptedFileBlob as downloadEncryptedFileBlobFirebase, downloadShareableFileBlob as downloadShareableFileBlobFirebase } from '../../../services/firebaseStorage';
+import { useToast } from '../../../contexts/ToastContext';
 
 const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey, onReply, onDelete, chatId }) => {
+    const { showToast } = useToast();
     const [displayedText, setDisplayedText] = useState("Decrypting...");
     const [viewerOpen, setViewerOpen] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -192,7 +194,7 @@ const MessageBubble = ({ message, isMe, onImportArtifact, senderName, cryptoKey,
                                         reader.readAsDataURL(blob);
                                     } catch (e) {
                                         console.error("Failed to open file", e);
-                                        alert("Failed to open file: " + e.message);
+                                        showToast("Failed to open file: " + e.message, 'error');
                                     } finally {
                                         setIsDownloading(false);
                                     }

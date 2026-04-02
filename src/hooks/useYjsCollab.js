@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import * as Y from 'yjs';
 import { createYjsProvider } from '../services/yjsCollab';
 
-export const useYjsCollab = ({ shareId, docKey, uid, enabled }) => {
+export const useYjsCollab = ({ shareId, docKey, uid, enabled, field = 'content' }) => {
     const ydocRef     = useRef(null);
     const ytextRef    = useRef(null);
     const providerRef = useRef(null);
@@ -15,7 +15,7 @@ export const useYjsCollab = ({ shareId, docKey, uid, enabled }) => {
         if (!enabled || !shareId || !docKey || !uid) return;
 
         const ydoc  = new Y.Doc();
-        const ytext = ydoc.getText('content');
+        const ytext = ydoc.getText(field);
         ydocRef.current  = ydoc;
         ytextRef.current = ytext;
 

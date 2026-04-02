@@ -6,6 +6,7 @@ import {
     Bold, Italic, Heading2, Code, Quote, List, ListOrdered, Link2, Minus,
     AlertCircle, RefreshCw
 } from 'lucide-react';
+import { useToast } from '../../../contexts/ToastContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import MarkdownViewer from '../../../components/ui/MarkdownViewer';
 import FileViewer from '../../../components/ui/FileViewer';
@@ -20,10 +21,12 @@ import { useYjsCollab } from '../../../hooks/useYjsCollab';
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'));
 
 const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus, user, onCollaborate, readOnly }) => {
+    const { showToast } = useToast();
     const { canShare } = usePermissions(item);
     const presenceUsers = usePresence({
         shareId: item?.shareId || null,
         uid: user?.uid,
+        displayName: user?.displayName || user?.email || null,
         enabled: !!item?.isSharedDoc,
     });
 
@@ -442,7 +445,7 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                             if (!file) return;
 
                                             if (file.size > 50 * 1024 * 1024) {
-                                                alert("File is too large. Maximum size is 50MB.");
+                                                showToast("File is too large. Maximum size is 50MB.", 'error');
                                                 e.target.value = null;
                                                 return;
                                             }
@@ -464,7 +467,7 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                                 }));
                                             } catch (err) {
                                                 console.error("Upload failed", err);
-                                                alert(err.message);
+                                                showToast(err.message || 'Upload failed.', 'error');
                                             }
 
                                             e.target.value = null;
@@ -486,7 +489,7 @@ const MarkdownEditor = ({ item, cryptoKey, onSave, onBack, onExport, saveStatus,
                                                     const url = await downloadFromFirebase(att.driveFileId, key, null, 'markdown');
                                                     setViewingAttachment({ ...att, data: url });
                                                 } catch (err) {
-                                                    alert("Failed to decrypt file");
+                                                    showToast("Failed to decrypt file.", 'error');
                                                 }
                                             }
                                         }} className="group relative flex-shrink-0 w-16 bg-gray-50 rounded-lg border border-gray-100 flex flex-col items-center justify-center overflow-hidden cursor-pointer active:scale-95 transition-all pt-2 pb-1">

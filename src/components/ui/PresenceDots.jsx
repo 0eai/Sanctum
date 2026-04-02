@@ -16,13 +16,13 @@ const PresenceDots = ({ users }) => {
     const visible = users.slice(0, 4);
     const overflow = users.length - visible.length;
     return (
-        <div className="flex items-center -space-x-1.5 mr-2" title={`${users.length} other editor${users.length > 1 ? 's' : ''} active`}>
+        <div className="flex items-center -space-x-1.5 mr-2" title={`Active: ${users.map(u => u.displayName || u.uid.slice(0, 6)).join(', ')}`}>
             {visible.map(u => (
                 <div
                     key={u.uid}
                     className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white ring-2 ring-white ${colorFor(u.uid)}`}
                 >
-                    {u.uid.slice(0, 2).toUpperCase()}
+                    {(u.displayName || u.uid).slice(0, 2).toUpperCase()}
                 </div>
             ))}
             {overflow > 0 && (

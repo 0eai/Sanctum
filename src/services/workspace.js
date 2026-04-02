@@ -11,6 +11,7 @@ import {
     generateMasterKey, encryptData, decryptData,
     encryptRSA, decryptRSA, importRSAPublicKey
 } from '../lib/crypto';
+import { logActivity } from './activityLog';
 
 // =============================================
 // HELPERS
@@ -73,7 +74,16 @@ export const createWorkspace = async (name, ownerUid) => {
         });
     }
 
+    logActivity(ownerUid, `Created workspace: ${name}`, 'success', 'Users', null);
+
     return { workspaceId: wsRef.id, workspaceKey: wsKey };
+};
+
+/**
+ * Rename a workspace (owner only).
+ */
+export const renameWorkspace = async (wsId, newName) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'workspaces', wsId), { name: newName });
 };
 
 /**
@@ -84,7 +94,7 @@ export const deleteWorkspace = async (wsId) => {
     const wsRef = doc(db, 'artifacts', appId, 'workspaces', wsId);
 
     // Delete all document subcollections (notes, tasks, etc.)
-    const DOC_COLLECTIONS = ['notes', 'tasks', 'markdown', 'checklists', 'passwords'];
+    const DOC_COLLECTIONS = ['notes', 'tasks', 'markdown', 'checklists', 'passwords', 'research', 'bookmarks'];
     for (const colName of DOC_COLLECTIONS) {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'workspaces', wsId, colName));
         if (!snap.empty) await deleteInChunks(snap.docs.map(d => d.ref));
@@ -102,7 +112,7 @@ export const deleteWorkspace = async (wsId) => {
 /**
  * Invite a new member to the workspace.
  */
-export const inviteMember = async (wsId, newUid, wsKey, role = 'editor') => {
+export const inviteMember = async (wsId, newUid, wsKey, role = 'editor', callerUid = null) => {
     const pubKey = await getPublicKey(newUid);
     if (!pubKey) throw new Error("User's public key not found. They must initialize SecureShare first.");
 
@@ -134,6 +144,8 @@ export const inviteMember = async (wsId, newUid, wsKey, role = 'editor') => {
             await updateDoc(wsRef, updatePayload);
         }
     }
+
+    if (callerUid) logActivity(callerUid, 'Invited member to workspace', 'info', 'UserPlus', null);
 };
 
 /**
@@ -141,7 +153,7 @@ export const inviteMember = async (wsId, newUid, wsKey, role = 'editor') => {
  * Rotates the workspace key and re-wraps it for all remaining members.
  * Note: Existing documents are NOT re-encrypted (similar to group chat model).
  */
-export const removeMember = async (wsId, uid) => {
+export const removeMember = async (wsId, uid, callerUid = null) => {
     // 1. Remove member's key doc
     await deleteDoc(doc(db, 'artifacts', appId, 'workspaces', wsId, 'members', uid));
 
@@ -174,6 +186,8 @@ export const removeMember = async (wsId, uid) => {
             console.warn(`Key rotation failed for ${memberUid}:`, e);
         }
     }
+
+    if (callerUid) logActivity(callerUid, 'Removed member from workspace', 'info', 'UserMinus', null);
 
     return newKey;
 };

@@ -11,6 +11,9 @@ import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
 import SharedDocsView from '../../components/ui/SharedDocsView';
 import useCollaboration from '../../hooks/useCollaboration';
+import { usePermissions } from '../../hooks/usePermissions';
+import usePresence from '../../hooks/usePresence';
+import MoveToContextModal from '../../components/ui/MoveToContextModal';
 
 import { useClipboard } from '../../hooks/useClipboard';
 import { getDomain, parseNetscapeHtml, exportBookmarksToNetscapeHtml } from '../../lib/bookmarkUtils';
@@ -90,10 +93,12 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const isAddModalOpen = !!addType;
 
   // Collaboration (all state + effects handled by the hook)
-  const collab = useCollaboration(user, cryptoKey, 'bookmarks');
-  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+  const collab = useCollaboration(user, cryptoKey, 'bookmarks', route);
+  const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
 
-  // Combined item sets for editing/viewing
+  const [contextMoveItem, setContextMoveItem] = useState(null);
+
+  // Combined item sets for editing/viewing — must be before hooks that depend on viewingItem
   const allAvailableItems = [...allItems, ...sharedDocs];
 
   const editingItemId = route.query?.edit;
@@ -101,6 +106,15 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   const viewingItemId = route.query?.view;
   const viewingItem = viewingItemId ? allAvailableItems.find(i => i.id === viewingItemId) : null;
+
+  const { isOwner: viewingItemIsOwner } = usePermissions(viewingItem);
+
+  const presenceUsers = usePresence({
+    shareId: viewingItem?.collabShareId || null,
+    uid: user?.uid,
+    displayName: user?.displayName || user?.email || null,
+    enabled: !!viewingItem?.isSharedDoc,
+  });
 
   const currentBasePath = currentFolderId ? `#bookmarks/folder/${currentFolderId}` : `#bookmarks`;
 
@@ -153,9 +167,9 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Handlers ---
 
-  const handleBreadcrumbClick = (index, folder) => {
-    if (folder.id === null) navigate(`#bookmarks`);
-    else navigate(`#bookmarks/folder/${folder.id}`);
+  const handleBreadcrumbClick = (_index, folder) => {
+    if (folder.id === null) navigate(wsLink(`#bookmarks`));
+    else navigate(wsLink(`#bookmarks/folder/${folder.id}`));
   };
 
   const handleBack = () => {
@@ -223,7 +237,7 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             activeWorkspace: activeWorkspace,
             onSelect: (ws) => {
               collab.switchWorkspace(ws);
-              navigate('#bookmarks');
+              navigate('#bookmarks'); // intentional: reset to root on workspace switch
             },
             onOpenPanel: () => collab.setIsWorkspacePanelOpen(true),
           },
@@ -266,7 +280,7 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               sharedDocs={sharedDocs}
               appType="bookmarks"
               currentUserUid={user.uid}
-              onOpenDoc={(doc) => navigate(`#bookmarks?view=${doc.id}`)}
+              onOpenDoc={(doc) => navigate(wsLink(`#bookmarks?view=${doc.id}`))}
             />
           </div>
         )}
@@ -294,10 +308,11 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
               <BookmarkCard
                 key={item.id}
                 item={item}
-                onEnterFolder={(folder) => navigate(`#bookmarks/folder/${folder.id}`)}
+                onEnterFolder={(folder) => navigate(wsLink(`#bookmarks/folder/${folder.id}`))}
                 onViewDetails={(i) => navigate(`${currentBasePath}?view=${i.id}`)}
                 copyUtils={copyUtils}
                 onCollaborate={!ctx && !item.isSharedDoc ? ((i) => collab.openCollaborateModal(i)) : null}
+                onMoveContext={!item.isSharedDoc && collab.workspaces.length > 0 ? (i) => setContextMoveItem(i) : null}
               />
             ))}
           </div>
@@ -320,7 +335,8 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         onDelete={(item) => setDeleteConfirmation(item)}
         onMove={(item) => setMoveItem(item)}
         copyUtils={copyUtils}
-        readOnly={viewingItem?.isSharedDoc && viewingItem?.role === 'viewer'}
+        readOnly={!viewingItemIsOwner}
+        presenceUsers={presenceUsers}
       />
 
       <MoveModal
@@ -351,6 +367,23 @@ const BookmarksApp = ({ user, cryptoKey, onExit, route, navigate }) => {
           }}
         />
       )}
+
+      <MoveToContextModal
+        isOpen={!!contextMoveItem}
+        onClose={() => setContextMoveItem(null)}
+        item={contextMoveItem}
+        collectionName="bookmarks"
+        allItems={allItems}
+        workspaces={collab.workspaces}
+        activeWorkspaceId={activeWorkspace?.id || null}
+        user={user}
+        privateKey={privateKey}
+        cryptoKey={cryptoKey}
+        ctx={ctx}
+        onMoveItemToContext={async (item, collectionName, destCtx, personalKey) => {
+          await collab.moveItemToContext(item, collectionName, destCtx, personalKey);
+        }}
+      />
 
       {collab.collaborateModalItem && (
         <CollaborateModal

@@ -324,13 +324,45 @@ export const exportChecklists = async (userId, cryptoKey) => {
     return exportData;
 };
 
+// --- Context Move Helper ---
+
+// Moves the items subcollection from one context to another, re-encrypting each item.
+// Called alongside moveItemToContext (which handles the parent checklist document).
+export const moveChecklistItems = async (userId, sourceKey, destKey, listId, sourceCtx, destCtx) => {
+    const itemsSnap = await getDocs(getItemsCol(userId, listId, sourceCtx));
+    if (itemsSnap.empty) return;
+
+    const destItemsCol = getItemsCol(userId, listId, destCtx);
+
+    // Re-encrypt and write each item to the destination
+    const writeBatchWrite = writeBatch(db);
+    for (const itemDoc of itemsSnap.docs) {
+        const raw = itemDoc.data();
+        const decrypted = await decryptData(raw, sourceKey);
+        if (!decrypted) continue;
+        const encrypted = await encryptData(decrypted, destKey);
+        writeBatchWrite.set(doc(destItemsCol, itemDoc.id), {
+            ...encrypted,
+            isCompleted: raw.isCompleted ?? false,
+            order: raw.order ?? 0,
+            createdAt: raw.createdAt || serverTimestamp(),
+        });
+    }
+    await writeBatchWrite.commit();
+
+    // Delete items from source
+    const writeBatchDelete = writeBatch(db);
+    itemsSnap.docs.forEach(d => writeBatchDelete.delete(d.ref));
+    await writeBatchDelete.commit();
+};
+
 // --- Sharing Helper ---
-export const fetchChecklistItemsForShare = async (userId, listId, cryptoKey) => {
-    const itemsQuery = query(collection(db, 'artifacts', appId, 'users', userId, 'checklists', listId, 'items'));
-    const itemsSnapshot = await getDocs(itemsQuery);
+export const fetchChecklistItemsForShare = async (userId, listId, cryptoKey, ctx = null) => {
+    const key = getKey(cryptoKey, ctx);
+    const itemsSnapshot = await getDocs(getItemsCol(userId, listId, ctx));
     return Promise.all(itemsSnapshot.docs.map(async (itemDoc) => {
         const raw = itemDoc.data();
-        const decrypted = await decryptData(raw, cryptoKey);
+        const decrypted = await decryptData(raw, key);
         return { text: decrypted.text || '', completed: raw.isCompleted || false };
     }));
 };

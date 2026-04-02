@@ -1,6 +1,6 @@
 // src/apps/SharedNote.jsx
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc } from 'firebase/firestore';
 import {
     FileText, AlertCircle, Loader, Tag, Paperclip, Download, Calendar, X, ZoomIn,
     FileCode, CheckSquare, ListChecks, Check, Circle

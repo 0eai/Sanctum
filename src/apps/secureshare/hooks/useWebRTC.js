@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import { useToast } from '../../../contexts/ToastContext';
 import { getRecipientPublicKey, getMyPrivateKey } from '../services/secureshare';
 import { encryptData, decryptData, encryptRSA, decryptRSA, deriveECDHSharedSecret } from '../../../lib/crypto';
 import { rtdb, appId } from '../../../lib/firebase';
 import { ref, push, set, onChildAdded, remove, onDisconnect, serverTimestamp } from 'firebase/database';
 
 export const useWebRTC = (currentUid, cryptoKey) => {
+    const { showToast } = useToast();
     const [callState, setCallState] = useState('IDLE'); // IDLE, INCOMING, CALLING, CONNECTED
     const [incomingCallData, setIncomingCallData] = useState(null);
     const [activeCallTarget, setActiveCallTarget] = useState(null);
@@ -189,10 +191,10 @@ export const useWebRTC = (currentUid, cryptoKey) => {
                 pendingCandidates.current.push(data.candidate);
             }
         } else if (type === 'busy') {
-            alert('User is busy on another call.');
+            showToast('User is busy on another call.', 'error');
             endCall();
         } else if (type === 'reject') {
-            alert('Call was rejected.');
+            showToast('Call was rejected.', 'error');
             endCall();
         } else if (type === 'end') {
             cleanupCall();
@@ -261,7 +263,7 @@ export const useWebRTC = (currentUid, cryptoKey) => {
 
             await sendSignal(targetUid, 'offer', { offer });
         } catch (e) {
-            alert(e.message);
+            showToast(e.message || 'Call failed.', 'error');
             cleanupCall();
         }
     };
@@ -289,7 +291,7 @@ export const useWebRTC = (currentUid, cryptoKey) => {
             pendingCandidates.current = [];
 
         } catch (e) {
-            alert(e.message);
+            showToast(e.message || 'Call failed.', 'error');
             cleanupCall();
         }
     };

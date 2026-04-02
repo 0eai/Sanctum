@@ -14,7 +14,7 @@ import { db, appId } from '../lib/firebase';
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes
 
-const usePresence = ({ shareId, uid, enabled = true }) => {
+const usePresence = ({ shareId, uid, displayName, enabled = true }) => {
     const [presenceUsers, setPresenceUsers] = useState([]);
 
     useEffect(() => {
@@ -23,7 +23,7 @@ const usePresence = ({ shareId, uid, enabled = true }) => {
         const presenceRef = doc(db, 'artifacts', appId, 'shared_docs', shareId, 'presence', uid);
 
         const writePresence = () =>
-            setDoc(presenceRef, { uid, openedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+            setDoc(presenceRef, { uid, displayName: displayName || null, openedAt: serverTimestamp() }, { merge: true }).catch(() => {});
 
         writePresence();
         const heartbeat = setInterval(writePresence, HEARTBEAT_MS);
@@ -32,7 +32,7 @@ const usePresence = ({ shareId, uid, enabled = true }) => {
         const unsubscribe = onSnapshot(collRef, (snap) => {
             const now = Date.now();
             const users = snap.docs
-                .map(d => ({ uid: d.id, openedAt: d.data().openedAt }))
+                .map(d => ({ uid: d.id, displayName: d.data().displayName || null, openedAt: d.data().openedAt }))
                 .filter(u => {
                     if (u.uid === uid) return false;
                     const ms = u.openedAt?.toMillis?.() ?? 0;
@@ -46,7 +46,7 @@ const usePresence = ({ shareId, uid, enabled = true }) => {
             unsubscribe();
             deleteDoc(presenceRef).catch(() => {});
         };
-    }, [shareId, uid, enabled]);
+    }, [shareId, uid, displayName, enabled]);
 
     return presenceUsers;
 };

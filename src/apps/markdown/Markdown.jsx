@@ -32,8 +32,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Collaboration (all state + effects handled by the hook)
-  const collab = useCollaboration(user, cryptoKey, 'markdown');
-  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+  const collab = useCollaboration(user, cryptoKey, 'markdown', route);
+  const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
 
   // Editor State
   const [editorDoc, setEditorDoc] = useState(null);
@@ -156,14 +156,14 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- Navigation Handlers ---
   const handleEnterFolder = (folder) => {
-    navigate(`#markdown/folder/${folder.id}`);
+    navigate(wsLink(`#markdown/folder/${folder.id}`));
   };
 
   const handleBreadcrumbClick = (index, folder) => {
     if (folder.id === null) {
-      navigate(`#markdown`);
+      navigate(wsLink(`#markdown`));
     } else {
-      navigate(`#markdown/folder/${folder.id}`);
+      navigate(wsLink(`#markdown/folder/${folder.id}`));
     }
   };
 
@@ -194,7 +194,7 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     {
       label: "New Document",
       icon: <Plus size={24} />,
-      onClick: () => navigate(`#markdown/doc/new/edit`),
+      onClick: () => navigate(wsLink(`#markdown/doc/new/edit`)),
       variant: 'primary'
     }
   ], [currentFolderId, navigate]);
@@ -207,9 +207,9 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         onSave={handleSave}
         onBack={() => {
           if (currentFolderId) {
-            navigate(`#markdown/folder/${currentFolderId}`);
+            navigate(wsLink(`#markdown/folder/${currentFolderId}`));
           } else {
-            navigate(`#markdown`);
+            navigate(wsLink(`#markdown`));
           }
         }}
         onExport={(d) => {
@@ -293,8 +293,8 @@ const MarkdownApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 item={item}
                 docs={docs}
                 onClick={() => item.type === 'folder'
-                  ? navigate(`#markdown/folder/${item.id}`)
-                  : navigate(`#markdown/doc/${item.id}`)
+                  ? navigate(wsLink(`#markdown/folder/${item.id}`))
+                  : navigate(wsLink(`#markdown/doc/${item.id}`))
                 }
                 onMove={(i) => setContextMoveItem(i)}
                 onDelete={(i) => setDeleteConfirm(i)}

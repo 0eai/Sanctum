@@ -53,11 +53,12 @@ service firebase.storage {
       // Files are AES-256-GCM encrypted with a key only in the URL fragment (never sent to Firebase).
       // Public read is intentional: same security model as Firestore shared_notes (allow read: if true).
       // Write is restricted to authenticated users to prevent anonymous upload abuse.
-      // Delete is restricted to authenticated users (owner cleanup + Cloud Function TTL purge).
+      // Delete is restricted to the note creator (owner cleanup) or TTL Cloud Function.
       match /shared_notes_files/{noteId}/{allPaths=**} {
         allow read: if true;
         allow write: if isAuthenticated() && isUnderSizeLimit();
-        allow delete: if isAuthenticated();
+        allow delete: if isAuthenticated()
+          && firestore.get(/databases/(default)/documents/shared_notes/$(noteId)).data.createdBy == request.auth.uid;
       }
 
     }

@@ -17,7 +17,7 @@
 //   // collab.switcherProps → spread onto <WorkspaceSwitcher>
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { listenToWorkspaces, getWorkspaceKey, createWorkspace, deleteWorkspace } from '../services/workspace';
+import { listenToWorkspaces, getWorkspaceKey, createWorkspace, deleteWorkspace, renameWorkspace } from '../services/workspace';
 import { listenToSharedDocs } from '../services/collaboration';
 import { getPersistedWorkspaceId, persistWorkspaceId } from '../components/ui/WorkspaceSwitcher';
 import { getMyPrivateKey } from '../apps/secureshare/services/secureshare';
@@ -32,8 +32,11 @@ import { db, appId } from '../lib/firebase';
  * @param {object} user - Firebase user object (must have .uid)
  * @param {CryptoKey} cryptoKey - Master decryption key
  * @param {string} appType - 'notes' | 'markdown' | 'tasks' | 'checklists' | 'research' | 'bookmarks'
+ * @param {object} [route] - Route object from useHashRoute. When provided, enables:
+ *   - Deep-link workspace auto-switch via ?ws=<workspaceId> URL param
+ *   - wsLink() helper that appends ?ws=<id> to URLs for shareable deep links
  */
-export default function useCollaboration(user, cryptoKey, appType) {
+export default function useCollaboration(user, cryptoKey, appType, route = null) {
     // --- State ---
     const [privateKey, setPrivateKey] = useState(null);
     const [workspaces, setWorkspaces] = useState([]);
@@ -45,6 +48,8 @@ export default function useCollaboration(user, cryptoKey, appType) {
     const [collaborateModalItem, setCollaborateModalItem] = useState(null);
     const [isNamingWorkspace, setIsNamingWorkspace] = useState(false);
     const [workspaceNameDraft, setWorkspaceNameDraft] = useState('');
+    const [isRenamingWorkspace, setIsRenamingWorkspace] = useState(false);
+    const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState('');
 
     // --- Computed ---
     const ctx = useMemo(
@@ -75,6 +80,20 @@ export default function useCollaboration(user, cryptoKey, appType) {
             if (ws) setActiveWorkspace(ws);
         }
     }, [workspaces, activeWorkspace]);
+
+    // 3a. Deep-link workspace override — ?ws=<workspaceId> in URL takes priority over localStorage.
+    // When a user opens a sharable deep link (e.g. #notes/doc/123?ws=wsId), this effect fires
+    // once workspaces are loaded and switches to the correct workspace automatically.
+    useEffect(() => {
+        const wsId = route?.query?.ws;
+        if (!wsId || !workspaces.length) return;
+        if (activeWorkspace?.id === wsId) return;
+        const ws = workspaces.find(w => w.id === wsId);
+        if (ws) {
+            persistWorkspaceId(ws.id);
+            setActiveWorkspace(ws);
+        }
+    }, [route?.query?.ws, workspaces]);
 
     // 4. Fetch workspace AES key when workspace ID changes (not object reference)
     useEffect(() => {
@@ -172,7 +191,7 @@ export default function useCollaboration(user, cryptoKey, appType) {
             // legacy single-blob fields
             data: _data, iv: _iv,
             // Firestore metadata — stored separately, not in the encrypted payload
-            isPinned, type, parentId, updatedAt: _updatedAt, createdAt: _createdAt, versionId,
+            isPinned, type, parentId, order, updatedAt: _updatedAt, createdAt: _createdAt, versionId,
             // Collaboration listener fields — not persisted to Firestore
             isSharedDoc, role, docKey,
             ...cleanPayload
@@ -185,6 +204,9 @@ export default function useCollaboration(user, cryptoKey, appType) {
             type: type || 'note',
             parentId: parentId || null,
             versionId: versionId || 0,
+            // Tasks use `order` as a top-level Firestore field for orderBy queries.
+            // Without it, orderBy('order') excludes the moved doc from results entirely.
+            ...(order !== undefined ? { order } : {}),
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
@@ -211,6 +233,15 @@ export default function useCollaboration(user, cryptoKey, appType) {
         await createNewWorkspace(name);
     }, [workspaceNameDraft, createNewWorkspace]);
 
+    const confirmRenameWorkspace = useCallback(async () => {
+        const name = workspaceRenameDraft.trim();
+        if (!name || !activeWorkspace) return;
+        setIsRenamingWorkspace(false);
+        setWorkspaceRenameDraft('');
+        await renameWorkspace(activeWorkspace.id, name);
+        setActiveWorkspace(prev => prev ? { ...prev, name } : prev);
+    }, [workspaceRenameDraft, activeWorkspace]);
+
     /** Spread onto <WorkspaceSwitcher> */
     const switcherProps = useMemo(() => ({
         workspaces,
@@ -222,7 +253,26 @@ export default function useCollaboration(user, cryptoKey, appType) {
         onNameDraftChange: setWorkspaceNameDraft,
         onConfirmName: confirmNewWorkspace,
         onCancelName: () => { setIsNamingWorkspace(false); setWorkspaceNameDraft(''); },
-    }), [workspaces, activeWorkspace, switchWorkspace, isNamingWorkspace, workspaceNameDraft, confirmNewWorkspace]);
+        isRenamingWorkspace,
+        workspaceRenameDraft,
+        onRenameDraftChange: setWorkspaceRenameDraft,
+        onStartRename: () => { setWorkspaceRenameDraft(activeWorkspace?.name || ''); setIsRenamingWorkspace(true); },
+        onConfirmRename: confirmRenameWorkspace,
+        onCancelRename: () => { setIsRenamingWorkspace(false); setWorkspaceRenameDraft(''); },
+    }), [workspaces, activeWorkspace, switchWorkspace, isNamingWorkspace, workspaceNameDraft, confirmNewWorkspace, isRenamingWorkspace, workspaceRenameDraft, confirmRenameWorkspace]);
+
+    /**
+     * Returns a navigate path with ?ws=<workspaceId> appended when a workspace is active.
+     * Use for every navigate() call within a collaborative app so that the URL is a
+     * shareable deep link: opening it auto-selects the correct workspace.
+     *
+     * When no workspace is active, returns the path unchanged (personal-vault mode).
+     */
+    const wsLink = useCallback((path) => {
+        if (!activeWorkspace) return path;
+        const sep = path.includes('?') ? '&' : '?';
+        return `${path}${sep}ws=${activeWorkspace.id}`;
+    }, [activeWorkspace]);
 
     /** Spread onto <WorkspacePanel> (only render when activeWorkspace is truthy) */
     const workspacePanelProps = useMemo(() => ({
@@ -253,6 +303,9 @@ export default function useCollaboration(user, cryptoKey, appType) {
         workspaceNameDraft,
         setWorkspaceNameDraft,
         confirmNewWorkspace,
+        isRenamingWorkspace,
+        workspaceRenameDraft,
+        confirmRenameWorkspace,
 
         // Actions
         switchWorkspace,
@@ -261,6 +314,7 @@ export default function useCollaboration(user, cryptoKey, appType) {
         openCollaborateModal,
         closeCollaborateModal,
         moveItemToContext,
+        wsLink,
 
         // Pre-built component props
         switcherProps,

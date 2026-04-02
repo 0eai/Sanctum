@@ -1,9 +1,9 @@
 // src/apps/checklist/Checklist.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trash2, CheckSquare, Check, X, Plus, AlertCircle,
   Bell, Clock, RotateCcw, Edit2, RefreshCw, Settings, MoveUp, MoveDown,
-  Users, Star
+  Users, Star, ArrowRightLeft
 } from 'lucide-react';
 
 import { Modal, Button, Input } from '../../components/ui';
@@ -14,14 +14,18 @@ import {
   listenToChecklists, listenToItems, createChecklist,
   updateChecklistEntity, addChecklistItem, toggleChecklistItem,
   resetChecklist, deleteChecklistEntity, reorderList, reorderItem,
-  toggleChecklistPin
+  toggleChecklistPin, moveChecklistItems, fetchChecklistItemsForShare
 } from './services/checklist';
 
 import useCollaboration from '../../hooks/useCollaboration';
+import usePresence from '../../hooks/usePresence';
+import { useYjsCollab } from '../../hooks/useYjsCollab';
 
 import WorkspacePanel from '../../components/ui/WorkspacePanel';
 import CollaborateModal from '../../components/ui/CollaborateModal';
+import MoveToContextModal from '../../components/ui/MoveToContextModal';
 import SharedDocsView from '../../components/ui/SharedDocsView';
+import PresenceDots from '../../components/ui/PresenceDots';
 
 // FIXED: Accept route and navigate from props
 const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
@@ -47,9 +51,64 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
   const [formRepeat, setFormRepeat] = useState("none");
 
 
+  const [contextMoveItem, setContextMoveItem] = useState(null);
+
   // Collaboration (all state + effects handled by the hook)
-  const collab = useCollaboration(user, cryptoKey, 'checklist');
-  const { ctx, activeWorkspace, sharedDocs, privateKey } = collab;
+  const collab = useCollaboration(user, cryptoKey, 'checklist', route);
+  const { ctx, activeWorkspace, sharedDocs, privateKey, wsLink } = collab;
+
+  // Presence — who else has this shared list open
+  const presenceUsers = usePresence({
+    shareId: activeList?.shareId || null,
+    uid: user?.uid,
+    displayName: user?.displayName || user?.email || null,
+    enabled: !!activeList?.isSharedDoc,
+  });
+
+  // CRDT — real-time item sync for shared lists via Y.js
+  const crdtEnabled = !!activeList?.isSharedDoc && !!(activeList?.shareId || activeList?.id);
+  const { ydocRef, ytextRef } = useYjsCollab({
+    shareId: activeList?.shareId || activeList?.id || null,
+    docKey: activeList?.docKey || cryptoKey,
+    uid: user?.uid,
+    enabled: crdtEnabled,
+    field: 'items',
+  });
+
+  // Tracks last items JSON written by remote CRDT to prevent feedback loop
+  const lastCrdtItemsRef = useRef(null);
+
+  // CRDT: mirror remote Y.Text changes → items state
+  useEffect(() => {
+    const ytext = ytextRef.current;
+    if (!ytext || !crdtEnabled) return;
+    const observer = (_, tx) => {
+      if (tx.origin !== 'remote') return;
+      try {
+        const parsed = JSON.parse(ytext.toString());
+        lastCrdtItemsRef.current = JSON.stringify(parsed);
+        setItems(parsed);
+      } catch { /* malformed JSON — skip */ }
+    };
+    ytext.observe(observer);
+    return () => ytext.unobserve(observer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crdtEnabled, ytextRef.current]);
+
+  // CRDT: write items → Y.Text on local changes (skip if from remote)
+  useEffect(() => {
+    if (!crdtEnabled || !ytextRef.current || !ydocRef.current) return;
+    const serialized = JSON.stringify(items);
+    if (serialized === lastCrdtItemsRef.current) return; // came from remote — skip
+    const ytext = ytextRef.current;
+    const old = ytext.toString();
+    if (old === serialized) return;
+    ydocRef.current.transact(() => {
+      ytext.delete(0, old.length);
+      ytext.insert(0, serialized);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, crdtEnabled]);
 
   // Combined item sets for viewing
   const allAvailableLists = useMemo(() => [...lists, ...sharedDocs], [lists, sharedDocs]);
@@ -108,11 +167,11 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
 
   // --- 3. Handlers ---
   const handleOpenList = (list) => {
-    navigate(`#checklist/list/${list.id}`);
+    navigate(wsLink(`#checklist/list/${list.id}`));
   };
 
   const handleBack = () => {
-    if (activeList) navigate(`#checklist`);
+    if (activeList) navigate(wsLink(`#checklist`));
     else onExit();
   };
 
@@ -217,7 +276,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
     );
 
     if (type === 'list' && activeList?.id === data.id) {
-      navigate(`#checklist`);
+      navigate(wsLink(`#checklist`));
       setActiveList(null);
     }
 
@@ -269,6 +328,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         title: activeList.title,
         customActions: (
           <div className="flex items-center gap-1">
+            {presenceUsers.length > 0 && <PresenceDots users={presenceUsers} />}
             {activeList.dueDate && (
               <span className="text-xs text-blue-100 flex items-center gap-1 mr-2">
                 <Clock size={10} /> {formatDate(activeList.dueDate)}
@@ -294,7 +354,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         ),
       };
     }
-  }, [activeList, activeWorkspace, collab.switcherProps, currentBasePath, ctx, searchQuery]);
+  }, [activeList, activeWorkspace, collab.switcherProps, currentBasePath, ctx, searchQuery, presenceUsers]);
 
   // --- Bottom bar for detail view ---
   const bottomBar = activeList && (!activeList.isSharedDoc || activeList.role === 'editor') ? (
@@ -334,7 +394,7 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                 sharedDocs={filteredSharedDocs}
                 appType="checklist"
                 currentUserUid={user.uid}
-                onOpenDoc={(doc) => navigate(`#checklist/list/${doc.id}`)}
+                onOpenDoc={(doc) => navigate(wsLink(`#checklist/list/${doc.id}`))}
               />
             </div>
           )}
@@ -368,6 +428,9 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
                       <button onClick={(e) => { e.stopPropagation(); toggleChecklistPin(user.uid, list.id, list.isPinned, ctx); }} className={`p-2 rounded-full hover:bg-gray-50 ${list.isPinned ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}`}>
                         <Star size={16} fill={list.isPinned ? 'currentColor' : 'none'} />
                       </button>
+                    )}
+                    {isOwner && collab.workspaces.length > 0 && (
+                      <button onClick={(e) => { e.stopPropagation(); setContextMoveItem(list); }} className="p-2 text-gray-300 hover:text-green-500 rounded-full hover:bg-gray-50" title="Move to workspace"><ArrowRightLeft size={16} /></button>
                     )}
                     <button onClick={(e) => { e.stopPropagation(); openEditModal({ type: 'list', ...list }); }} className="p-2 text-gray-300 hover:text-blue-500 rounded-full hover:bg-gray-50"><Edit2 size={16} /></button>
                     {isOwner && <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ type: 'list', data: list }); }} className="p-2 text-gray-300 hover:text-red-500 rounded-full hover:bg-gray-50"><Trash2 size={16} /></button>}
@@ -504,6 +567,28 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
         </div>
       </Modal>
 
+      <MoveToContextModal
+        isOpen={!!contextMoveItem}
+        onClose={() => setContextMoveItem(null)}
+        item={contextMoveItem}
+        collectionName="checklists"
+        allItems={lists}
+        workspaces={collab.workspaces}
+        activeWorkspaceId={activeWorkspace?.id || null}
+        user={user}
+        privateKey={privateKey}
+        cryptoKey={cryptoKey}
+        ctx={ctx}
+        onMoveItemToContext={async (item, collectionName, destCtx, personalKey) => {
+          const sourceKey = ctx?.key ?? personalKey ?? cryptoKey;
+          const destKey = destCtx?.key ?? personalKey ?? cryptoKey;
+          // Move the parent checklist document
+          await collab.moveItemToContext(item, collectionName, destCtx, personalKey);
+          // Move the items subcollection — not handled by the generic hook
+          await moveChecklistItems(user.uid, sourceKey, destKey, item.id, ctx, destCtx);
+        }}
+      />
+
       <WorkspacePanel
         {...collab.workspacePanelProps}
         onDelete={async () => {
@@ -537,6 +622,10 @@ const ChecklistApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             const payload = { title: collab.collaborateModalItem.title, dueDate: collab.collaborateModalItem.dueDate, repeat: collab.collaborateModalItem.repeat, collabShareId: null };
             await updateChecklistEntity(user.uid, collab.collaborateModalItem.id, null, cryptoKey, payload, true, ctx);
           }
+        }}
+        onPreparePublicShareData={async (docData) => {
+          const items = await fetchChecklistItemsForShare(user.uid, docData.id, cryptoKey, ctx);
+          return { sharedType: 'checklist', title: docData.title, dueDate: docData.dueDate || null, items };
         }}
         onPublicLinkCreated={async (id, key) => {
           if (collab.collaborateModalItem) {

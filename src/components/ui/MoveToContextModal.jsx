@@ -59,9 +59,12 @@ const MoveToContextModal = ({
                     await onMoveItemToContext(child, collectionName, destCtx, cryptoKey);
                     setProgress({ current: ++current, total });
                 }
-                await onMoveItemToContext(item, collectionName, destCtx, cryptoKey);
+                // Reset parentId (notes/markdown) and folderId (tasks) so the root item
+                // lands at the destination root, not inside a folder that doesn't exist
+                // in the new context.
+                await onMoveItemToContext({ ...item, parentId: null, folderId: null }, collectionName, destCtx, cryptoKey);
             } else {
-                await onMoveItemToContext(item, collectionName, destCtx, cryptoKey);
+                await onMoveItemToContext({ ...item, parentId: null, folderId: null }, collectionName, destCtx, cryptoKey);
             }
 
             setSelected(null);

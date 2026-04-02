@@ -1,7 +1,9 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 const { initializeApp } = require("firebase-admin/app");
 
 initializeApp();
@@ -26,6 +28,38 @@ exports.cleanupExpiredMessages = onSchedule("every 24 hours", async (event) => {
     await batch.commit();
 
     console.log(`Deleted ${chatsSnap.size} expired messages`);
+});
+
+exports.cleanupExpiredSharedNotes = onSchedule("every 24 hours", async () => {
+    const db = getFirestore();
+    const storage = getStorage();
+    const now = new Date();
+
+    const snap = await db.collection("shared_notes")
+        .where("expiresAt", "<=", now)
+        .limit(500)
+        .get();
+
+    if (snap.empty) {
+        console.log("No expired shared_notes found.");
+        return;
+    }
+
+    // Delete Firestore docs and their Storage files
+    const batch = db.batch();
+    const storageDeletions = [];
+
+    snap.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+        // Delete corresponding storage directory shared_notes_files/{noteId}/
+        const bucket = storage.bucket();
+        storageDeletions.push(
+            bucket.deleteFiles({ prefix: `shared_notes_files/${docSnap.id}/` }).catch(() => {})
+        );
+    });
+
+    await Promise.all([batch.commit(), ...storageDeletions]);
+    console.log(`Deleted ${snap.size} expired shared_notes and their storage files`);
 });
 
 const googleClientId = defineSecret("GOOGLE_CLIENT_ID");
@@ -121,4 +155,80 @@ exports.exchangeDriveAuthCode = onCall({
         console.error("Error exchanging auth code:", error);
         throw new HttpsError("internal", "An error occurred while exchanging the Google Drive auth code.");
     }
+});
+
+// --- Collaboration & Workspace Cleanup ---
+
+// When a shared_doc is deleted, purge its subcollections (members, presence, CRDT state/updates)
+exports.onSharedDocDeleted = onDocumentDeleted(
+    "artifacts/{appId}/shared_docs/{shareId}",
+    async (event) => {
+        const db = getFirestore();
+        const docRef = event.data.ref;
+        const subcollections = ["members", "crdt_updates", "crdt_state", "presence"];
+
+        for (const sub of subcollections) {
+            const refs = await docRef.collection(sub).listDocuments();
+            if (refs.length > 0) {
+                const batch = db.batch();
+                refs.forEach(ref => batch.delete(ref));
+                await batch.commit();
+            }
+        }
+        console.log(`Purged subcollections for shared_doc ${event.params.shareId}`);
+    }
+);
+
+// When a collaborator doc is deleted, remove their presence entry
+exports.onCollaboratorRemoved = onDocumentDeleted(
+    "artifacts/{appId}/shared_docs/{shareId}/members/{uid}",
+    async (event) => {
+        const db = getFirestore();
+        const { appId, shareId, uid } = event.params;
+        await db.doc(`artifacts/${appId}/shared_docs/${shareId}/presence/${uid}`).delete().catch(() => {});
+        console.log(`Removed presence for ${uid} from shared_doc ${shareId}`);
+    }
+);
+
+// When a workspace is deleted, purge its Storage files
+exports.onWorkspaceDeleted = onDocumentDeleted(
+    "artifacts/{appId}/workspaces/{wsId}",
+    async (event) => {
+        const { wsId } = event.params;
+        const bucket = getStorage().bucket();
+        await bucket.deleteFiles({ prefix: `workspaces/${wsId}/` }).catch(() => {});
+        console.log(`Deleted storage files for workspace ${wsId}`);
+    }
+);
+
+// Server-side workspace member removal with ownership validation
+exports.removeWorkspaceMember = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Must be authenticated.");
+    }
+
+    const { wsId, memberUid, appId } = request.data;
+    if (!wsId || !memberUid || !appId) {
+        throw new HttpsError("invalid-argument", "wsId, memberUid, and appId are required.");
+    }
+
+    const db = getFirestore();
+    const wsRef = db.doc(`artifacts/${appId}/workspaces/${wsId}`);
+    const wsSnap = await wsRef.get();
+
+    if (!wsSnap.exists) {
+        throw new HttpsError("not-found", "Workspace not found.");
+    }
+
+    if (wsSnap.data().createdBy !== request.auth.uid) {
+        throw new HttpsError("permission-denied", "Only the workspace owner can remove members.");
+    }
+
+    await wsRef.update({ memberUids: FieldValue.arrayRemove(memberUid) });
+
+    const updated = await wsRef.get();
+    const remainingMemberUids = updated.data()?.memberUids || [];
+
+    console.log(`Removed member ${memberUid} from workspace ${wsId}`);
+    return { remainingMemberUids };
 });

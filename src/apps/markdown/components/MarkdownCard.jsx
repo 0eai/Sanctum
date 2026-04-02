@@ -76,27 +76,23 @@ const MarkdownCard = ({ item, docs, onClick, onMove, onDelete, onShare, onCollab
                     {formatDateTime(item.updatedAt)}
                 </span>
                 <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    {item.type !== 'folder' && (
-                        <>
-                            {onCollaborate && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onCollaborate(item); }}
-                                    className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}
-                                    title="Collaborate"
-                                >
-                                    <Users size={14} />
-                                </button>
-                            )}
-                            {canShare && onShare && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onShare(item); }}
-                                    className={`p-1 ${item.sharedId ? 'text-green-500' : 'text-gray-300 hover:text-blue-500'}`}
-                                    title={item.sharedId ? 'Shared' : 'Share'}
-                                >
-                                    <Globe size={14} />
-                                </button>
-                            )}
-                        </>
+                    {onCollaborate && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onCollaborate(item); }}
+                            className={`p-1 ${item.memberUids?.length > 0 ? 'text-blue-500' : 'text-gray-300 hover:text-blue-500'}`}
+                            title={item.type === 'folder' ? 'Share folder' : 'Collaborate'}
+                        >
+                            <Users size={14} />
+                        </button>
+                    )}
+                    {item.type !== 'folder' && canShare && onShare && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onShare(item); }}
+                            className={`p-1 ${item.sharedId ? 'text-green-500' : 'text-gray-300 hover:text-blue-500'}`}
+                            title={item.sharedId ? 'Shared' : 'Share'}
+                        >
+                            <Globe size={14} />
+                        </button>
                     )}
                     {item.type !== 'folder' && onMove && (
                         <button

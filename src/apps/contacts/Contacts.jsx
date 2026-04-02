@@ -9,6 +9,7 @@ import {
     saveContact, deleteContact
 } from './services/contacts';
 import { useEncryptedCollection } from '../../hooks/useEncryptedCollection';
+import { useToast } from '../../contexts/ToastContext';
 
 import ContactEditor from './components/ContactEditor';
 import ContactDetail from './components/ContactDetail';
@@ -19,6 +20,7 @@ const TABS = [
 ];
 
 const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
+    const { showToast } = useToast();
     const [contacts, setContacts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -118,7 +120,7 @@ const ContactsApp = ({ user, cryptoKey, onExit, route, navigate }) => {
             navigate(`#contacts/view/${savedId}`);
         } catch (error) {
             console.error("Failed to save contact:", error);
-            alert("Failed to save contact. Please try again.");
+            showToast("Failed to save contact. Please try again.", 'error');
         }
     };
 

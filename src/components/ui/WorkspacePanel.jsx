@@ -42,7 +42,7 @@ const WorkspacePanel = ({ isOpen, onClose, workspace, workspaceKey, currentUid, 
             if (!user) { setError('User not found. They need a Sanctum account with SecureShare enabled.'); return; }
             if (members.some(m => m.uid === user.uid)) { setError('Already a member.'); return; }
 
-            await inviteMember(workspace.id, user.uid, workspaceKey, role);
+            await inviteMember(workspace.id, user.uid, workspaceKey, role, currentUid);
             setSuccess(`${user.displayName || user.email} added!`);
             setEmail('');
             await loadMembers();
@@ -56,7 +56,7 @@ const WorkspacePanel = ({ isOpen, onClose, workspace, workspaceKey, currentUid, 
     const handleRemove = async (uid) => {
         setLoading(true);
         try {
-            const newKey = await removeMember(workspace.id, uid);
+            const newKey = await removeMember(workspace.id, uid, currentUid);
             await loadMembers();
             if (newKey) onKeyRotated?.(newKey);
         } catch (err) {

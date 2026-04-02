@@ -1,5 +1,6 @@
 // src/App.jsx
 import React, { useEffect, Suspense } from 'react';
+import { useToast } from './contexts/ToastContext';
 import {
   GoogleAuthProvider, signInWithPopup, signInWithCustomToken, onAuthStateChanged
 } from 'firebase/auth';
@@ -28,6 +29,7 @@ import appRegistry, { SharedNote } from './AppRegistry';
 
 export default function App() {
   const { user, cryptoKey, loading, lockReason, setAuthUser, unlockVault, lockVault } = useVault();
+  const { showToast } = useToast();
   const [enabledApps, setEnabledApps] = React.useState(null);
   const [extensionWarnings, setExtensionWarnings] = React.useState([]);
 
@@ -141,7 +143,7 @@ export default function App() {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     }
-    catch (e) { console.error(e); alert("Login failed"); }
+    catch (e) { console.error(e); showToast('Login failed. Please check your account and try again.', 'error'); }
   };
 
   // --- Render Logic ---
